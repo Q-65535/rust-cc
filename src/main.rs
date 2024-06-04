@@ -32,7 +32,6 @@ fn main() {
         println!("add ${}, %rax\n", tn.val);
     }
     let src = String::from("100+99-10+123455");
-    // let src = String::from("100+");
     tokenize(&src);
 }
 
@@ -44,7 +43,7 @@ fn tokenize(src: &String) {
                 println!("{c}");
                 index += 1;
             } else if c <= '9' && c >= '0' {
-                let (len, int_str) = read_int(src, index);
+                let (len, int_str) = read_int(src[index..], index);
                 index += len;
                 println!("{int_str}");
             }
@@ -54,17 +53,21 @@ fn tokenize(src: &String) {
     }
 }
 
-fn read_int(src: &String, mut index: usize) -> (usize, &str) {
+fn read_int(src: &str, mut index: usize) -> (usize, &str) {
     let start_index = index;
+    for c.src.chars().enumerate() {
+        
+    }
     loop {
         if let Some(c) = src.chars().nth(index) {
             if c <= '9' && c >= '0' {
                 index += 1;
             } else {
-                return (index - start_index, &src[start_index..index]);
+                break;
             }
         } else {
-            return (index - start_index, &src[start_index..index]);
+            break;
         }
     }
+    return (index - start_index, &src[start_index..index]);
 }
