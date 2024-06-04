@@ -15,26 +15,56 @@ struct Token {
 }
 
 enum Node {
-    Token{
-        kind: TokenKind,
-        next: Box<Node>,
-        val: i32,
-        index: i32,
-        len: i32,
-    },
+    Token(Token),
     Nil,
 }
 
 fn main() {
-    let tok = Node::Token {
+    let tok = Token {
         kind: TokenKind::TkNum,
         next: Box::new(Node::Nil),
-        val: 1,
+        val: 3,
         index: 0,
-        len: 4,
+        len: 1,
     };
+    let tok_node = Node::Token(tok);
+    if let Node::Token(tn) = tok_node {
+        println!("add ${}, %rax\n", tn.val);
+    }
+    let src = String::from("100+99-10+123455");
+    // let src = String::from("100+");
+    tokenize(&src);
+}
 
-    if let Node::Token { kind, next, val, index, len } = tok {
-        println!("  add ${val}, %rax\n");
+fn tokenize(src: &String) {
+    let mut index: usize = 0;
+    while index < src.len() {
+        if let Some(c) = src.chars().nth(index) {
+            if c == '+' || c == '-' {
+                println!("{c}");
+                index += 1;
+            } else if c <= '9' && c >= '0' {
+                let (len, int_str) = read_int(src, index);
+                index += len;
+                println!("{int_str}");
+            }
+        } else {
+            println!("index out of bounds");
+        }
+    }
+}
+
+fn read_int(src: &String, mut index: usize) -> (usize, &str) {
+    let start_index = index;
+    loop {
+        if let Some(c) = src.chars().nth(index) {
+            if c <= '9' && c >= '0' {
+                index += 1;
+            } else {
+                return (index - start_index, &src[start_index..index]);
+            }
+        } else {
+            return (index - start_index, &src[start_index..index]);
+        }
     }
 }
