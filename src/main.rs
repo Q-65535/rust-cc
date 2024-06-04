@@ -31,7 +31,7 @@ fn main() {
     if let Node::Token(tn) = tok_node {
         println!("add ${}, %rax\n", tn.val);
     }
-    let src = String::from("100+99-10+123455");
+    let src = String::from("100+99-10+123455-23423+12312-1223412+11112442342");
     tokenize(&src);
 }
 
@@ -43,7 +43,7 @@ fn tokenize(src: &String) {
                 println!("{c}");
                 index += 1;
             } else if c <= '9' && c >= '0' {
-                let (len, int_str) = read_int(src[index..], index);
+                let (len, int_str) = read_int(&src[index..]);
                 index += len;
                 println!("{int_str}");
             }
@@ -53,21 +53,14 @@ fn tokenize(src: &String) {
     }
 }
 
-fn read_int(src: &str, mut index: usize) -> (usize, &str) {
-    let start_index = index;
-    for c.src.chars().enumerate() {
-        
-    }
-    loop {
-        if let Some(c) = src.chars().nth(index) {
+fn read_int(src: &str) -> (usize, &str) {
+    let mut len: usize = 0;
+    for (i, c) in src.chars().enumerate() {
             if c <= '9' && c >= '0' {
-                index += 1;
+                len += 1;
             } else {
                 break;
             }
-        } else {
-            break;
-        }
     }
-    return (index - start_index, &src[start_index..index]);
+    (len, &src[..len])
 }
