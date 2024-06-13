@@ -9,6 +9,8 @@ enum TokenKind {
     TkMinus,
     TkMul,
     TkDiv,
+    TkLParen,
+    TkRParen,
     TkNum,   // Numeric literals
     TkEof,   // End-of-file markers
 }
@@ -18,6 +20,7 @@ enum Precedence {
     Lowest,
     PlusMinus,
     MulDiv,
+    Prefix,
 }
 
 #[derive(Clone, PartialEq)]
@@ -57,22 +60,30 @@ impl Default for Token {
     }
 }
 
+// @Smell: we can wrap Expr enum in a struct with some meta data like locations
+#[derive(PartialEq)]
+enum ExprType {
+    Number(i32),
+    Binary(Box<Node>),
+    Neg(Box<ExprType>),
+}
+
+use ExprType::*;
+
+// binary expr
 #[derive(PartialEq)]
 struct Node {
     token: Token,
-    lhs: Option<Rc<Node>>,
-    rhs: Option<Rc<Node>>,
-    // @TODO: wrap a single integer as IntegerNode
-    val: i32, // valid only when token is a number
+    lhs: ExprType,
+    rhs: ExprType,
 }
 
 impl Node {
-    fn new(lhs: Node, rhs: Node, token: Token, val: i32) -> Self {
+    fn new(token: Token, lhs: ExprType, rhs: ExprType) -> Self {
         Node {
             token,
-            lhs: Some(lhs.into()),
-            rhs: Some(rhs.into()),
-            val,
+            lhs,
+            rhs,
         }
     }
 }
@@ -96,32 +107,41 @@ impl Parser {
     fn peek_token(&self) -> &Token {
         &self.tokens[self.cur_index+1]
     }
-    fn skip(&mut self, target: &str) {
-        if self.tokens[self.cur_index].content.as_str() == target {
+
+    fn skip_peek(&mut self, target: &str) {
+        let actual = self.peek_token().content.as_str();
+        if  actual == target {
             self.cur_index += 1;
         } else {
-            error_token(&self.src, self.cur_token(), target)
+            error_token(&self.src, self.peek_token(), format!("want '{}', but got '{}'", target, actual).as_str());
         }
     }
 
-    // for now, we consider infix expresseions and single number
-    fn parse_expr(&mut self, precedence: Precedence) -> Node {
-        // @Incomplete: for now, we assume the first token is an integer
-        let mut expr: Node = self.parse_integer();
+    fn skip(&mut self, target: &str) {
+        let actual = self.cur_token().content.as_str();
+        if actual == target {
+            self.cur_index += 1;
+        } else {
+            error_token(&self.src, self.cur_token(), format!("want '{}', but got '{}'", target, actual).as_str());
+        }
+    }
+
+    fn parse_expr(&mut self, precedence: Precedence) -> ExprType {
+        let mut expr: ExprType = self.parse_prefix();
         loop {
-            if precedence > self.peek_token().precedence() {
+            if precedence >= self.peek_token().precedence() {
                 return expr;
             }
-            self.next_token();
-            match self.cur_token().kind {
+            match self.peek_token().kind {
                 TokenKind::TkPlus | TokenKind::TkMinus |
                 TokenKind::TkMul | TokenKind::TkDiv => {
+                    self.next_token();
                     expr = self.parse_infix(expr)
                 },
-                TokenKind::TkNum => {
+                TokenKind::TkNum | TokenKind::TkLParen => {
                     error_token(&self.src, self.cur_token(), "expect an operator");
                 },
-                TokenKind::TkEof => {
+                TokenKind::TkEof | TokenKind::TkRParen => {
                     break;
                 },
             }
@@ -129,34 +149,57 @@ impl Parser {
         expr
     }
 
-    fn parse_integer(&self) -> Node {
+    fn parse_paren(&mut self) -> ExprType {
+        self.skip("(");
+        let res = self.parse_expr(Precedence::Lowest);
+        self.skip_peek(")");
+        res
+    }
+
+    fn parse_prefix(&mut self) -> ExprType {
+        let mut neg_count = 0;
+        if self.cur_token().kind == TokenKind::TkLParen {
+            return self.parse_paren();
+        }
+        if self.cur_token().kind == TokenKind::TkNum {
+            return self.parse_integer();
+        }
+        // prefix unary operators
+        while (self.cur_token().kind == TokenKind::TkMinus) |
+        (self.cur_token().kind == TokenKind::TkPlus) {
+            if self.cur_token().kind == TokenKind::TkMinus {
+                neg_count += 1;
+            }
+            self.next_token();
+        }
+        let expr = self.parse_expr(Precedence::Prefix);
+        if neg_count % 2 == 0 {expr} else {Neg(Box::new(expr))}
+    }
+
+    fn parse_integer(&self) -> ExprType {
         if self.cur_token().kind != TokenKind::TkNum {
             error_token(&self.src, self.cur_token(), "expect a number");
         }
-        Node {
-            token: self.cur_token().clone(),
-            lhs: None,
-            rhs: None,
-            val: self.cur_token().val,
-        }
+        Number(self.cur_token().val)
     }
 
-    fn parse_infix(&mut self, lhs: Node) -> Node {
-        let tok = self.cur_token().clone();
-        let p = tok.precedence();
+    fn parse_infix(&mut self, lhs: ExprType) -> ExprType {
+        let token = self.cur_token().clone();
+        let p = token.precedence();
         self.next_token();
-        Node {
-            token: tok,
-            lhs: Some(lhs.into()),
-            rhs: Some(self.parse_expr(p).into()),
-            val: 0,
-        }
+        let content = Node {
+            token,
+            lhs,
+            rhs: self.parse_expr(p),
+        };
+        Binary(Box::new(content))
     }
 }
 
 fn main() {
     // test case
-    let src = String::from("10-1234*2-3423/12312-1223412+11112");
+    let src = String::from("-10-1234*(2-3423)/11112");
+    // let src = String::from("-3+2");
     println!("compiling source code: {src}");
     println!();
 
@@ -167,72 +210,56 @@ fn main() {
         tokens: tokens.clone(),
         cur_index: 0,
     };
-    let res = parser.parse_expr(Precedence::Lowest);
-    show_node(&Some(res.into()));
+    let program = parser.parse_expr(Precedence::Lowest);
+    show_expr(&program);
     println!();
-    // error_token(&src, &res.token, "expect a number for the first token");
 
-    // special case: deal with the first token
-    if let TokenKind::TkNum = parser.cur_token().kind {
-        println!("  .globl main");
-        println!("main:");
-        println!("  mov ${} %rax", parser.cur_token().val);
-        parser.next_token();
-    } else {
-        error_token(&src, parser.cur_token(), "expect a number for the first token");
-    }
-    loop {
-        match parser.cur_token().kind {
-            TokenKind::TkPlus => {
-                if let TokenKind::TkNum = parser.peek_token().kind  {
-                    println!("  add ${}, %rax", parser.peek_token().val);
-                    parser.next_token();
-                    parser.next_token();
-                } else {
-                    error_token(&src, parser.peek_token(), "expect a number");
-                }
-            },
-            TokenKind::TkMinus => {
-                if let TokenKind::TkNum = parser.peek_token().kind  {
-                    println!("  sub ${}, %rax", parser.peek_token().val);
-                    parser.next_token();
-                    parser.next_token();
-                } else {
-                    error_token(&src, parser.peek_token(), "expect a number");
-                }
-            },
-            TokenKind::TkNum => {
-                error_token(&src, parser.cur_token(), "expect an operator");
-            },
-            _ => {
-                break;
-            },
-        }
-    }
+    println!("  .globl main");
+    println!("main:");
+    gen_code(program);
     println!("  ret");
 }
 
-fn show_node(root: &Option<Rc<Node>>) {
-     if let Some(ref rc_root) = root {
-        if rc_root.token.kind == TokenKind:: TkNum {
-            // mid
-            print!("{}", rc_root.token.content);
-            return;
+fn show_expr(root: &ExprType) {
+    match root {
+        Number(n) => print!("{}", n),
+        Binary(node) => {
+            print!("(");
+            show_expr(&node.lhs);
+            print!("{}", node.token.content);
+            show_expr(&node.rhs);
+            print!(")");
+        },
+        Neg(expr) => {
+            print!("-");
+            show_expr(&*expr);
+        },
+    }
+}
+
+fn gen_code(expr: ExprType) {
+    match expr {
+        Number(n) => println!("  mov ${}, %rax", n),
+        Binary(node) => {
+            gen_code(node.rhs);
+            println!("  push %rax");
+            gen_code(node.lhs);
+            println!("  pop %rdi");
+            match node.token.kind {
+                TokenKind::TkPlus => println!("  add %rdi, %rax"),
+                TokenKind::TkMinus => println!("  sub %rdi, %rax"),
+                TokenKind::TkMul => println!("  imul %rdi, %rax"),
+                TokenKind::TkDiv => {
+                    println!("  cqo");
+                    println!("  idiv %rdi");
+                },
+                _ => println!("expect a binary operator"),
+            }
         }
-        print!("(");
-        // left
-        if rc_root.lhs != None {
-            show_node(&rc_root.lhs);
-        }
-        // mid
-        print!("{}", rc_root.token.content);
-        // right
-        if rc_root.rhs != None {
-            show_node(&rc_root.rhs);
-        }
-        print!(")");
-    } else {
-        print!("No value found");
+        Neg(expr) => {
+            gen_code(*expr);
+            println!("  neg %rax");
+        },
     }
 }
 
@@ -243,7 +270,7 @@ fn tokenize(src: &String) -> Vec<Token> {
         let mut tok = Token::default();
         tok.index = index;
         if let Some(c) = src.chars().nth(index) {
-            // @TODO: use switch case match
+            // @Cleanup: use switch case match
             if c == ' ' {
                 index += 1;
                 continue;
@@ -264,6 +291,16 @@ fn tokenize(src: &String) -> Vec<Token> {
                 index += 1; 
             } else if c == '/' {
                 tok.kind = TokenKind::TkDiv;
+                tok.content = String::from(c);
+                tok.len = 1;
+                index += 1; 
+            } else if c == '(' {
+                tok.kind = TokenKind::TkLParen;
+                tok.content = String::from(c);
+                tok.len = 1;
+                index += 1; 
+            } else if c == ')' {
+                tok.kind = TokenKind::TkRParen;
                 tok.content = String::from(c);
                 tok.len = 1;
                 index += 1; 
