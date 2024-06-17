@@ -1,28 +1,35 @@
  #![allow(warnings)]
 use std::{io::{self, Write}, process::exit};
 use std::rc::Rc;
+use colored::*;
 
-static global_src: &str = "1<2";
+static global_src: &str = "-10-1234*(2-3423)/11112";
 
 #[derive(Clone)]
 #[derive(PartialEq)]
 enum TokenKind {
-    TkPlus,
-    TkMinus,
-    TkMul,
-    TkDiv,
-    TkLParen,
-    TkRParen,
-    TkAssignment,
-    TkEq,
-    TkNeq,
-    TkNot,
-    TkLT,
-    TkLE,
-    TkNum(i32),   // Numeric literals
-    TkEof,   // End-of-file markers
+    Plus,
+    Minus,
+    Mul,
+    Div,
+    LParen,
+    RParen,
+    Assignment,
+    Compare(CompareToken),
+    Not,
+    Num(i32),
+    Eof,
 }
 use TokenKind::*;
+
+#[derive(PartialEq, Clone)]
+enum CompareToken {
+    Eq,
+    Neq,
+    LT,
+    LE,
+}
+use CompareToken::*;
 
 #[derive(PartialEq, PartialOrd)]
 enum Precedence {
@@ -45,16 +52,16 @@ struct Token {
 impl Token {
     fn precedence(&self) -> Precedence {
         match self.kind {
-            TokenKind::TkPlus | TokenKind::TkMinus => {
+            Plus | Minus => {
                 return Precedence::PlusMinus;
             }
-            TokenKind::TkMul | TokenKind::TkDiv => {
+            Mul | Div => {
                 return Precedence::MulDiv;
             }
-            TkEq | TkNeq | TkNot | TkLT | TkLE => {
+            Compare(_) => {
                 return Precedence::Compare;
             },
-            TkAssignment => Precedence::Assign,
+            Assignment => Precedence::Assign,
             _ => {
                 return Precedence::Lowest;
             }
@@ -65,7 +72,7 @@ impl Token {
 impl Default for Token {
     fn default() -> Token {
         Token{
-            kind: TokenKind::TkEof,
+            kind: Eof,
             content: "".to_string(),
             index: 0,
             len: 0,
@@ -128,42 +135,42 @@ impl Lexer {
             let i = self.index;
             match c {
                 ' ' => (),
-                '+' => tokens.push(Self::gen_token(TkPlus, "+", i, 1)),
-                '-' => tokens.push(Self::gen_token(TkMinus, "-", i, 1)),
-                '*' => tokens.push(Self::gen_token(TkMul, "*", i, 1)),
-                '/' => tokens.push(Self::gen_token(TkDiv, "/", i, 1)),
-                '(' => tokens.push(Self::gen_token(TkLParen, "(", i, 1)),
-                ')' => tokens.push(Self::gen_token(TkRParen, ")", i, 1)),
+                '+' => tokens.push(Self::gen_token(Plus, "+", i, 1)),
+                '-' => tokens.push(Self::gen_token(Minus, "-", i, 1)),
+                '*' => tokens.push(Self::gen_token(Mul, "*", i, 1)),
+                '/' => tokens.push(Self::gen_token(Div, "/", i, 1)),
+                '(' => tokens.push(Self::gen_token(LParen, "(", i, 1)),
+                ')' => tokens.push(Self::gen_token(RParen, ")", i, 1)),
                 '=' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(TkEq, "==", i, 2));
+                            tokens.push(Self::gen_token(Compare(Eq), "==", i, 2));
                             self.next_char();
                         },
                         _ => {
-                            tokens.push(Self::gen_token(TkAssignment, "=", i, 1));
+                            tokens.push(Self::gen_token(Assignment, "=", i, 1));
                         },
                     }
                 },
                 '!' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(TkNeq, "!=", i, 2));
+                            tokens.push(Self::gen_token(Compare(Neq), "!=", i, 2));
                             self.next_char();
                         },
                         _ => {
-                            tokens.push(Self::gen_token(TkNot, "!", i, 1));
+                            tokens.push(Self::gen_token(Not, "!", i, 1));
                         },
                     }
                 },
                 '<' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(TkLE, "<=", i, 2));
+                            tokens.push(Self::gen_token(Compare(LE), "<=", i, 2));
                             self.next_char();
                         },
                         _ => {
-                            tokens.push(Self::gen_token(TkLT, "<", i, 1));
+                            tokens.push(Self::gen_token(Compare(LT), "<", i, 1));
                         },
                     }
                 },
@@ -171,7 +178,7 @@ impl Lexer {
                     match self.read_int() {
                         Ok(num) => {
                             let num_str = &num.to_string();
-                            tokens.push(Self::gen_token(TkNum(num), num_str, i, num_str.len()));
+                            tokens.push(Self::gen_token(Num(num), num_str, i, num_str.len()));
                         },
                         Err(s) => {
                             println!("{s}");
@@ -186,7 +193,7 @@ impl Lexer {
             }
             self.next_char();
         }
-        tokens.push(Self::gen_token(TkEof, "", 0, 0));
+        tokens.push(Self::gen_token(Eof, "", 0, 0));
         tokens
     }
 
@@ -219,10 +226,16 @@ impl Lexer {
     }
 }
 
+struct Expr {
+    content: ExprType,
+    token: Token,
+}
+
 // @Smell: we can wrap Expr enum in a struct with some meta data like locations
 #[derive(PartialEq)]
 enum ExprType {
     Number(i32),
+    // Addition(Box<Expr>, Box<Expr>, TokenKind),
     Binary(Box<Node>),
     Neg(Box<ExprType>),
 }
@@ -295,21 +308,21 @@ impl Parser {
                         return Ok(expr);
                     }
                     match self.peek_token().kind {
-                        TokenKind::TkPlus | TokenKind::TkMinus |
-                        TokenKind::TkMul | TokenKind::TkDiv |
-                        TkEq | TkNeq | TkLT | TkLE | TkAssignment => {
+                        Plus | Minus |
+                        Mul | Div |
+                        Compare(_) | Assignment => {
                             self.next_token();
                             expr = self.parse_infix(expr)?;
                         },
-                        TokenKind::TkNum(_) | TokenKind::TkLParen => {
+                        Num(_) | LParen => {
                             let err_msg = error_token(&self.src, self.cur_token(), "expect an operator");
                             return Err(err_msg);
                         },
-                        TokenKind::TkEof | TokenKind::TkRParen => {
+                        Eof | RParen => {
                             break;
                         },
                         _ => {
-                            let err_msg = error_token(&self.src, self.cur_token(), "not support parsing this token");
+                            let err_msg = error_token(&self.src, self.peek_token(), "not support parsing this token");
                             return Err(err_msg);
                         },
                     }
@@ -328,13 +341,13 @@ impl Parser {
 
     fn parse_prefix(&mut self) -> Result<ExprType, String> {
         match self.cur_token().kind {
-            TokenKind::TkLParen => return self.parse_paren(),
-            TokenKind::TkNum(_) => return self.parse_integer(),
-            TokenKind::TkPlus => {
+            LParen => return self.parse_paren(),
+            Num(_) => return self.parse_integer(),
+            Plus => {
                 self.next_token();
                 return self.parse_prefix();
             },
-            TokenKind::TkMinus => {
+            Minus => {
                 self.next_token();
                 let prefix = self.parse_prefix()?;
                 let operand = Box::new(prefix);
@@ -348,7 +361,7 @@ impl Parser {
     }
 
     fn parse_integer(&self) -> Result<ExprType, String> {
-        if let TokenKind::TkNum(n) = self.cur_token().kind {
+        if let Num(n) = self.cur_token().kind {
             return Ok(Number(n));
         } else {
             return Err(error_token(&self.src, self.cur_token(), "expect a number"));
@@ -432,27 +445,20 @@ fn gen_code(expr: ExprType) {
             gen_code(node.lhs);
             println!("  pop %rdi");
             match node.token.kind  {
-                TkPlus => println!("  add %rdi, %rax"),
-                TkMinus => println!("  sub %rdi, %rax"),
-                TkMul => println!("  imul %rdi, %rax"),
-                TkDiv => {
+                Plus => println!("  add %rdi, %rax"),
+                Minus => println!("  sub %rdi, %rax"),
+                Mul => println!("  imul %rdi, %rax"),
+                Div => {
                     println!("  cqo");
                     println!("  idiv %rdi");
                 },
-                TkEq | TkNeq |
-                TkLT | TkLE => {
+                Compare(c) => {
                     println!("  cmp %rdi, %rax");
-                    if node.token.kind == TkEq {
-                        println!("  sete %al");
-                    }
-                    if node.token.kind == TkNeq {
-                        println!("  setne %al");
-                    }
-                    if node.token.kind == TkLT {
-                        println!("  selt %al");
-                    }
-                    if node.token.kind == TkLE {
-                        println!("  sele %al");
+                    match c {
+                        Eq => println!("  sete %al"),
+                        Neq => println!("  setne %al"),
+                        LT => println!("  selt %al"),
+                        LE => println!("  sele %al"),
                     }
                     println!("  movzb %al, %rax");
                 },
@@ -479,8 +485,8 @@ fn tokenize(src: &String) -> Vec<Token> {
             match c {
                 ' ' => index += 1,
                 '+' => {
-                    // (TkPlus, content, len, index)
-                    tok.kind = TokenKind::TkPlus;
+                    // (Plus, content, len, index)
+                    tok.kind = Plus;
                     tok.content = String::from(c);
                     tok.len = 1;
                     index += 1;
@@ -491,35 +497,35 @@ fn tokenize(src: &String) -> Vec<Token> {
                 index += 1;
                 continue;
             } else if c == '+' {
-                tok.kind = TokenKind::TkPlus;
+                tok.kind = Plus;
             } else if c == '-' {
-                tok.kind = TokenKind::TkMinus;
+                tok.kind = Minus;
                 tok.content = String::from(c);
                 tok.len = 1;
                 index += 1; 
             } else if c == '*' {
-                tok.kind = TokenKind::TkMul;
+                tok.kind = Mul;
                 tok.content = String::from(c);
                 tok.len = 1;
                 index += 1; 
             } else if c == '/' {
-                tok.kind = TokenKind::TkDiv;
+                tok.kind = Div;
                 tok.content = String::from(c);
                 tok.len = 1;
                 index += 1; 
             } else if c == '(' {
-                tok.kind = TokenKind::TkLParen;
+                tok.kind = LParen;
                 tok.content = String::from(c);
                 tok.len = 1;
                 index += 1; 
             } else if c == ')' {
-                tok.kind = TokenKind::TkRParen;
+                tok.kind = RParen;
                 tok.content = String::from(c);
                 tok.len = 1;
                 index += 1; 
             } else if c <= '9' && c >= '0' {
                 let (len, int_str) = read_int(&src[index..]);
-                tok.kind = TokenKind::TkNum(int_str.parse().unwrap());
+                tok.kind = Num(int_str.parse().unwrap());
                 tok.content = int_str.to_string();
                 tok.len = len;
                 index += len; 
@@ -532,7 +538,7 @@ fn tokenize(src: &String) -> Vec<Token> {
         }
     }
     let mut eof_tok = Token::default();
-    eof_tok.kind = TokenKind::TkEof;
+    eof_tok.kind = Eof;
     tokens.push(eof_tok);
     tokens
 }
@@ -552,7 +558,7 @@ fn read_int(src: &str) -> (usize, &str) {
 fn error_at(src: &String, index: usize, err_msg: &str) {
     println!("{}", src);
     let spaces = " ".repeat(index);
-    println!("{}^ {}", spaces, err_msg);
+    println!("{}^ {}", spaces, err_msg.red());
     exit(0);
 }
 
@@ -561,6 +567,6 @@ fn error_token(src: &str, tok: &Token, info: &str) -> String {
     err_msg.push_str(&format!("{}\n", src));
     let spaces = " ".repeat(tok.index);
     let arrows = "^".repeat(tok.len);
-    err_msg.push_str(&format!("{}{} {}", spaces, arrows, info));
+    err_msg.push_str(&format!("{}{} {}", spaces, arrows, info.red()));
     err_msg
 }
