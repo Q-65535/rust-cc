@@ -226,18 +226,24 @@ impl Lexer {
     }
 }
 
+#[derive(PartialEq)]
 struct Expr {
     content: ExprType,
     token: Token,
 }
 
-// @Smell: we can wrap Expr enum in a struct with some meta data like locations
+impl Expr {
+    fn new(content: ExprType, token: Token) -> Self {
+        Expr{content, token}
+    }
+}
+
 #[derive(PartialEq)]
 enum ExprType {
     Number(i32),
     // Addition(Box<Expr>, Box<Expr>, TokenKind),
-    Binary(Box<Node>),
-    Neg(Box<ExprType>),
+    Binary(Box<Expr>, Box<Expr>, TokenKind),
+    Neg(Box<Expr>),
 }
 
 use ExprType::*;
@@ -299,7 +305,7 @@ impl Parser {
         }
     }
 
-    fn parse_expr(&mut self, precedence: Precedence) -> Result<ExprType, String> {
+    fn parse_expr(&mut self, precedence: Precedence) -> Result<Expr, String> {
         match self.parse_prefix() {
             Err(err_msg) => return Err(err_msg),
             Ok(mut expr) => {
@@ -332,15 +338,16 @@ impl Parser {
         }
     }
 
-    fn parse_paren(&mut self) -> Result<ExprType, String> {
+    fn parse_paren(&mut self) -> Result<Expr, String> {
         self.skip("(");
         let res = self.parse_expr(Precedence::Lowest);
         self.skip_peek(")");
         res
     }
 
-    fn parse_prefix(&mut self) -> Result<ExprType, String> {
-        match self.cur_token().kind {
+    fn parse_prefix(&mut self) -> Result<Expr, String> {
+        let cur_token = self.cur_token().clone();
+        match cur_token.kind {
             LParen => return self.parse_paren(),
             Num(_) => return self.parse_integer(),
             Plus => {
@@ -351,34 +358,33 @@ impl Parser {
                 self.next_token();
                 let prefix = self.parse_prefix()?;
                 let operand = Box::new(prefix);
-                return Ok(Neg(operand));
+                let expr = Expr::new(Neg(operand), cur_token);
+                return Ok(expr);
             },
             _ => {
-                let err_msg = error_token(&self.src, self.cur_token(), "can't parse prefix expression here");
+                let err_msg = error_token(&self.src, &cur_token, "can't parse prefix expression here");
                 return Err(err_msg);
             }
         }
     }
 
-    fn parse_integer(&self) -> Result<ExprType, String> {
-        if let Num(n) = self.cur_token().kind {
-            return Ok(Number(n));
+    fn parse_integer(&self) -> Result<Expr, String> {
+        let cur_token = self.cur_token();
+        if let Num(n) = cur_token.kind {
+            let expr = Expr::new(Number(n), cur_token.clone());
+            return Ok(expr);
         } else {
             return Err(error_token(&self.src, self.cur_token(), "expect a number"));
         }
     }
 
-    fn parse_infix(&mut self, lhs: ExprType) -> Result<ExprType, String> {
+    fn parse_infix(&mut self, lhs: Expr) -> Result<Expr, String> {
         let token = self.cur_token().clone();
         let p = token.precedence();
         self.next_token();
         let rhs = self.parse_expr(p)?;
-        let content = Node {
-            token,
-            lhs,
-            rhs,
-        };
-        Ok(Binary(Box::new(content)))
+        let content = Binary(Box::new(lhs), Box::new(rhs), token.kind.clone());
+        Ok(Expr::new(content, token))
     }
 }
 
@@ -403,13 +409,13 @@ fn main() {
     let res = parser.parse_expr(Precedence::Lowest);
     match res {
         Ok(program) => {
-            // show_expr(&program);
+            show_expr(&program);
             println!();
             println!("assembly result:");
             println!();
             println!("  .globl main");
             println!("main:");
-            gen_code(program);
+            gen_code(&program);
             println!("  ret");
         },
         Err(err_msg) => {
@@ -419,32 +425,33 @@ fn main() {
     
 }
 
-fn show_expr(root: &ExprType) {
-    match root {
+fn show_expr(root: &Expr) {
+    match &root.content {
         Number(n) => print!("{}", n),
-        Binary(node) => {
+        Binary(lhs, rhs, kind) => {
             print!("(");
-            show_expr(&node.lhs);
-            print!("{}", node.token.content);
-            show_expr(&node.rhs);
+            show_expr(&lhs);
+            print!("{}", root.token.content);
+            show_expr(&rhs);
             print!(")");
         },
         Neg(expr) => {
             print!("-");
-            show_expr(&*expr);
+            show_expr(&expr);
         },
     }
 }
 
-fn gen_code(expr: ExprType) {
-    match expr {
+fn gen_code(expr: &Expr) {
+    let content = &expr.content;
+    match content {
         Number(n) => println!("  mov ${}, %rax", n),
-        Binary(node) => {
-            gen_code(node.rhs);
+        Binary(lhs, rhs, kind) => {
+            gen_code(&rhs);
             println!("  push %rax");
-            gen_code(node.lhs);
+            gen_code(&lhs);
             println!("  pop %rdi");
-            match node.token.kind  {
+            match kind  {
                 Plus => println!("  add %rdi, %rax"),
                 Minus => println!("  sub %rdi, %rax"),
                 Mul => println!("  imul %rdi, %rax"),
@@ -463,13 +470,13 @@ fn gen_code(expr: ExprType) {
                     println!("  movzb %al, %rax");
                 },
                 _ => {
-                    let err_msg = error_token(global_src, &node.token, "unknown binary token");
+                    let err_msg = error_token(global_src, &expr.token, "unknown binary token");
                     println!("{}", err_msg);
                 },
             }
         }
         Neg(expr) => {
-            gen_code(*expr);
+            gen_code(&expr);
             println!("  neg %rax");
         },
     }
