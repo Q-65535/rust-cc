@@ -14,6 +14,7 @@ pub enum TokenKind {
     Compare(CompareToken),
     Not,
     Num(i32),
+    Semicolon,
     Eof,
 }
 use TokenKind::*;
@@ -31,7 +32,7 @@ use CompareToken::*;
 pub enum Precedence {
     Lowest,
     Assign,
-    Compare,
+    Comparison,
     PlusMinus,
     MulDiv,
     Prefix,
@@ -55,7 +56,7 @@ impl Token {
                 return Precedence::MulDiv;
             }
             Compare(_) => {
-                return Precedence::Compare;
+                return Precedence::Comparison;
             },
             Assignment => Precedence::Assign,
             _ => {
@@ -131,6 +132,7 @@ impl Lexer {
             let i = self.index;
             match c {
                 ' ' => (),
+                ';' => tokens.push(Self::gen_token(Semicolon, ";", i, 1)),
                 '+' => tokens.push(Self::gen_token(Plus, "+", i, 1)),
                 '-' => tokens.push(Self::gen_token(Minus, "-", i, 1)),
                 '*' => tokens.push(Self::gen_token(Mul, "*", i, 1)),
@@ -182,7 +184,10 @@ impl Lexer {
                         },
                     }
                 },
-                _ => (),
+                _ => {
+                    println!("lexing error: unknown character: '{}'", c);
+                    exit(0);
+                },
             }
             if !self.has_next() {
                 break;

@@ -1,6 +1,5 @@
  #![allow(warnings)]
 use std::{io::{self, Write}, process::exit};
-use std::rc::Rc;
 use colored::*;
 use crate::lex::*;
 use crate::parse::*;
@@ -10,7 +9,7 @@ use crate::ExprType::*;
 pub mod parse;
 pub mod lex;
 
-static global_src: &str = "-10-1234*(2-3423)/11112";
+static global_src: &str = "-10-1234*(2-3423)/11112;1+2;";
 
 
 
@@ -29,17 +28,24 @@ fn main() {
     let tokens = lexer.lex();
     let src = global_src.to_string().clone();
     let mut parser = parse::Parser::new(src, tokens, 0);
-    let res = parser.parse_expr(Precedence::Lowest);
+    // let res = parser.parse_expr(Precedence::Lowest);
+    let res = parser.parse();
     match res {
         Ok(program) => {
-            show_expr(&program);
-            println!();
-            println!("assembly result:");
-            println!();
-            println!("  .globl main");
-            println!("main:");
-            gen_code(&program);
-            println!("  ret");
+            for stmt in program {
+                match stmt {
+                    StmtType::Ex(expr) => {
+                        println!();
+                        println!("assembly result:");
+                        println!();
+                        println!("  .globl main");
+                        println!("main:");
+                        gen_code(&expr);
+                        println!("  ret");
+                    }
+                }
+            }
+            // show_expr(&program);
         },
         Err(err_msg) => {
             println!("{}", err_msg);

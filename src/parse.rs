@@ -1,5 +1,11 @@
 use std::{io::{self, Write}, process::exit};
 use crate::*;
+use crate::Precedence::*;
+
+pub enum StmtType {
+    Ex(Expr),
+}
+use StmtType::*;
 
 #[derive(PartialEq)]
 pub struct Expr {
@@ -16,7 +22,6 @@ impl Expr {
 #[derive(PartialEq)]
 pub enum ExprType {
     Number(i32),
-    // Addition(Box<Expr>, Box<Expr>, TokenKind),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Neg(Box<Expr>),
 }
@@ -67,6 +72,31 @@ impl Parser {
         } else {
             error_token(&self.src, self.cur_token(), format!("want '{}', but got '{}'", target, actual).as_str());
         }
+    }
+
+    pub fn parse(&mut self) -> Result<Vec<StmtType>, String> {
+        let mut stmts: Vec<StmtType> = Vec::new();
+        loop {
+            match self.cur_token().kind {
+                Eof => break,
+                // @TODO: for now, we only consider expression
+                _ => {
+                    let expr = self.parse_expr(Lowest)?;
+                    stmts.push(Ex(expr));
+                },
+            }
+            match self.peek_token().kind {
+                Semicolon => {
+                    self.next_token();
+                    self.next_token();
+                },
+                _ => {
+                    let err_msg = error_token(&self.src, self.peek_token(), "expect ';' at the end of a statement");
+                    return Err(err_msg);
+                }
+            }
+        } 
+        Ok(stmts)
     }
 
     pub fn parse_expr(&mut self, precedence: Precedence) -> Result<Expr, String> {
