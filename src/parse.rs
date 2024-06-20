@@ -1,6 +1,7 @@
 use std::{io::{self, Write}, process::exit};
 use crate::*;
 use crate::Precedence::*;
+use crate::TokenKind::*;
 
 pub enum StmtType {
     Ex(Expr),
@@ -55,6 +56,17 @@ impl Parser {
         &self.tokens[self.cur_index+1]
     }
 
+    fn expect_peek(&mut self, expect: TokenKind) -> Result<&Token, String> {
+        let peek = self.peek_token();
+        if  peek.kind == expect {
+            self.next_token();
+            return Ok(self.cur_token());
+        } else {
+            let err_msg = format!("parsing error: expect {:?} kind token, but got{:?} kind token\n", expect, peek.kind);
+            return Err(error_token(&self.src, peek, err_msg.as_str()));
+        }
+    }
+
     fn skip_peek(&mut self, target: &str) {
         let actual = self.peek_token().content.as_str();
         if  actual == target {
@@ -79,24 +91,27 @@ impl Parser {
         loop {
             match self.cur_token().kind {
                 Eof => break,
-                // @TODO: for now, we only consider expression
                 _ => {
-                    let expr = self.parse_expr(Lowest)?;
-                    stmts.push(Ex(expr));
-                },
-            }
-            match self.peek_token().kind {
-                Semicolon => {
-                    self.next_token();
-                    self.next_token();
-                },
-                _ => {
-                    let err_msg = error_token(&self.src, self.peek_token(), "expect ';' at the end of a statement");
-                    return Err(err_msg);
+                    let stmt = self.parse_stmt()?;
+                    stmts.push(stmt);
                 }
             }
+            self.next_token();
         } 
         Ok(stmts)
+    }
+
+    fn parse_stmt(&mut self) -> Result<StmtType, String> {
+        match self.cur_token() {
+            // @TODO: consider other types of statement
+            _ => Ok(self.parse_expr_stmt()?),
+        }
+    }
+
+    fn parse_expr_stmt(&mut self) -> Result<StmtType, String> {
+        let expr = self.parse_expr(Lowest)?;
+        self.expect_peek(Semicolon)?;
+        Ok(Ex(expr))
     }
 
     pub fn parse_expr(&mut self, precedence: Precedence) -> Result<Expr, String> {

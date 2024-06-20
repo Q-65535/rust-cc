@@ -1,8 +1,7 @@
 use std::{io::{self, Write}, process::exit};
 use crate::*;
 
-#[derive(Clone)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
     Plus,
     Minus,
@@ -19,7 +18,7 @@ pub enum TokenKind {
 }
 use TokenKind::*;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum CompareToken {
     Eq,
     Neq,

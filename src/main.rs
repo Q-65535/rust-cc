@@ -14,45 +14,38 @@ static global_src: &str = "-10-1234*(2-3423)/11112;1+2;";
 
 
 fn main() {
-    // test case
-    // let src = String::from("-10-1234*(2-3423)/11112");
-    // let src = String::from("1=2");
     println!("compiling source code: '{global_src}'");
     let mut lexer = Lexer::new(global_src);
 
     let mut tokens: Vec<Token> = Vec::new();
-    // let temp_tokens = tokenize(&src);
-    // for c in temp_tokens {
-    //     let a = c;
-    // }
     let tokens = lexer.lex();
     let src = global_src.to_string().clone();
     let mut parser = parse::Parser::new(src, tokens, 0);
-    // let res = parser.parse_expr(Precedence::Lowest);
     let res = parser.parse();
+
+    println!();
+    println!("assembly result:");
+    println!();
+    println!("  .globl main");
+    println!("main:");
     match res {
         Ok(program) => {
             for stmt in program {
                 match stmt {
                     StmtType::Ex(expr) => {
-                        println!();
-                        println!("assembly result:");
-                        println!();
-                        println!("  .globl main");
-                        println!("main:");
                         gen_code(&expr);
-                        println!("  ret");
                     }
                 }
+                println!();
             }
-            // show_expr(&program);
         },
         Err(err_msg) => {
             println!("{}", err_msg);
         },
     }
-    
+    println!("  ret");
 }
+
 
 fn show_expr(root: &Expr) {
     match &root.content {
