@@ -9,7 +9,8 @@ use crate::ExprType::*;
 pub mod parse;
 pub mod lex;
 
-static global_src: &str = "-10-1234*(2-3423)/11112;1+2;";
+// static global_src: &str = "-10-1234*(2-3423)/11112;1+2;";
+static global_src: &str = "c = 1; b = 10;";
 
 
 
@@ -20,7 +21,7 @@ fn main() {
     let mut tokens: Vec<Token> = Vec::new();
     let tokens = lexer.lex();
     let src = global_src.to_string().clone();
-    let mut parser = parse::Parser::new(src, tokens, 0);
+    let mut parser = Parser::new(&src, tokens, 0);
     let res = parser.parse();
 
     println!();
@@ -61,6 +62,7 @@ fn show_expr(root: &Expr) {
             print!("-");
             show_expr(&expr);
         },
+        _ => println!("show_expr error, not support showing {:?}", &root.content),
     }
 }
 
@@ -92,15 +94,38 @@ fn gen_code(expr: &Expr) {
                     println!("  movzb %al, %rax");
                 },
                 _ => {
-                    let err_msg = error_token(global_src, &expr.token, "unknown binary token");
+                    let err_msg = "aa";//error_token(global_src, &expr.token, "unknown binary token");
                     println!("{}", err_msg);
                 },
             }
         }
+        Assign(var, val) => {
+            gen_addr(&var);
+            println!("  push %rax");
+            gen_code(val);
+            println!("  pop %rdi");
+            println!("  mov %rax, (%rdi)");
+        },
         Neg(expr) => {
             gen_code(&expr);
             println!("  neg %rax");
         },
+        Var(s) => {
+            gen_addr(&s);
+            println!("  move (%rax), %rax\n");
+        },
+        _ => println!("gen_code error: not support {:?}", content),
+    }
+}
+
+fn gen_addr(var: &str) {
+    if let Some(c) = var.chars().next() {
+        let cval = c as i32;
+        let base = 'a' as i32;
+        let offset = (cval - base + 1)*8;
+        println!("  lea {}(%rbp), %rax\n", -offset);
+    } else {
+    println!("gen_addr error: 0 length var name: {}", var);
     }
 }
 

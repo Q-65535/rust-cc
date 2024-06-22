@@ -1,14 +1,17 @@
 use std::{io::{self, Write}, process::exit};
-use crate::*;
-use crate::Precedence::*;
-use crate::TokenKind::*;
+use colored::*;
+use crate::Precedence::{self, *};
+use crate::TokenKind::{self, *};
+use crate::ExprType::*;
+use crate::error_token;
+use crate::Token;
 
 pub enum StmtType {
     Ex(Expr),
 }
 use StmtType::*;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Expr {
     pub content: ExprType,
     pub token: Token,
@@ -20,11 +23,13 @@ impl Expr {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum ExprType {
     Number(i32),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
+    Assign(String, Box<Expr>),
     Neg(Box<Expr>),
+    Var(String),
 }
 
 
@@ -35,9 +40,9 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(src: String, tokens: Vec<Token>, cur_index: usize) -> Self {
+    pub fn new(src: &str, tokens: Vec<Token>, cur_index: usize) -> Self {
         Parser {
-            src,
+            src: src.to_string(),
             tokens,
             cur_index,
         }
@@ -62,8 +67,8 @@ impl Parser {
             self.next_token();
             return Ok(self.cur_token());
         } else {
-            let err_msg = format!("parsing error: expect {:?} kind token, but got{:?} kind token\n", expect, peek.kind);
-            return Err(error_token(&self.src, peek, err_msg.as_str()));
+            let err_msg = format!("parsing error: expect {:?} kind token, but got {:?} kind token\n", expect, peek.kind);
+            return Err(self.error_token(peek, err_msg.as_str()));
         }
     }
 
@@ -72,7 +77,7 @@ impl Parser {
         if  actual == target {
             self.cur_index += 1;
         } else {
-            let err_msg = error_token(&self.src, self.peek_token(), format!("want '{}', but got '{}'", target, actual).as_str());
+            let err_msg = self.error_token(self.peek_token(), format!("want '{}', but got '{}'", target, actual).as_str());
             println!("{}", err_msg);
         }
     }
@@ -82,7 +87,7 @@ impl Parser {
         if actual == target {
             self.cur_index += 1;
         } else {
-            error_token(&self.src, self.cur_token(), format!("want '{}', but got '{}'", target, actual).as_str());
+            self.error_token(self.cur_token(), format!("want '{}', but got '{}'", target, actual).as_str());
         }
     }
 
@@ -125,19 +130,23 @@ impl Parser {
                     match self.peek_token().kind {
                         Plus | Minus |
                         Mul | Div |
-                        Compare(_) | Assignment => {
+                        Compare(_) => {
                             self.next_token();
                             expr = self.parse_infix(expr)?;
                         },
                         Num(_) | LParen => {
-                            let err_msg = error_token(&self.src, self.cur_token(), "expect an operator");
+                            let err_msg = self.error_token(self.cur_token(), "expect an operator");
                             return Err(err_msg);
                         },
                         Eof | RParen => {
                             break;
                         },
+                        Assignment => {
+                            self.next_token();
+                            expr = self.parse_assign(expr)?;
+                        }
                         _ => {
-                            let err_msg = error_token(&self.src, self.peek_token(), "not support parsing this token");
+                            let err_msg = self.error_token(self.peek_token(), "not support parsing this token");
                             return Err(err_msg);
                         },
                     }
@@ -170,11 +179,18 @@ impl Parser {
                 let expr = Expr::new(Neg(operand), cur_token);
                 return Ok(expr);
             },
+            Ident => return self.parse_ident(),
             _ => {
-                let err_msg = error_token(&self.src, &cur_token, "can't parse prefix expression here");
+                let err_msg = self.error_token(&cur_token, "can't parse prefix expression here");
                 return Err(err_msg);
             }
         }
+    }
+    
+    fn parse_ident(&self) -> Result<Expr, String> {
+        let tok = self.cur_token();
+        let expr = Expr::new(Var(tok.content.clone()), tok.clone());
+        Ok(expr)
     }
 
     fn parse_integer(&self) -> Result<Expr, String> {
@@ -183,7 +199,7 @@ impl Parser {
             let expr = Expr::new(Number(n), cur_token.clone());
             return Ok(expr);
         } else {
-            return Err(error_token(&self.src, self.cur_token(), "expect a number"));
+            return Err(self.error_token(self.cur_token(), "expect a number"));
         }
     }
 
@@ -194,5 +210,26 @@ impl Parser {
         let rhs = self.parse_expr(p)?;
         let content = Binary(Box::new(lhs), Box::new(rhs), token.kind.clone());
         Ok(Expr::new(content, token))
+    }
+
+    fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
+        let tok = self.cur_token().clone();
+        if let Var(s) = lhs.content {
+            self.next_token();
+            let val = self.parse_expr(Lowest)?;
+            let content = ExprType::Assign(s, Box::new(val));
+            return Ok(Expr::new(content, tok));
+        } else {
+            return Err(self.error_token(&lhs.token, "not a variable name"));
+        }
+    }
+
+    fn error_token(&self, tok: &Token, info: &str) -> String {
+        let mut err_msg = String::from("");
+        err_msg.push_str(&format!("{}\n", self.src));
+        let spaces = " ".repeat(tok.index);
+        let arrows = "^".repeat(tok.len);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows, info.red()));
+        err_msg
     }
 }

@@ -14,6 +14,7 @@ pub enum TokenKind {
     Not,
     Num(i32),
     Semicolon,
+    Ident,
     Eof,
 }
 use TokenKind::*;
@@ -37,7 +38,7 @@ pub enum Precedence {
     Prefix,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub content: String,
@@ -138,6 +139,7 @@ impl Lexer {
                 '/' => tokens.push(Self::gen_token(Div, "/", i, 1)),
                 '(' => tokens.push(Self::gen_token(LParen, "(", i, 1)),
                 ')' => tokens.push(Self::gen_token(RParen, ")", i, 1)),
+                'a'..='z' => tokens.push(Self::gen_token(Ident, &c.to_string(), i, 1)),
                 '=' => {
                     match self.peek_char() {
                         Some('=') => {
@@ -193,7 +195,7 @@ impl Lexer {
             }
             self.next_char();
         }
-        tokens.push(Self::gen_token(Eof, "", 0, 0));
+        tokens.push(Self::gen_token(Eof, "", self.src.len(), 1));
         tokens
     }
 
