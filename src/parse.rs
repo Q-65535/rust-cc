@@ -3,7 +3,6 @@ use colored::*;
 use crate::Precedence::{self, *};
 use crate::TokenKind::{self, *};
 use crate::ExprType::*;
-use crate::error_token;
 use crate::Token;
 
 pub enum StmtType {
