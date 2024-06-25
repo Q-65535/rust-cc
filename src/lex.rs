@@ -25,6 +25,8 @@ pub enum CompareToken {
     Neq,
     LT,
     LE,
+    GT,
+    GE,
 }
 use CompareToken::*;
 
@@ -139,7 +141,11 @@ impl Lexer {
                 '/' => tokens.push(Self::gen_token(Div, "/", i, 1)),
                 '(' => tokens.push(Self::gen_token(LParen, "(", i, 1)),
                 ')' => tokens.push(Self::gen_token(RParen, ")", i, 1)),
-                'a'..='z' => tokens.push(Self::gen_token(Ident, &c.to_string(), i, 1)),
+                'a'..='z' | '_' => {
+                    let name = self.read_ident();
+                    let tok = Self::gen_token(Ident, &name, i, name.len());
+                    tokens.push(Self::gen_token(Ident, &c.to_string(), i, 1));
+                },
                 '=' => {
                     match self.peek_char() {
                         Some('=') => {
@@ -173,6 +179,17 @@ impl Lexer {
                         },
                     }
                 },
+                '>' => {
+                    match self.peek_char() {
+                        Some('=') => {
+                            tokens.push(Self::gen_token(Compare(GE), "<=", i, 2));
+                            self.next_char();
+                        },
+                        _ => {
+                            tokens.push(Self::gen_token(Compare(GT), "<", i, 1));
+                        },
+                    }
+                },
                 '0'..='9' => {
                     match self.read_int() {
                         Ok(num) => {
@@ -180,13 +197,14 @@ impl Lexer {
                             tokens.push(Self::gen_token(Num(num), num_str, i, num_str.len()));
                         },
                         Err(s) => {
-                            println!("{s}");
+                            self.error_at(i, "unable to read integer.");
                             exit(0);
                         },
                     }
                 },
                 _ => {
-                    println!("lexing error: unknown character: '{}'", c);
+                    let err_msg = &format!("lexing error: unknown character: '{}'", c);
+                    self.error_at(i, err_msg);
                     exit(0);
                 },
             }
@@ -225,6 +243,25 @@ impl Lexer {
         }
         let s: &String = &self.src[i..i+len].iter().collect(); 
         Ok(s.parse().unwrap())
+    }
+
+    fn read_ident(&mut self) -> String {
+        let mut len = 1;
+        let i = self.index;
+        loop {
+            match self.peek_char() {
+                Some(c) => {
+                    if (c <= '9' && c >= '0') | (c >= 'a' && c <= 'z') | (c == '_') {
+                        len += 1;
+                        self.next_char();
+                    } else {
+                        break;
+                    }
+                },
+                None => break,
+            }
+        }
+        self.src[i..i+len].iter().collect()
     }
 
     fn error_at(&self, index: usize, err_msg: &str) {

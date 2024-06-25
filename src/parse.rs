@@ -203,12 +203,12 @@ impl Parser {
     }
 
     fn parse_infix(&mut self, lhs: Expr) -> Result<Expr, String> {
-        let token = self.cur_token().clone();
-        let p = token.precedence();
+        let tok = self.cur_token().clone();
+        let p = tok.precedence();
         self.next_token();
         let rhs = self.parse_expr(p)?;
-        let content = Binary(Box::new(lhs), Box::new(rhs), token.kind.clone());
-        Ok(Expr::new(content, token))
+        let content = Binary(Box::new(lhs), Box::new(rhs), tok.kind.clone());
+        Ok(Expr::new(content, tok))
     }
 
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
