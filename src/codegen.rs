@@ -38,13 +38,126 @@ impl SblTable {
     }
 }
 
+pub struct Generator {
+    sbl_table: SblTable,
+    cur_offset: i32,
+}
+
+impl Generator {
+    pub fn gen_code(&mut self, stmts: &Vec<StmtType>) {
+        let stack_size = self.stack_size(stmts);
+        println!("  .globl main");
+        println!("main:");
+            for stmt in stmts {
+                match stmt {
+                    StmtType::Ex(expr) => {
+                        self.expr_gen(&expr);
+                    }
+                }
+                println!();
+            }
+        println!("  ret");
+    }
+
+    fn expr_gen(&mut self, expr: &Expr) {
+        let content = &expr.content;
+        match content {
+            Number(n) => println!("  mov ${}, %rax", n),
+            Binary(lhs, rhs, kind) => {
+                expr_gen(&rhs);
+                println!("  push %rax");
+                expr_gen(&lhs);
+                println!("  pop %rdi");
+                match kind  {
+                    Plus => println!("  add %rdi, %rax"),
+                    Minus => println!("  sub %rdi, %rax"),
+                    Mul => println!("  imul %rdi, %rax"),
+                    Div => {
+                        println!("  cqo");
+                        println!("  idiv %rdi");
+                    },
+                    Compare(c) => {
+                        println!("  cmp %rdi, %rax");
+                        match c {
+                            Eq => println!("  sete %al"),
+                            Neq => println!("  setne %al"),
+                            LT => println!("  selt %al"),
+                            LE => println!("  sele %al"),
+                            GT => {
+                                println!("  sele %al");
+                                println!("  neg %al");
+                            },
+                            GE => {
+                                println!("  selt %al");
+                                println!("  neg %al");
+                            },
+                        }
+                        println!("  movzb %al, %rax");
+                    },
+                    _ => println!("gen_code error: not support {:?}", content),
+                }
+            }
+            Assign(var, val) => {
+                let obj = match self.sbl_table.find_obj(&var) {
+                    Some(o) => o,
+                    None => {
+                        self.sbl_table.add_new_obj(&var);
+                        self.sbl_table.find_obj(&var).expect("codegen fatal error, no symbol found in assignment")
+                    },
+                };
+                // gen_addr for an obj
+                gen_addr(obj);
+
+                println!("  push %rax");
+                expr_gen(val);
+                println!("  pop %rdi");
+                println!("  mov %rax, (%rdi)");
+            },
+            Neg(expr) => {
+                expr_gen(&expr);
+                println!("  neg %rax");
+            },
+            Var(s) => {
+                let err_smg = &format!("symbol '{}' not found\n", s);
+                let obj = self.sbl_table.find_obj(&s).expect(err_smg);
+                gen_addr(obj);
+                println!("  move (%rax), %rax\n");
+            },
+            _ => println!("gen_code error: not support {:?}", content),
+        }
+    }
+
+    fn stack_size(&mut self, stmts: &Vec<StmtType>) -> i32 {
+        for stmt in stmts {
+            match stmt {
+                StmtType::Ex(expr) => self.scan_expr(expr),
+            }
+        }
+        let res = self.sbl_table.objs.len();
+        self.sbl_table.objs.clear();
+        res.try_into().unwrap()
+    }
+
+    fn scan_expr(&mut self, expr: &Expr) {
+        match &expr.content {
+            Binary(lhs, rhs, _) => {
+                self.scan_expr(&rhs);
+                self.scan_expr(&lhs);
+            },
+            Assign(var, val) => {
+                match self.sbl_table.find_obj(&var) {
+                    None => self.sbl_table.add_new_obj(&var),
+                    _ => (),
+                }
+            },
+            _ => (),
+        }
+    }
+}
+
 static mut cur_offset: i32 = 1;
 
-// basically a symbol table
-static objs: Vec<Obj> = Vec::new();
-
 pub fn gen_code(stmts: Vec<StmtType>) {
-    println!("assembly result:");
     println!("  .globl main");
     println!("main:");
         for stmt in stmts {
