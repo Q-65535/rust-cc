@@ -1,4 +1,5 @@
 use std::{io::{self, Write}, process::exit};
+use std::collections::HashMap;
 use crate::*;
 
 #[derive(PartialEq, Clone, Debug)]
@@ -15,6 +16,7 @@ pub enum TokenKind {
     Num(i32),
     Semicolon,
     Ident,
+    Keyword(KeywordToken),
     Eof,
 }
 use TokenKind::*;
@@ -29,6 +31,12 @@ pub enum CompareToken {
     GE,
 }
 use CompareToken::*;
+
+#[derive(PartialEq, Clone, Debug)]
+pub enum KeywordToken {
+    Ret,
+}
+use KeywordToken::*;
 
 #[derive(PartialEq, PartialOrd)]
 pub enum Precedence {
@@ -82,14 +90,28 @@ impl Default for Token {
 pub struct Lexer {
     src: Vec<char>,
     index: usize,
+    keywords: HashMap<String, TokenKind>,
 }
 
 impl Lexer {
     pub fn new(s: &str) -> Lexer {
+        let keywords: HashMap<String, TokenKind> = vec![
+            // add more keywords here 
+            ("return".to_string(), Keyword(Ret)),
+        ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),
             index: 0,
+            keywords,
         }
+    }
+
+    fn is_keyword(&self, name: &str) -> bool {
+        self.keywords.contains_key(name)
+    }
+
+    fn get_tok_kind(&self, name: &str) -> TokenKind {
+        self.keywords.get(name).unwrap().clone()
     }
 
     fn cur_char(&self) -> char {
@@ -143,8 +165,13 @@ impl Lexer {
                 ')' => tokens.push(Self::gen_token(RParen, ")", i, 1)),
                 'a'..='z' | '_' => {
                     let name = self.read_ident();
-                    let tok = Self::gen_token(Ident, &name, i, name.len());
-                    tokens.push(Self::gen_token(Ident, &c.to_string(), i, 1));
+                    let tok_kind = if self.is_keyword(&name) {
+                        self.get_tok_kind(&name)
+                    } else {
+                        Ident
+                    };
+                    let tok = Self::gen_token(tok_kind, &name, i, name.len());
+                    tokens.push(tok);
                 },
                 '=' => {
                     match self.peek_char() {

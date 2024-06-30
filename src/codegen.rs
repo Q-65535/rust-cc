@@ -59,17 +59,22 @@ impl Generator {
 
         for stmt in stmts {
             match stmt {
-                StmtType::Ex(expr) => {
-                    self.expr_gen(&expr);
-                }
+                StmtType::Ex(expr) => self.expr_gen(&expr),
+                StmtType::Return(expr) =>self.ret_gen(&expr),
             }
             println!();
         }
 
         // end
+        println!(".L.return:");
         println!("  mov %rbp, %rsp");
         println!("  pop %rbp");
         println!("  ret");
+    }
+
+    fn ret_gen(&mut self, expr: &Expr) {
+        self.expr_gen(expr);
+        println!("  jmp .L.return\n");
     }
 
     fn expr_gen(&mut self, expr: &Expr) {
@@ -143,11 +148,13 @@ impl Generator {
         for stmt in stmts {
             match stmt {
                 StmtType::Ex(expr) => self.scan_expr(expr),
+                StmtType::Return(expr) => self.scan_expr(expr),
             }
         }
-        let res = self.sbl_table.objs.len();
+        let len: i32 = self.sbl_table.objs.len().try_into().unwrap();
+        let size: i32 = len * 8;
         self.sbl_table = SblTable::new();
-        (8*res).try_into().unwrap()
+        align_to(size, 16)
     }
 
     fn scan_expr(&mut self, expr: &Expr) {
@@ -171,4 +178,13 @@ impl Generator {
 
 fn gen_addr(o: &Obj) {
         println!("  lea {}(%rbp), %rax", -o.offset*8);
+}
+
+fn align_to(n: i32, align: i32) -> i32 {
+    let extra = n % align;
+    let base = n - extra;
+    match extra {
+        0 => base,
+        _ => base + align,
+    }
 }

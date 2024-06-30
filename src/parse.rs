@@ -3,10 +3,12 @@ use colored::*;
 use crate::Precedence::{self, *};
 use crate::TokenKind::{self, *};
 use crate::ExprType::*;
+use crate::KeywordToken::*;
 use crate::Token;
 
 pub enum StmtType {
     Ex(Expr),
+    Return(Expr),
 }
 use StmtType::*;
 
@@ -106,10 +108,18 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> Result<StmtType, String> {
-        match self.cur_token() {
-            // @TODO: consider other types of statement
+        let kind = &self.cur_token().kind;
+        match kind {
+            Keyword(Ret) => Ok(self.parse_ret_stmt()?),
             _ => Ok(self.parse_expr_stmt()?),
         }
+    }
+
+    fn parse_ret_stmt(&mut self) -> Result<StmtType, String> {
+        self.next_token();
+        let expr = self.parse_expr(Lowest)?;
+        self.expect_peek(Semicolon)?;
+        Ok(Return(expr))
     }
 
     fn parse_expr_stmt(&mut self) -> Result<StmtType, String> {
