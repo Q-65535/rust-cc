@@ -182,11 +182,11 @@ impl Lexer {
                 '>' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(GE), "<=", i, 2));
+                            tokens.push(Self::gen_token(Compare(GE), ">=", i, 2));
                             self.next_char();
                         },
                         _ => {
-                            tokens.push(Self::gen_token(Compare(GT), "<", i, 1));
+                            tokens.push(Self::gen_token(Compare(GT), ">", i, 1));
                         },
                     }
                 },

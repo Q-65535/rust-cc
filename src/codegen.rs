@@ -40,22 +40,35 @@ impl SblTable {
 
 pub struct Generator {
     sbl_table: SblTable,
-    cur_offset: i32,
 }
 
 impl Generator {
+    pub fn new() -> Self {
+        Self {sbl_table: SblTable::new()}
+    }
+
     pub fn gen_code(&mut self, stmts: &Vec<StmtType>) {
         let stack_size = self.stack_size(stmts);
+        // prologue
         println!("  .globl main");
         println!("main:");
-            for stmt in stmts {
-                match stmt {
-                    StmtType::Ex(expr) => {
-                        self.expr_gen(&expr);
-                    }
+        println!("  push %rbp");
+        println!("  mov %rsp, %rbp");
+        println!("  sub ${}, %rsp", stack_size);
+        println!();
+
+        for stmt in stmts {
+            match stmt {
+                StmtType::Ex(expr) => {
+                    self.expr_gen(&expr);
                 }
-                println!();
             }
+            println!();
+        }
+
+        // end
+        println!("  mov %rbp, %rsp");
+        println!("  pop %rbp");
         println!("  ret");
     }
 
@@ -64,9 +77,9 @@ impl Generator {
         match content {
             Number(n) => println!("  mov ${}, %rax", n),
             Binary(lhs, rhs, kind) => {
-                expr_gen(&rhs);
+                self.expr_gen(&rhs);
                 println!("  push %rax");
-                expr_gen(&lhs);
+                self.expr_gen(&lhs);
                 println!("  pop %rdi");
                 match kind  {
                     Plus => println!("  add %rdi, %rax"),
@@ -81,15 +94,15 @@ impl Generator {
                         match c {
                             Eq => println!("  sete %al"),
                             Neq => println!("  setne %al"),
-                            LT => println!("  selt %al"),
-                            LE => println!("  sele %al"),
+                            LT => println!("  setl %al"),
+                            LE => println!("  setle %al"),
                             GT => {
-                                println!("  sele %al");
-                                println!("  neg %al");
+                                println!("  cmp %rax, %rdi");
+                                println!("  setl %al");
                             },
                             GE => {
-                                println!("  selt %al");
-                                println!("  neg %al");
+                                println!("  cmp %rax, %rdi");
+                                println!("  setle %al");
                             },
                         }
                         println!("  movzb %al, %rax");
@@ -102,26 +115,25 @@ impl Generator {
                     Some(o) => o,
                     None => {
                         self.sbl_table.add_new_obj(&var);
+                        // @Performance: finding the new obj in vec takes long time
                         self.sbl_table.find_obj(&var).expect("codegen fatal error, no symbol found in assignment")
                     },
                 };
-                // gen_addr for an obj
                 gen_addr(obj);
-
                 println!("  push %rax");
-                expr_gen(val);
+                self.expr_gen(val);
                 println!("  pop %rdi");
                 println!("  mov %rax, (%rdi)");
             },
             Neg(expr) => {
-                expr_gen(&expr);
+                self.expr_gen(&expr);
                 println!("  neg %rax");
             },
             Var(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
                 let obj = self.sbl_table.find_obj(&s).expect(err_smg);
                 gen_addr(obj);
-                println!("  move (%rax), %rax\n");
+                println!("  mov (%rax), %rax\n");
             },
             _ => println!("gen_code error: not support {:?}", content),
         }
@@ -134,8 +146,8 @@ impl Generator {
             }
         }
         let res = self.sbl_table.objs.len();
-        self.sbl_table.objs.clear();
-        res.try_into().unwrap()
+        self.sbl_table = SblTable::new();
+        (8*res).try_into().unwrap()
     }
 
     fn scan_expr(&mut self, expr: &Expr) {
@@ -144,7 +156,9 @@ impl Generator {
                 self.scan_expr(&rhs);
                 self.scan_expr(&lhs);
             },
-            Assign(var, val) => {
+            // @Temporary: in the end, only declarations count for the stack size
+            Assign(var, expr) => {
+                self.scan_expr(expr);
                 match self.sbl_table.find_obj(&var) {
                     None => self.sbl_table.add_new_obj(&var),
                     _ => (),
@@ -155,109 +169,6 @@ impl Generator {
     }
 }
 
-static mut cur_offset: i32 = 1;
-
-pub fn gen_code(stmts: Vec<StmtType>) {
-    println!("  .globl main");
-    println!("main:");
-        for stmt in stmts {
-            match stmt {
-                StmtType::Ex(expr) => {
-                    expr_gen(&expr);
-                }
-            }
-            println!();
-        }
-    println!("  ret");
-}
-
-fn expr_gen(expr: &Expr) {
-    let mut sbl_table = SblTable::new();
-    let content = &expr.content;
-    match content {
-        Number(n) => println!("  mov ${}, %rax", n),
-        Binary(lhs, rhs, kind) => {
-            expr_gen(&rhs);
-            println!("  push %rax");
-            expr_gen(&lhs);
-            println!("  pop %rdi");
-            match kind  {
-                Plus => println!("  add %rdi, %rax"),
-                Minus => println!("  sub %rdi, %rax"),
-                Mul => println!("  imul %rdi, %rax"),
-                Div => {
-                    println!("  cqo");
-                    println!("  idiv %rdi");
-                },
-                Compare(c) => {
-                    println!("  cmp %rdi, %rax");
-                    match c {
-                        Eq => println!("  sete %al"),
-                        Neq => println!("  setne %al"),
-                        LT => println!("  selt %al"),
-                        LE => println!("  sele %al"),
-                        GT => {
-                            println!("  sele %al");
-                            println!("  neg %al");
-                        },
-                        GE => {
-                            println!("  selt %al");
-                            println!("  neg %al");
-                        },
-                    }
-                    println!("  movzb %al, %rax");
-                },
-                _ => println!("gen_code error: not support {:?}", content),
-            }
-        }
-        Assign(var, val) => {
-            let obj = match sbl_table.find_obj(&var) {
-                Some(o) => o,
-                None => {
-                    sbl_table.add_new_obj(&var);
-                    sbl_table.find_obj(&var).expect("codegen fatal error, no symbol found in assignment")
-                },
-            };
-            // gen_addr for an obj
-            gen_addr(obj);
-
-            println!("  push %rax");
-            expr_gen(val);
-            println!("  pop %rdi");
-            println!("  mov %rax, (%rdi)");
-        },
-        Neg(expr) => {
-            expr_gen(&expr);
-            println!("  neg %rax");
-        },
-        Var(s) => {
-            let err_smg = &format!("symbol '{}' not found\n", s);
-            let obj = sbl_table.find_obj(&s).expect(err_smg);
-            gen_addr(obj);
-            println!("  move (%rax), %rax\n");
-        },
-        _ => println!("gen_code error: not support {:?}", content),
-    }
-}
-
 fn gen_addr(o: &Obj) {
         println!("  lea {}(%rbp), %rax", -o.offset*8);
-}
-
-fn show_expr(root: &Expr) {
-    match &root.content {
-        Number(n) => print!("{}", n),
-        Binary(lhs, rhs, kind) => {
-            print!("(");
-            show_expr(&lhs);
-            print!("{}", root.token.content);
-            show_expr(&rhs);
-            print!(")");
-        },
-        Neg(expr) => {
-            print!("-");
-            show_expr(&expr);
-        },
-        _ => println!("show_expr error, not support showing {:?}", &root.content),
-    }
 }

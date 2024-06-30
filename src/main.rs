@@ -26,7 +26,7 @@ fn main() {
         return;
     }
 
-    println!("compiling source code: '{}'", input);
+    // println!("compiling source code: '{}'", input);
     // lex
     let mut lexer = Lexer::new(input);
     let mut tokens: Vec<Token> = Vec::new();
@@ -36,8 +36,9 @@ fn main() {
     let mut parser = Parser::new(&src, tokens, 0);
     let res = parser.parse();
     // codegen
+    let mut gen = Generator::new();
     match res {
-        Ok(program) => gen_code(program),
+        Ok(program) => gen.gen_code(&program),
         Err(err_msg) => println!("{}", err_msg),
     }
 }
