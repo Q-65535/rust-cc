@@ -47,6 +47,18 @@ impl Generator {
         Self {sbl_table: SblTable::new()}
     }
 
+    fn block_gen(&mut self, stmts: &Vec<StmtType>) {
+        for stmt in stmts {
+            match stmt {
+                StmtType::Ex(expr) => self.expr_gen(&expr),
+                StmtType::Return(expr) =>self.ret_gen(&expr),
+                StmtType::Block(stmts) =>self.block_gen(stmts),
+                _ => println!("currently not support {:?}", stmt),
+            }
+            println!();
+        }
+    }
+    
     pub fn gen_code(&mut self, stmts: &Vec<StmtType>) {
         let stack_size = self.stack_size(stmts);
         // prologue
@@ -57,13 +69,7 @@ impl Generator {
         println!("  sub ${}, %rsp", stack_size);
         println!();
 
-        for stmt in stmts {
-            match stmt {
-                StmtType::Ex(expr) => self.expr_gen(&expr),
-                StmtType::Return(expr) =>self.ret_gen(&expr),
-            }
-            println!();
-        }
+        self.block_gen(stmts);
 
         // end
         println!(".L.return:");
@@ -120,7 +126,7 @@ impl Generator {
                     Some(o) => o,
                     None => {
                         self.sbl_table.add_new_obj(&var);
-                        // @Performance: finding the new obj in vec takes long time
+                        // @Performance: finding an obj in vec might take long time
                         self.sbl_table.find_obj(&var).expect("codegen fatal error, no symbol found in assignment")
                     },
                 };
@@ -145,16 +151,22 @@ impl Generator {
     }
 
     fn stack_size(&mut self, stmts: &Vec<StmtType>) -> i32 {
-        for stmt in stmts {
-            match stmt {
-                StmtType::Ex(expr) => self.scan_expr(expr),
-                StmtType::Return(expr) => self.scan_expr(expr),
-            }
-        }
+        self.scan_block(stmts);
         let len: i32 = self.sbl_table.objs.len().try_into().unwrap();
         let size: i32 = len * 8;
         self.sbl_table = SblTable::new();
         align_to(size, 16)
+    }
+
+    fn scan_block(&mut self, stmts: &Vec<StmtType>) {
+        for stmt in stmts {
+            match stmt {
+                StmtType::Ex(expr) => self.scan_expr(expr),
+                StmtType::Return(expr) => self.scan_expr(expr),
+                StmtType::Block(stmts) => self.scan_block(stmts),
+                _ => (),
+            }
+        }
     }
 
     fn scan_expr(&mut self, expr: &Expr) {

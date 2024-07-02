@@ -10,6 +10,8 @@ pub enum TokenKind {
     Div,
     LParen,
     RParen,
+    LBrace,
+    RBrace,
     Assignment,
     Compare(CompareToken),
     Not,
@@ -163,6 +165,8 @@ impl Lexer {
                 '/' => tokens.push(Self::gen_token(Div, "/", i, 1)),
                 '(' => tokens.push(Self::gen_token(LParen, "(", i, 1)),
                 ')' => tokens.push(Self::gen_token(RParen, ")", i, 1)),
+                '{' => tokens.push(Self::gen_token(LBrace, "{", i, 1)),
+                '}' => tokens.push(Self::gen_token(RBrace, "}", i, 1)),
                 'a'..='z' | '_' => {
                     let name = self.read_ident();
                     let tok_kind = if self.is_keyword(&name) {
@@ -179,9 +183,7 @@ impl Lexer {
                             tokens.push(Self::gen_token(Compare(Eq), "==", i, 2));
                             self.next_char();
                         },
-                        _ => {
-                            tokens.push(Self::gen_token(Assignment, "=", i, 1));
-                        },
+                        _ => tokens.push(Self::gen_token(Assignment, "=", i, 1)),
                     }
                 },
                 '!' => {
@@ -190,9 +192,7 @@ impl Lexer {
                             tokens.push(Self::gen_token(Compare(Neq), "!=", i, 2));
                             self.next_char();
                         },
-                        _ => {
-                            tokens.push(Self::gen_token(Not, "!", i, 1));
-                        },
+                        _ => tokens.push(Self::gen_token(Not, "!", i, 1)),
                     }
                 },
                 '<' => {
@@ -201,9 +201,7 @@ impl Lexer {
                             tokens.push(Self::gen_token(Compare(LE), "<=", i, 2));
                             self.next_char();
                         },
-                        _ => {
-                            tokens.push(Self::gen_token(Compare(LT), "<", i, 1));
-                        },
+                        _ => tokens.push(Self::gen_token(Compare(LT), "<", i, 1)),
                     }
                 },
                 '>' => {
@@ -212,9 +210,7 @@ impl Lexer {
                             tokens.push(Self::gen_token(Compare(GE), ">=", i, 2));
                             self.next_char();
                         },
-                        _ => {
-                            tokens.push(Self::gen_token(Compare(GT), ">", i, 1));
-                        },
+                        _ => tokens.push(Self::gen_token(Compare(GT), ">", i, 1)),
                     }
                 },
                 '0'..='9' => {

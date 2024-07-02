@@ -6,9 +6,11 @@ use crate::ExprType::*;
 use crate::KeywordToken::*;
 use crate::Token;
 
+#[derive(Debug)]
 pub enum StmtType {
     Ex(Expr),
     Return(Expr),
+    Block(Vec<StmtType>),
 }
 use StmtType::*;
 
@@ -111,8 +113,26 @@ impl Parser {
         let kind = &self.cur_token().kind;
         match kind {
             Keyword(Ret) => Ok(self.parse_ret_stmt()?),
+            LBrace => Ok(self.parse_block()?),
             _ => Ok(self.parse_expr_stmt()?),
         }
+    }
+
+    fn parse_block(&mut self) -> Result<StmtType, String> {
+        let mut stmts: Vec<StmtType> = Vec::new();
+        // skip '{'
+        self.next_token();
+        let mut cur_kind: TokenKind = self.cur_token().kind.clone();
+        while cur_kind != RBrace {
+            let stmt = self.parse_stmt()?;
+            stmts.push(stmt);
+            self.next_token();
+            if matches!(cur_kind, Eof) {
+                return Err("parsing block statement error: reach the end of file.".to_string())
+            }
+            cur_kind = self.cur_token().kind.clone();
+        }
+        Ok(Block(stmts))
     }
 
     fn parse_ret_stmt(&mut self) -> Result<StmtType, String> {
