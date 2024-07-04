@@ -40,23 +40,12 @@ impl SblTable {
 
 pub struct Generator {
     sbl_table: SblTable,
+    lable_count: i32,
 }
 
 impl Generator {
     pub fn new() -> Self {
-        Self {sbl_table: SblTable::new()}
-    }
-
-    fn block_gen(&mut self, stmts: &Vec<StmtType>) {
-        for stmt in stmts {
-            match stmt {
-                StmtType::Ex(expr) => self.expr_gen(&expr),
-                StmtType::Return(expr) =>self.ret_gen(&expr),
-                StmtType::Block(stmts) =>self.block_gen(stmts),
-                _ => println!("currently not support {:?}", stmt),
-            }
-            println!();
-        }
+        Self {sbl_table: SblTable::new(), lable_count: 0,}
     }
     
     pub fn gen_code(&mut self, stmts: &Vec<StmtType>) {
@@ -78,9 +67,40 @@ impl Generator {
         println!("  ret");
     }
 
+    fn block_gen(&mut self, stmts: &Vec<StmtType>) {
+        for stmt in stmts {
+            self.stmt_gen(stmt);
+        }
+        println!();
+    }
+
+    fn stmt_gen(&mut self, stmt: &StmtType) {
+        match stmt {
+            StmtType::Ex(expr) => self.expr_gen(&expr),
+            StmtType::Return(expr) =>self.ret_gen(&expr),
+            StmtType::Block(stmts) =>self.block_gen(stmts),
+            StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
+            _ => println!("currently not support {:?}", stmt),
+        }
+    }
+
     fn ret_gen(&mut self, expr: &Expr) {
         self.expr_gen(expr);
         println!("  jmp .L.return\n");
+    }
+
+    fn if_gen(&mut self, cond: &Expr, then: &StmtType, otherwise: &Option<Box<StmtType>>) {
+        let c = self.count();
+        self.expr_gen(&cond);
+        println!("  cmp $0, %rax");
+        println!("  je  .L.else.{}", c);
+        self.stmt_gen(&then);
+        println!("  jmp .L.end.{}", c);
+        println!(".L.else.{}:", c);
+        if let Some(els) = otherwise {
+            self.stmt_gen(&els);
+        }
+        println!(".L.end.{}:", c);
     }
 
     fn expr_gen(&mut self, expr: &Expr) {
@@ -88,9 +108,9 @@ impl Generator {
         match content {
             Number(n) => println!("  mov ${}, %rax", n),
             Binary(lhs, rhs, kind) => {
-                self.expr_gen(&rhs);
+                self.expr_gen(rhs);
                 println!("  push %rax");
-                self.expr_gen(&lhs);
+                self.expr_gen(lhs);
                 println!("  pop %rdi");
                 match kind  {
                     Plus => println!("  add %rdi, %rax"),
@@ -185,6 +205,11 @@ impl Generator {
             },
             _ => (),
         }
+    }
+
+    fn count(&mut self) -> i32 {
+        self.lable_count += 1;
+        self.lable_count
     }
 }
 

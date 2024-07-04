@@ -37,6 +37,8 @@ use CompareToken::*;
 #[derive(PartialEq, Clone, Debug)]
 pub enum KeywordToken {
     Ret,
+    If,
+    Else,
 }
 use KeywordToken::*;
 
@@ -100,6 +102,8 @@ impl Lexer {
         let keywords: HashMap<String, TokenKind> = vec![
             // add more keywords here 
             ("return".to_string(), Keyword(Ret)),
+            ("if".to_string(), Keyword(If)),
+            ("else".to_string(), Keyword(Else)),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

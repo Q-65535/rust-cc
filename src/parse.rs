@@ -11,6 +11,7 @@ pub enum StmtType {
     Ex(Expr),
     Return(Expr),
     Block(Vec<StmtType>),
+    If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
 }
 use StmtType::*;
 
@@ -113,9 +114,36 @@ impl Parser {
         let kind = &self.cur_token().kind;
         match kind {
             Keyword(Ret) => Ok(self.parse_ret_stmt()?),
+            Keyword(If) => Ok(self.parse_if_stmt()?),
+            Semicolon => {
+                let empty: Vec<StmtType> = Vec::new();
+                Ok(Block(empty))
+            },
             LBrace => Ok(self.parse_block()?),
             _ => Ok(self.parse_expr_stmt()?),
         }
+    }
+
+    fn parse_if_stmt(&mut self) -> Result<StmtType, String> {
+        self.expect_peek(LParen)?;
+        self.next_token();
+        // parse condition
+        let cond = self.parse_expr(Lowest)?;
+        self.expect_peek(RParen)?;
+        self.next_token();
+        // parse then
+        let then = Box::new(self.parse_stmt()?);
+        self.next_token();
+        // parse otherwise
+        let otherwise = match self.peek_token().kind {
+            Keyword(Else) => {
+                self.next_token();
+                self.next_token();
+                Some(Box::new(self.parse_stmt()?))
+            }
+            _ => None
+        };
+        Ok(StmtType::If{cond, then, otherwise})
     }
 
     fn parse_block(&mut self) -> Result<StmtType, String> {
