@@ -57,7 +57,6 @@ impl Parser {
     }
 
     fn next_token(&mut self) {
-        //@TODO check validity
         self.cur_index += 1;
     }
 
@@ -65,9 +64,9 @@ impl Parser {
         &self.tokens[self.cur_index+1]
     }
 
-    fn expect_peek(&mut self, expect: TokenKind) -> Result<&Token, String> {
+    fn expect_peek(&mut self, expect: &TokenKind) -> Result<&Token, String> {
         let peek = self.peek_token();
-        if  peek.kind == expect {
+        if  &peek.kind == expect {
             self.next_token();
             return Ok(self.cur_token());
         } else {
@@ -76,22 +75,31 @@ impl Parser {
         }
     }
 
-    fn skip_peek(&mut self, target: &str) {
-        let actual = self.peek_token().content.as_str();
-        if  actual == target {
-            self.cur_index += 1;
-        } else {
-            let err_msg = self.error_token(self.peek_token(), format!("want '{}', but got '{}'", target, actual).as_str());
-            println!("{}", err_msg);
+    fn check_jumpto_peek(&mut self, target: &TokenKind) {
+        match self.expect_peek(target) {
+            Err(err_msg) => {
+                println!("{}", err_msg);
+                // @Improve: instead of directly exiting here, we can collect all error messages and report them all later.
+                exit(0);
+            },
+            Ok(_) => (),
         }
     }
 
-    fn skip(&mut self, target: &str) {
-        let actual = self.cur_token().content.as_str();
+    fn check_skip_peek(&mut self, target: &TokenKind) {
+        self.check_jumpto_peek(target);
+        self.next_token();
+    }
+
+    fn check_skip_current(&mut self, target: &TokenKind) {
+        let actual = &self.cur_token().kind;
         if actual == target {
             self.cur_index += 1;
         } else {
-            self.error_token(self.cur_token(), format!("want '{}', but got '{}'", target, actual).as_str());
+            let err_msg = self.error_token(self.cur_token(), format!("want '{:?}', but got '{:?}'", target, actual).as_str());
+            println!("{}", err_msg);
+            // @Improve: instead of directly exiting here, we can collect all error messages and report them all later.
+            exit(0);
         }
     }
 
@@ -125,19 +133,16 @@ impl Parser {
     }
 
     fn parse_if_stmt(&mut self) -> Result<StmtType, String> {
-        self.expect_peek(LParen)?;
-        self.next_token();
+        self.check_skip_peek(&LParen);
         // parse condition
         let cond = self.parse_expr(Lowest)?;
-        self.expect_peek(RParen)?;
-        self.next_token();
+        self.check_skip_peek(&RParen);
         // parse then
         let then = Box::new(self.parse_stmt()?);
         self.next_token();
         // parse otherwise
-        let otherwise = match self.peek_token().kind {
+        let otherwise = match self.cur_token().kind {
             Keyword(Else) => {
-                self.next_token();
                 self.next_token();
                 Some(Box::new(self.parse_stmt()?))
             }
@@ -166,13 +171,13 @@ impl Parser {
     fn parse_ret_stmt(&mut self) -> Result<StmtType, String> {
         self.next_token();
         let expr = self.parse_expr(Lowest)?;
-        self.expect_peek(Semicolon)?;
+        self.expect_peek(&Semicolon)?;
         Ok(Return(expr))
     }
 
     fn parse_expr_stmt(&mut self) -> Result<StmtType, String> {
         let expr = self.parse_expr(Lowest)?;
-        self.expect_peek(Semicolon)?;
+        self.expect_peek(&Semicolon)?;
         Ok(Ex(expr))
     }
 
@@ -214,9 +219,9 @@ impl Parser {
     }
 
     fn parse_paren(&mut self) -> Result<Expr, String> {
-        self.skip("(");
+        self.check_skip_current(&LParen);
         let res = self.parse_expr(Precedence::Lowest);
-        self.skip_peek(")");
+        self.check_jumpto_peek(&RParen);
         res
     }
 
