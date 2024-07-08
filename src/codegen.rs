@@ -1,4 +1,5 @@
 use std::{io::{self, Write}, process::exit};
+use colored::*;
 use crate::ExprType::{self, *};
 use crate::StmtType::{self, *};
 use crate::TokenKind::{self, *};
@@ -39,13 +40,14 @@ impl SblTable {
 }
 
 pub struct Generator {
+    src: String,
     sbl_table: SblTable,
     lable_count: i32,
 }
 
 impl Generator {
-    pub fn new() -> Self {
-        Self {sbl_table: SblTable::new(), lable_count: 0,}
+    pub fn new(src: &String) -> Self {
+        Self {src: src.clone(), sbl_table: SblTable::new(), lable_count: 0,}
     }
     
     pub fn gen_code(&mut self, stmts: &Vec<StmtType>) {
@@ -142,19 +144,24 @@ impl Generator {
                 }
             }
             Assign(var, val) => {
-                let obj = match self.sbl_table.find_obj(&var) {
-                    Some(o) => o,
-                    None => {
-                        self.sbl_table.add_new_obj(&var);
-                        // @Performance: finding an obj in vec might take long time
-                        self.sbl_table.find_obj(&var).expect("codegen fatal error, no symbol found in assignment")
-                    },
-                };
-                gen_addr(obj);
-                println!("  push %rax");
-                self.expr_gen(val);
-                println!("  pop %rdi");
-                println!("  mov %rax, (%rdi)");
+                if let Var(name) = &var.content {
+                    let obj = match self.sbl_table.find_obj(&name) {
+                        Some(o) => o,
+                        None => {
+                            self.sbl_table.add_new_obj(&name);
+                            // @Performance: finding an obj in vec might take long time
+                            self.sbl_table.find_obj(&name).expect("codegen fatal error, no symbol found in assignment")
+                        },
+                    };
+                    gen_addr(obj);
+                    println!("  push %rax");
+                    self.expr_gen(val);
+                    println!("  pop %rdi");
+                    println!("  mov %rax, (%rdi)");
+                } else {
+                    println!("lval is not an identifier");
+                    exit(0);
+                }
             },
             Neg(expr) => {
                 self.expr_gen(&expr);
@@ -198,9 +205,10 @@ impl Generator {
             // @Temporary: in the end, only declarations count for the stack size
             Assign(var, expr) => {
                 self.scan_expr(expr);
-                match self.sbl_table.find_obj(&var) {
-                    None => self.sbl_table.add_new_obj(&var),
-                    _ => (),
+                if let Var(name) = &var.content {
+                    if let None = self.sbl_table.find_obj(&name) {
+                        self.sbl_table.add_new_obj(&name);
+                    }
                 }
             },
             _ => (),
@@ -210,6 +218,15 @@ impl Generator {
     fn count(&mut self) -> i32 {
         self.lable_count += 1;
         self.lable_count
+    }
+
+    fn error_expr(&self, expr: &Expr, info: &str) -> String {
+        let mut err_msg = String::from("");
+        err_msg.push_str(&format!("{}\n", self.src));
+        let spaces = " ".repeat(expr.start);
+        let arrows = "^".repeat(expr.end - expr.start);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+        err_msg
     }
 }
 

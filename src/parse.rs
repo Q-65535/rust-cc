@@ -19,11 +19,31 @@ use StmtType::*;
 pub struct Expr {
     pub content: ExprType,
     pub token: Token,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl Expr {
     fn new(content: ExprType, token: Token) -> Self {
-        Expr{content, token}
+        let mut expr = Expr{content, token, start: 0, end: 0};
+        (expr.start, expr.end) = (expr.cal_start_index(), expr.cal_end_index());
+        expr
+    }
+
+    fn cal_start_index(&self) -> usize {
+        match &self.content {
+            Number(_) | Neg(_) | Var(_) => self.token.start,
+            Binary(lhs, _, _) => lhs.cal_start_index(),
+            ExprType::Assign(lhs, _) => lhs.cal_start_index(),
+        }
+    }
+
+    fn cal_end_index(&self) -> usize {
+        match &self.content {
+            Number(_) | Neg(_) | Var(_) => self.token.end,
+            Binary(_, rhs, _) => rhs.cal_end_index(),
+            ExprType::Assign(_, rhs) => rhs.cal_end_index(),
+        }
     }
 }
 
@@ -31,7 +51,7 @@ impl Expr {
 pub enum ExprType {
     Number(i32),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
-    Assign(String, Box<Expr>),
+    Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
     Var(String),
 }
@@ -213,6 +233,8 @@ impl Parser {
                         },
                     }
                 }
+                // set location info for the expr
+                // expr.set_loc();
                 Ok(expr)
             }
         }
@@ -241,7 +263,7 @@ impl Parser {
                 let expr = Expr::new(Neg(operand), cur_token);
                 return Ok(expr);
             },
-            Ident => return self.parse_ident(),
+            Ident(_) => return self.parse_ident(),
             _ => {
                 let err_msg = self.error_token(&cur_token, "can't parse prefix expression here");
                 return Err(err_msg);
@@ -251,8 +273,12 @@ impl Parser {
     
     fn parse_ident(&self) -> Result<Expr, String> {
         let tok = self.cur_token();
-        let expr = Expr::new(Var(tok.content.clone()), tok.clone());
-        Ok(expr)
+        if let Ident(name) = &tok.kind {
+            let expr = Expr::new(Var(name.clone()), tok.clone());
+            Ok(expr)
+        } else {
+            Err(self.error_token(self.cur_token(), "expect an identifier"))
+        }
     }
 
     fn parse_integer(&self) -> Result<Expr, String> {
@@ -276,22 +302,22 @@ impl Parser {
 
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
         let tok = self.cur_token().clone();
-        if let Var(s) = lhs.content {
+        if let Var(_) = lhs.content {
             self.next_token();
             let val = self.parse_expr(Lowest)?;
-            let content = ExprType::Assign(s, Box::new(val));
-            return Ok(Expr::new(content, tok));
+            let content = ExprType::Assign(Box::new(lhs), Box::new(val));
+            Ok(Expr::new(content, tok))
         } else {
-            return Err(self.error_token(&lhs.token, "not a variable name"));
+            Err(self.error_token(&lhs.token, "not a variable name"))
         }
     }
 
     fn error_token(&self, tok: &Token, info: &str) -> String {
         let mut err_msg = String::from("");
         err_msg.push_str(&format!("{}\n", self.src));
-        let spaces = " ".repeat(tok.index);
-        let arrows = "^".repeat(tok.len);
-        err_msg.push_str(&format!("{}{} {}", spaces, arrows, info.red()));
+        let spaces = " ".repeat(tok.start);
+        let arrows = "^".repeat(tok.end - tok.start);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }
 }

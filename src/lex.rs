@@ -17,7 +17,7 @@ pub enum TokenKind {
     Not,
     Num(i32),
     Semicolon,
-    Ident,
+    Ident(String),
     Keyword(KeywordToken),
     Eof,
 }
@@ -55,9 +55,8 @@ pub enum Precedence {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub content: String,
-    pub index: usize,
-    pub len: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl Token {
@@ -84,9 +83,8 @@ impl Default for Token {
     fn default() -> Token {
         Token{
             kind: Eof,
-            content: "".to_string(),
-            index: 0,
-            len: 0,
+            start: 0,
+            end: 0,
         }
     }
 }
@@ -146,12 +144,11 @@ impl Lexer {
         }
     }
 
-    fn gen_token(kind: TokenKind, content: &str, index: usize, len: usize) -> Token {
+    fn gen_token(kind: TokenKind, content: &str, start: usize, size: usize) -> Token {
         Token {
             kind,
-            content: content.to_string(),
-            index,
-            len,
+            start,
+            end: start+size,
         }
     }
 
@@ -176,7 +173,7 @@ impl Lexer {
                     let tok_kind = if self.is_keyword(&name) {
                         self.get_tok_kind(&name)
                     } else {
-                        Ident
+                        Ident(name.clone())
                     };
                     let tok = Self::gen_token(tok_kind, &name, i, name.len());
                     tokens.push(tok);

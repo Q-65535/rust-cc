@@ -35,7 +35,7 @@ fn main() {
     let mut parser = Parser::new(&src, tokens, 0);
     let res = parser.parse();
     // codegen
-    let mut gen = Generator::new();
+    let mut gen = Generator::new(&src);
     match res {
         Ok(program) => gen.gen_code(&program),
         Err(err_msg) => println!("{}", err_msg),
