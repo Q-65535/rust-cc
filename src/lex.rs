@@ -40,6 +40,7 @@ pub enum KeywordToken {
     If,
     Else,
     For,
+    While,
 }
 use KeywordToken::*;
 
@@ -104,6 +105,7 @@ impl Lexer {
             ("if".to_string(), Keyword(If)),
             ("else".to_string(), Keyword(Else)),
             ("for".to_string(), Keyword(For)),
+            ("while".to_string(), Keyword(While)),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

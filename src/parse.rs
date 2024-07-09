@@ -145,6 +145,7 @@ impl Parser {
             Keyword(Ret) => Ok(self.parse_ret_stmt()?),
             Keyword(If) => Ok(self.parse_if_stmt()?),
             Keyword(For) => Ok(self.parse_for_stmt()?),
+            Keyword(While) => Ok(self.parse_while_stmt()?),
             Semicolon => {
                 let empty: Vec<StmtType> = Vec::new();
                 Ok(Block(empty))
@@ -198,7 +199,6 @@ impl Parser {
     }
 
     fn parse_for_stmt(&mut self) -> Result<StmtType, String> {
-        // self.next_token();
         self.check_skip_peek(&LParen);
         let init: Option<Expr>;
         let cond: Option<Expr>;
@@ -244,6 +244,25 @@ impl Parser {
         let then = self.parse_stmt()?;
         let then = Box::new(then);
         Ok(StmtType::For{init, cond, inc, then})
+    }
+
+    fn parse_while_stmt(&mut self) -> Result<StmtType, String> {
+        self.check_skip_peek(&LParen);
+        let cond: Option<Expr>;
+        cond = match self.cur_token().kind {
+            RParen => {
+                self.check_skip_current(&RParen);
+                None
+            },
+            _ => {
+                let expr = self.parse_expr(Lowest)?;
+                self.check_skip_peek(&RParen);
+                Some(expr)
+            },
+        };
+        let then = self.parse_stmt()?;
+        let then = Box::new(then);
+        Ok(StmtType::For{init: None, cond, inc: None, then})
     }
 
     fn parse_expr_stmt(&mut self) -> Result<StmtType, String> {
