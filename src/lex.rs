@@ -39,6 +39,7 @@ pub enum KeywordToken {
     Ret,
     If,
     Else,
+    For,
 }
 use KeywordToken::*;
 
@@ -102,6 +103,7 @@ impl Lexer {
             ("return".to_string(), Keyword(Ret)),
             ("if".to_string(), Keyword(If)),
             ("else".to_string(), Keyword(Else)),
+            ("for".to_string(), Keyword(For)),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

@@ -82,6 +82,7 @@ impl Generator {
             StmtType::Return(expr) =>self.ret_gen(&expr),
             StmtType::Block(stmts) =>self.block_gen(stmts),
             StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
+            StmtType::For{init, cond, inc, then} => self.for_gen(init, cond, inc, then),
             _ => println!("currently not support {:?}", stmt),
         }
     }
@@ -102,6 +103,25 @@ impl Generator {
         if let Some(els) = otherwise {
             self.stmt_gen(&els);
         }
+        println!(".L.end.{}:", c);
+    }
+
+    fn for_gen(&mut self, init: &Option<Expr>, cond: &Option<Expr>, inc: &Option<Expr>, then: &Box<StmtType>) {
+        let c = self.count();
+        if let Some(expr) = init {
+            self.expr_gen(expr);
+        }
+        println!(".L.begin.{}:", c);
+        if let Some(expr) = cond {
+            self.expr_gen(expr);
+            println!("  cmp $0, %rax");
+            println!("  je  .L.end.{}", c);
+        }
+        self.stmt_gen(&then);
+        if let Some(expr) = inc {
+            self.expr_gen(expr);
+        }
+        println!("  jmp .L.begin.{}", c);
         println!(".L.end.{}:", c);
     }
 

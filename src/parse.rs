@@ -12,6 +12,7 @@ pub enum StmtType {
     Return(Expr),
     Block(Vec<StmtType>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
+    For {init: Option<Expr>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>},
 }
 use StmtType::*;
 
@@ -143,6 +144,7 @@ impl Parser {
         match kind {
             Keyword(Ret) => Ok(self.parse_ret_stmt()?),
             Keyword(If) => Ok(self.parse_if_stmt()?),
+            Keyword(For) => Ok(self.parse_for_stmt()?),
             Semicolon => {
                 let empty: Vec<StmtType> = Vec::new();
                 Ok(Block(empty))
@@ -193,6 +195,55 @@ impl Parser {
         let expr = self.parse_expr(Lowest)?;
         self.expect_peek(&Semicolon)?;
         Ok(Return(expr))
+    }
+
+    fn parse_for_stmt(&mut self) -> Result<StmtType, String> {
+        // self.next_token();
+        self.check_skip_peek(&LParen);
+        let init: Option<Expr>;
+        let cond: Option<Expr>;
+        let inc: Option<Expr>;
+        // @Duplication
+        // @Duplication
+        // @Duplication
+        // @Duplication
+        init  = match self.cur_token().kind {
+            Semicolon => {
+                self.check_skip_current(&Semicolon);
+                None
+            },
+            _ => {
+                let expr = self.parse_expr(Lowest)?;
+                self.check_skip_peek(&Semicolon);
+                Some(expr)
+            },
+        };
+        cond = match self.cur_token().kind {
+            Semicolon => {
+                self.check_skip_current(&Semicolon);
+                None
+            },
+            _ => {
+                let expr = self.parse_expr(Lowest)?;
+                self.check_skip_peek(&Semicolon);
+                Some(expr)
+            },
+        };
+        inc = match self.cur_token().kind {
+            RParen => {
+                self.check_skip_current(&RParen);
+                None
+            },
+            _ => {
+                let expr = self.parse_expr(Lowest)?;
+                self.check_skip_peek(&RParen);
+                Some(expr)
+            },
+        };
+
+        let then = self.parse_stmt()?;
+        let then = Box::new(then);
+        Ok(StmtType::For{init, cond, inc, then})
     }
 
     fn parse_expr_stmt(&mut self) -> Result<StmtType, String> {
