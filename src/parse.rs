@@ -33,7 +33,7 @@ impl Expr {
 
     fn cal_start_index(&self) -> usize {
         match &self.content {
-            Number(_) | Neg(_) | Var(_) => self.token.start,
+            Number(_) | Neg(_) | Var(_) | Deref(_) | AddrOf(_) => self.token.start,
             Binary(lhs, _, _) => lhs.cal_start_index(),
             ExprType::Assign(lhs, _) => lhs.cal_start_index(),
         }
@@ -41,7 +41,8 @@ impl Expr {
 
     fn cal_end_index(&self) -> usize {
         match &self.content {
-            Number(_) | Neg(_) | Var(_) => self.token.end,
+            Neg(e) | Deref(e) | AddrOf(e) => e.cal_end_index(),
+            Number(_) | Var(_) => self.token.end,
             Binary(_, rhs, _) => rhs.cal_end_index(),
             ExprType::Assign(_, rhs) => rhs.cal_end_index(),
         }
@@ -54,6 +55,8 @@ pub enum ExprType {
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
+    Deref(Box<Expr>),
+    AddrOf(Box<Expr>),
     Var(String),
 }
 
@@ -303,8 +306,6 @@ impl Parser {
                         },
                     }
                 }
-                // set location info for the expr
-                // expr.set_loc();
                 Ok(expr)
             }
         }
@@ -320,23 +321,37 @@ impl Parser {
     fn parse_prefix(&mut self) -> Result<Expr, String> {
         let cur_token = self.cur_token().clone();
         match cur_token.kind {
-            LParen => return self.parse_paren(),
-            Num(_) => return self.parse_integer(),
+            LParen => self.parse_paren(),
+            Num(_) => self.parse_integer(),
             Plus => {
                 self.next_token();
-                return self.parse_prefix();
+                self.parse_prefix()
             },
             Minus => {
                 self.next_token();
                 let prefix = self.parse_prefix()?;
                 let operand = Box::new(prefix);
                 let expr = Expr::new(Neg(operand), cur_token);
-                return Ok(expr);
+                Ok(expr)
             },
-            Ident(_) => return self.parse_ident(),
+            Mul => {
+                self.next_token();
+                let prefix = self.parse_prefix()?;
+                let operand = Box::new(prefix);
+                let expr = Expr::new(Deref(operand), cur_token);
+                Ok(expr)
+            },
+            Ampersand => {
+                self.next_token();
+                let prefix = self.parse_prefix()?;
+                let operand = Box::new(prefix);
+                let expr = Expr::new(AddrOf(operand), cur_token);
+                Ok(expr)
+            },
+            Ident(_) => self.parse_ident(),
             _ => {
                 let err_msg = self.error_token(&cur_token, "can't parse prefix expression here");
-                return Err(err_msg);
+                Err(err_msg)
             }
         }
     }
@@ -372,13 +387,14 @@ impl Parser {
 
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
         let tok = self.cur_token().clone();
-        if let Var(_) = lhs.content {
-            self.next_token();
-            let val = self.parse_expr(Lowest)?;
-            let content = ExprType::Assign(Box::new(lhs), Box::new(val));
-            Ok(Expr::new(content, tok))
-        } else {
-            Err(self.error_token(&lhs.token, "not a variable name"))
+        match lhs.content {
+            Var(_) | Deref(_) => {
+                self.next_token();
+                let val = self.parse_expr(Lowest)?;
+                let content = ExprType::Assign(Box::new(lhs), Box::new(val));
+                Ok(Expr::new(content, tok))
+            },
+            _ => Err(self.error_token(&lhs.token, "not a variable name")),
         }
     }
 

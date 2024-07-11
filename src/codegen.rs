@@ -1,4 +1,4 @@
-use std::{io::{self, Write}, process::exit};
+use std::{io::{self, Write}, collections::VecDeque, process::exit};
 use colored::*;
 use crate::ExprType::{self, *};
 use crate::StmtType::{self, *};
@@ -14,13 +14,14 @@ struct Obj {
 }
 
 struct SblTable {
-    objs: Vec<Obj>,
+    objs: VecDeque<Obj>,
     cur_offset: i32,
+    end_offset_addr: i32,
 }
 
 impl SblTable {
     fn new() -> Self {
-        SblTable {objs: Vec::new(), cur_offset: 1}
+        SblTable {objs: VecDeque::new(), cur_offset: 0, end_offset_addr: 0}
     }
 
     fn find_obj(&self, s: &str) -> Option<&Obj> {
@@ -34,7 +35,7 @@ impl SblTable {
 
     fn add_new_obj(&mut self, name: &str) {
         let o = Obj{name: name.to_string(), offset: self.cur_offset};
-        self.objs.push(o);
+        self.objs.push_front(o);
         self.cur_offset += 1;
     }
 }
@@ -51,7 +52,8 @@ impl Generator {
     }
     
     pub fn gen_code(&mut self, stmts: &Vec<StmtType>) {
-        let stack_size = self.stack_size(stmts);
+        let (stack_size, end_offset_addr) = self.stack_size(stmts);
+        self.sbl_table.end_offset_addr = end_offset_addr;
         // prologue
         println!("  .globl main");
         println!("main:");
@@ -163,46 +165,64 @@ impl Generator {
                     _ => println!("gen_code error: not support {:?}", content),
                 }
             }
+            // @Cleanup
+            // @Cleanup
+            // @Cleanup
             Assign(var, val) => {
-                if let Var(name) = &var.content {
-                    let obj = match self.sbl_table.find_obj(&name) {
-                        Some(o) => o,
-                        None => {
-                            self.sbl_table.add_new_obj(&name);
-                            // @Performance: finding an obj in vec might take long time
-                            self.sbl_table.find_obj(&name).expect("codegen fatal error, no symbol found in assignment")
-                        },
-                    };
-                    gen_addr(obj);
-                    println!("  push %rax");
-                    self.expr_gen(val);
-                    println!("  pop %rdi");
-                    println!("  mov %rax, (%rdi)");
-                } else {
-                    println!("lval is not an identifier");
-                    exit(0);
+                match &var.content {
+                    Var(name) => {
+                        let obj = match self.sbl_table.find_obj(&name) {
+                            Some(o) => o,
+                            None => {
+                                self.sbl_table.add_new_obj(&name);
+                                // @Performance: finding an obj in vec might take long time
+                                self.sbl_table.find_obj(&name).expect("codegen fatal error, no symbol found in assignment")
+                            },
+                        };
+                        self.gen_addr(var);
+                        println!("  push %rax");
+                        self.expr_gen(val);
+                        println!("  pop %rdi");
+                        println!("  mov %rax, (%rdi)");
+                    },
+                    Deref(_) => {
+                        self.gen_addr(var);
+                        println!("  push %rax");
+                        self.expr_gen(val);
+                        println!("  pop %rdi");
+                        println!("  mov %rax, (%rdi)");
+                    },
+                    _ => println!("not support"),
                 }
             },
             Neg(expr) => {
                 self.expr_gen(&expr);
                 println!("  neg %rax");
             },
+            Deref(expr) => {
+                self.expr_gen(&expr);
+                println!("  mov (%rax), %rax");
+            },
+            AddrOf(expr) => {
+                self.gen_addr(expr);
+            },
             Var(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
                 let obj = self.sbl_table.find_obj(&s).expect(err_smg);
-                gen_addr(obj);
+                self.gen_addr(expr);
                 println!("  mov (%rax), %rax\n");
             },
             _ => println!("gen_code error: not support {:?}", content),
         }
     }
 
-    fn stack_size(&mut self, stmts: &Vec<StmtType>) -> i32 {
+    // return stack size and offset end_addr
+    fn stack_size(&mut self, stmts: &Vec<StmtType>) -> (i32, i32) {
         self.scan_block(stmts);
         let len: i32 = self.sbl_table.objs.len().try_into().unwrap();
         let size: i32 = len * 8;
         self.sbl_table = SblTable::new();
-        align_to(size, 16)
+        (align_to(size, 16), size)
     }
 
     fn scan_block(&mut self, stmts: &Vec<StmtType>) {
@@ -248,10 +268,28 @@ impl Generator {
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }
+
+    fn gen_addr(&mut self, expr: &Expr) {
+        match &expr.content {
+            Var(name) => {
+                let obj = self.sbl_table.find_obj(name);
+                println!("  lea {}(%rbp), %rax", -self.sbl_table.end_offset_addr+obj.unwrap().offset*8);
+                // println!("  lea {}(%rsp), %rax", obj.unwrap().offset*8);
+            },
+            Deref(expr) => {
+                self.expr_gen(expr);
+            },
+            _ => {
+                let err_msg = self.error_expr(expr, "can't get addr of this expr");
+                println!("{}", err_msg);
+            },
+        }
+    }
 }
 
 fn gen_addr(o: &Obj) {
-        println!("  lea {}(%rbp), %rax", -o.offset*8);
+    println!("  lea {}(%rbp), %rax", -o.offset*8);
+    // println!("  lea {}(%rsp), %rax", o.offset*8);
 }
 
 fn align_to(n: i32, align: i32) -> i32 {

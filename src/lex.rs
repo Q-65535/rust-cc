@@ -15,6 +15,8 @@ pub enum TokenKind {
     Assignment,
     Compare(CompareToken),
     Not,
+    // Star,
+    Ampersand,
     Num(i32),
     Semicolon,
     Ident(String),
@@ -172,6 +174,7 @@ impl Lexer {
                 ')' => tokens.push(Self::gen_token(RParen, ")", i, 1)),
                 '{' => tokens.push(Self::gen_token(LBrace, "{", i, 1)),
                 '}' => tokens.push(Self::gen_token(RBrace, "}", i, 1)),
+                '&' => tokens.push(Self::gen_token(Ampersand, "&", i, 1)),
                 'a'..='z' | '_' => {
                     let name = self.read_ident();
                     let tok_kind = if self.is_keyword(&name) {
