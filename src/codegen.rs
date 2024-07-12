@@ -16,12 +16,12 @@ struct Obj {
 struct SblTable {
     objs: VecDeque<Obj>,
     cur_offset: i32,
-    end_offset_addr: i32,
+    stack_size: i32,
 }
 
 impl SblTable {
     fn new() -> Self {
-        SblTable {objs: VecDeque::new(), cur_offset: 0, end_offset_addr: 0}
+        SblTable {objs: VecDeque::new(), cur_offset: 0, stack_size: 0}
     }
 
     fn find_obj(&self, s: &str) -> Option<&Obj> {
@@ -36,7 +36,7 @@ impl SblTable {
     fn add_new_obj(&mut self, name: &str) {
         let o = Obj{name: name.to_string(), offset: self.cur_offset};
         self.objs.push_front(o);
-        self.cur_offset += 1;
+        self.cur_offset += 8;
     }
 }
 
@@ -44,16 +44,18 @@ pub struct Generator {
     src: String,
     sbl_table: SblTable,
     lable_count: i32,
+    var_count: i32,
 }
 
 impl Generator {
-    pub fn new(src: &String) -> Self {
-        Self {src: src.clone(), sbl_table: SblTable::new(), lable_count: 0,}
+    pub fn new(src: &String, var_count: i32) -> Self {
+        Self {src: src.clone(), sbl_table: SblTable::new(), lable_count: 0, var_count}
     }
     
     pub fn gen_code(&mut self, stmts: &Vec<StmtType>) {
-        let (stack_size, end_offset_addr) = self.stack_size(stmts);
-        self.sbl_table.end_offset_addr = end_offset_addr;
+        let stack_size = self.var_count * 8;
+        let aligned_stack_size = align_to(stack_size, 16);
+        self.sbl_table.stack_size = stack_size;
         // prologue
         println!("  .globl main");
         println!("main:");
@@ -165,93 +167,34 @@ impl Generator {
                     _ => println!("gen_code error: not support {:?}", content),
                 }
             }
-            // @Cleanup
-            // @Cleanup
-            // @Cleanup
             Assign(var, val) => {
-                match &var.content {
-                    Var(name) => {
-                        let obj = match self.sbl_table.find_obj(&name) {
-                            Some(o) => o,
-                            None => {
-                                self.sbl_table.add_new_obj(&name);
-                                // @Performance: finding an obj in vec might take long time
-                                self.sbl_table.find_obj(&name).expect("codegen fatal error, no symbol found in assignment")
-                            },
-                        };
-                        self.gen_addr(var);
-                        println!("  push %rax");
-                        self.expr_gen(val);
-                        println!("  pop %rdi");
-                        println!("  mov %rax, (%rdi)");
-                    },
-                    Deref(_) => {
-                        self.gen_addr(var);
-                        println!("  push %rax");
-                        self.expr_gen(val);
-                        println!("  pop %rdi");
-                        println!("  mov %rax, (%rdi)");
-                    },
-                    _ => println!("not support"),
-                }
-            },
-            Neg(expr) => {
-                self.expr_gen(&expr);
-                println!("  neg %rax");
-            },
-            Deref(expr) => {
-                self.expr_gen(&expr);
-                println!("  mov (%rax), %rax");
-            },
-            AddrOf(expr) => {
-                self.gen_addr(expr);
-            },
-            Var(s) => {
-                let err_smg = &format!("symbol '{}' not found\n", s);
-                let obj = self.sbl_table.find_obj(&s).expect(err_smg);
-                self.gen_addr(expr);
-                println!("  mov (%rax), %rax\n");
-            },
-            _ => println!("gen_code error: not support {:?}", content),
-        }
-    }
-
-    // return stack size and offset end_addr
-    fn stack_size(&mut self, stmts: &Vec<StmtType>) -> (i32, i32) {
-        self.scan_block(stmts);
-        let len: i32 = self.sbl_table.objs.len().try_into().unwrap();
-        let size: i32 = len * 8;
-        self.sbl_table = SblTable::new();
-        (align_to(size, 16), size)
-    }
-
-    fn scan_block(&mut self, stmts: &Vec<StmtType>) {
-        for stmt in stmts {
-            match stmt {
-                StmtType::Ex(expr) => self.scan_expr(expr),
-                StmtType::Return(expr) => self.scan_expr(expr),
-                StmtType::Block(stmts) => self.scan_block(stmts),
-                _ => (),
-            }
-        }
-    }
-
-    fn scan_expr(&mut self, expr: &Expr) {
-        match &expr.content {
-            Binary(lhs, rhs, _) => {
-                self.scan_expr(&rhs);
-                self.scan_expr(&lhs);
-            },
-            // @Temporary: in the end, only declarations count for the stack size
-            Assign(var, expr) => {
-                self.scan_expr(expr);
                 if let Var(name) = &var.content {
-                    if let None = self.sbl_table.find_obj(&name) {
-                        self.sbl_table.add_new_obj(&name);
+                    if let None = self.sbl_table.find_obj(name) {
+                        self.sbl_table.add_new_obj(name);
                     }
                 }
-            },
-            _ => (),
+                self.gen_addr(var);
+                println!("  push %rax");
+                self.expr_gen(val);
+                println!("  pop %rdi");
+                println!("  mov %rax, (%rdi)");
+            }
+            Neg(expr) => {
+                self.expr_gen(expr);
+                println!("  neg %rax");
+            }
+            Deref(expr) => {
+                self.expr_gen(expr);
+                println!("  mov (%rax), %rax");
+            }
+            AddrOf(expr) => self.gen_addr(expr),
+            Var(s) => {
+                let err_smg = &format!("symbol '{}' not found\n", s);
+                let obj = self.sbl_table.find_obj(s).expect(err_smg);
+                self.gen_addr(expr);
+                println!("  mov (%rax), %rax\n");
+            }
+            _ => println!("gen_code error: not support {:?}", content),
         }
     }
 
@@ -273,8 +216,7 @@ impl Generator {
         match &expr.content {
             Var(name) => {
                 let obj = self.sbl_table.find_obj(name);
-                println!("  lea {}(%rbp), %rax", -self.sbl_table.end_offset_addr+obj.unwrap().offset*8);
-                // println!("  lea {}(%rsp), %rax", obj.unwrap().offset*8);
+                println!("  lea {}(%rbp), %rax", -self.sbl_table.stack_size+obj.unwrap().offset);
             },
             Deref(expr) => {
                 self.expr_gen(expr);
@@ -285,11 +227,6 @@ impl Generator {
             },
         }
     }
-}
-
-fn gen_addr(o: &Obj) {
-    println!("  lea {}(%rbp), %rax", -o.offset*8);
-    // println!("  lea {}(%rsp), %rax", o.offset*8);
 }
 
 fn align_to(n: i32, align: i32) -> i32 {

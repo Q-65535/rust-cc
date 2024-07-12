@@ -65,14 +65,16 @@ pub struct Parser {
     src: String,
     tokens: Vec<Token>,
     cur_index: usize,
+    pub ident_count :i32,
 }
 
 impl Parser {
-    pub fn new(src: &str, tokens: Vec<Token>, cur_index: usize) -> Self {
+    pub fn new(src: &str, tokens: Vec<Token>) -> Self {
         Parser {
             src: src.to_string(),
             tokens,
-            cur_index,
+            cur_index: 0,
+            ident_count: 0,
         }
     }
 
@@ -356,10 +358,11 @@ impl Parser {
         }
     }
     
-    fn parse_ident(&self) -> Result<Expr, String> {
+    fn parse_ident(&mut self) -> Result<Expr, String> {
         let tok = self.cur_token();
         if let Ident(name) = &tok.kind {
             let expr = Expr::new(Var(name.clone()), tok.clone());
+            self.ident_count += 1;
             Ok(expr)
         } else {
             Err(self.error_token(self.cur_token(), "expect an identifier"))
