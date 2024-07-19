@@ -227,6 +227,16 @@ impl Generator {
             },
         }
     }
+
+    fn change_enum_test(&mut self, expr: &mut Expr) {
+        match &mut expr.content {
+            Var(name) => {
+                println!("variable name: {}", name);
+                *name = "changed".to_string();
+            }
+            _ => (),
+        }
+    }
 }
 
 fn align_to(n: i32, align: i32) -> i32 {

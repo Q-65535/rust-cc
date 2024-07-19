@@ -4,6 +4,7 @@ use crate::Precedence::{self, *};
 use crate::TokenKind::{self, *};
 use crate::ExprType::*;
 use crate::KeywordToken::*;
+use crate::Type::{self, *};
 use crate::Token;
 
 #[derive(Debug)]
@@ -16,17 +17,30 @@ pub enum StmtType {
 }
 use StmtType::*;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExprType {
+    Number(i32),
+    Binary(Box<Expr>, Box<Expr>, TokenKind),
+    Assign(Box<Expr>, Box<Expr>),
+    Neg(Box<Expr>),
+    Deref(Box<Expr>),
+    AddrOf(Box<Expr>),
+    Var(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
     pub content: ExprType,
     pub token: Token,
+    pub ty: Type,
     pub start: usize,
     pub end: usize,
 }
 
 impl Expr {
-    fn new(content: ExprType, token: Token) -> Self {
-        let mut expr = Expr{content, token, start: 0, end: 0};
+    pub fn new(content: ExprType, token: Token) -> Self {
+        // @Improve: properly set initial type
+        let mut expr = Expr{content, token, ty: ty_none, start: 0, end: 0};
         (expr.start, expr.end) = (expr.cal_start_index(), expr.cal_end_index());
         expr
     }
@@ -47,17 +61,21 @@ impl Expr {
             ExprType::Assign(_, rhs) => rhs.cal_end_index(),
         }
     }
-}
 
-#[derive(Debug, PartialEq)]
-pub enum ExprType {
-    Number(i32),
-    Binary(Box<Expr>, Box<Expr>, TokenKind),
-    Assign(Box<Expr>, Box<Expr>),
-    Neg(Box<Expr>),
-    Deref(Box<Expr>),
-    AddrOf(Box<Expr>),
-    Var(String),
+    pub fn is_integer(&self) -> bool {
+        if let TY_INT = &self.ty {
+            true
+        } else {
+            false
+        }
+    }
+    pub fn is_ptr(&self) -> bool {
+        if let TY_PTR(_) = &self.ty {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 
@@ -361,7 +379,8 @@ impl Parser {
     fn parse_ident(&mut self) -> Result<Expr, String> {
         let tok = self.cur_token();
         if let Ident(name) = &tok.kind {
-            let expr = Expr::new(Var(name.clone()), tok.clone());
+            let mut var = Var(name.clone());
+            let expr = Expr::new(var, tok.clone());
             self.ident_count += 1;
             Ok(expr)
         } else {

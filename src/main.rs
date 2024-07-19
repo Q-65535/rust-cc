@@ -3,12 +3,14 @@ use std::{io::{self, Write}, process::exit, env};
 use colored::*;
 use crate::lex::*;
 use crate::parse::*;
+use crate::analyze::*;
 use crate::TokenKind::*;
 use crate::CompareToken::*;
 use crate::ExprType::*;
 use crate::codegen::*;
 pub mod parse;
 pub mod lex;
+pub mod analyze;
 pub mod codegen;
 
 // static global_src: &str = "-10-1234*(2-3423)/11112;1+2;";
@@ -33,11 +35,11 @@ fn main() {
     let src = input.clone();
     // parse
     let mut parser = Parser::new(&src, tokens);
-    let res = parser.parse();
+    let mut res = parser.parse().unwrap();
+    // analyze
+    let mut analyzer = Analyzer::new();
+    analyzer.analyze(&mut res);
     // codegen
     let mut gen = Generator::new(&src, parser.ident_count);
-    match res {
-        Ok(program) => gen.gen_code(&program),
-        Err(err_msg) => println!("{}", err_msg),
-    }
+    gen.gen_code(&res);
 }

@@ -150,7 +150,7 @@ impl Lexer {
         }
     }
 
-    fn gen_token(kind: TokenKind, content: &str, start: usize, size: usize) -> Token {
+    pub fn gen_token(kind: TokenKind, content: &str, start: usize, size: usize) -> Token {
         Token {
             kind,
             start,
