@@ -1,70 +1,41 @@
 use std::{io::{self, Write}, collections::VecDeque, process::exit};
+use std::cell::Cell;
 use colored::*;
 use crate::ExprType::{self, *};
 use crate::StmtType::{self, *};
 use crate::TokenKind::{self, *};
 use crate::CompareToken::{self, *};
+use crate::BlockItem::{self, *};
+use crate::Declaration;
 use crate::Expr;
-
-// @temporal: each obj occupy 8 bytes
-#[derive(Debug, Clone, PartialEq)]
-struct Obj {
-    name: String,
-    offset: i32,
-}
-
-struct SblTable {
-    objs: VecDeque<Obj>,
-    cur_offset: i32,
-    stack_size: i32,
-}
-
-impl SblTable {
-    fn new() -> Self {
-        SblTable {objs: VecDeque::new(), cur_offset: 0, stack_size: 0}
-    }
-
-    fn find_obj(&self, s: &str) -> Option<&Obj> {
-        for o in &self.objs {
-            if o.name == s {
-                return Some(o);
-            }
-        }
-        None
-    }
-
-    fn add_new_obj(&mut self, name: &str) {
-        let o = Obj{name: name.to_string(), offset: self.cur_offset};
-        self.objs.push_front(o);
-        self.cur_offset += 8;
-    }
-}
+use crate::Function;
+use crate::Obj;
+use crate::SblTable;
+use crate::AnalyzedFunc;
 
 pub struct Generator {
     src: String,
-    sbl_table: SblTable,
-    lable_count: i32,
-    var_count: i32,
+    afunc: AnalyzedFunc,
+    lable_count: Cell<i32>,
 }
 
 impl Generator {
-    pub fn new(src: &String, var_count: i32) -> Self {
-        Self {src: src.clone(), sbl_table: SblTable::new(), lable_count: 0, var_count}
+    pub fn new(src: &String, afunc: AnalyzedFunc) -> Self {
+        Self {src: src.clone(), afunc, lable_count: 0.into()}
     }
     
-    pub fn gen_code(&mut self, stmts: &Vec<StmtType>) {
-        let stack_size = self.var_count * 8;
+    pub fn gen_code(&self) {
+        let stack_size = self.afunc.stack_size;
         let aligned_stack_size = align_to(stack_size, 16);
-        self.sbl_table.stack_size = stack_size;
         // prologue
         println!("  .globl main");
         println!("main:");
         println!("  push %rbp");
         println!("  mov %rsp, %rbp");
-        println!("  sub ${}, %rsp", stack_size);
+        println!("  sub ${}, %rsp", aligned_stack_size);
         println!();
-
-        self.block_gen(stmts);
+        let i = &self.afunc.func.items;
+        self.block_gen(&i);
 
         // end
         println!(".L.return:");
@@ -73,30 +44,44 @@ impl Generator {
         println!("  ret");
     }
 
-    fn block_gen(&mut self, stmts: &Vec<StmtType>) {
-        for stmt in stmts {
-            self.stmt_gen(stmt);
+    fn block_gen(&self, items: &Vec<BlockItem>) {
+        for item in items {
+            match item {
+                Stmt(stmt) => self.stmt_gen(stmt),
+                Decl(decl) => self.decl_gen(decl),
+            }
         }
         println!();
     }
 
-    fn stmt_gen(&mut self, stmt: &StmtType) {
+    fn stmt_gen(&self, stmt: &StmtType) {
         match stmt {
             StmtType::Ex(expr) => self.expr_gen(&expr),
             StmtType::Return(expr) =>self.ret_gen(&expr),
-            StmtType::Block(stmts) =>self.block_gen(stmts),
+            StmtType::Block(item) =>self.block_gen(item),
             StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
             StmtType::For{init, cond, inc, then} => self.for_gen(init, cond, inc, then),
-            _ => println!("currently not support {:?}", stmt),
         }
     }
 
-    fn ret_gen(&mut self, expr: &Expr) {
+    fn decl_gen(&self, decl: &Declaration) {
+        for init in &decl.init_declarators {
+            if let Some(expr) = &init.init_expr {
+                self.gen_addr_by_name(&init.declarator.name);
+                println!("  push %rax");
+                self.expr_gen(expr);
+                println!("  pop %rdi");
+                println!("  mov %rax, (%rdi)");
+            }
+        }
+    }
+
+    fn ret_gen(&self, expr: &Expr) {
         self.expr_gen(expr);
         println!("  jmp .L.return\n");
     }
 
-    fn if_gen(&mut self, cond: &Expr, then: &StmtType, otherwise: &Option<Box<StmtType>>) {
+    fn if_gen(&self, cond: &Expr, then: &StmtType, otherwise: &Option<Box<StmtType>>) {
         let c = self.count();
         self.expr_gen(&cond);
         println!("  cmp $0, %rax");
@@ -110,7 +95,7 @@ impl Generator {
         println!(".L.end.{}:", c);
     }
 
-    fn for_gen(&mut self, init: &Option<Expr>, cond: &Option<Expr>, inc: &Option<Expr>, then: &Box<StmtType>) {
+    fn for_gen(&self, init: &Option<Expr>, cond: &Option<Expr>, inc: &Option<Expr>, then: &Box<StmtType>) {
         let c = self.count();
         if let Some(expr) = init {
             self.expr_gen(expr);
@@ -129,7 +114,7 @@ impl Generator {
         println!(".L.end.{}:", c);
     }
 
-    fn expr_gen(&mut self, expr: &Expr) {
+    fn expr_gen(&self, expr: &Expr) {
         let content = &expr.content;
         match content {
             Number(n) => println!("  mov ${}, %rax", n),
@@ -168,11 +153,6 @@ impl Generator {
                 }
             }
             Assign(var, val) => {
-                if let Var(name) = &var.content {
-                    if let None = self.sbl_table.find_obj(name) {
-                        self.sbl_table.add_new_obj(name);
-                    }
-                }
                 self.gen_addr(var);
                 println!("  push %rax");
                 self.expr_gen(val);
@@ -190,7 +170,7 @@ impl Generator {
             AddrOf(expr) => self.gen_addr(expr),
             Var(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
-                let obj = self.sbl_table.find_obj(s).expect(err_smg);
+                let obj = self.afunc.sbl_table.find_obj(s).expect(err_smg);
                 self.gen_addr(expr);
                 println!("  mov (%rax), %rax\n");
             }
@@ -198,9 +178,9 @@ impl Generator {
         }
     }
 
-    fn count(&mut self) -> i32 {
-        self.lable_count += 1;
-        self.lable_count
+    fn count(&self) -> i32 {
+        self.lable_count.set(self.lable_count.get()+1);
+        self.lable_count.get()
     }
 
     fn error_expr(&self, expr: &Expr, info: &str) -> String {
@@ -212,11 +192,16 @@ impl Generator {
         err_msg
     }
 
-    fn gen_addr(&mut self, expr: &Expr) {
+    fn gen_addr_by_name(&self, name: &str) {
+        let obj = self.afunc.sbl_table.find_obj(name);
+        println!("  lea {}(%rbp), %rax", -self.afunc.stack_size+obj.unwrap().offset);
+    }
+
+    fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Var(name) => {
-                let obj = self.sbl_table.find_obj(name);
-                println!("  lea {}(%rbp), %rax", -self.sbl_table.stack_size+obj.unwrap().offset);
+                let obj = self.afunc.sbl_table.find_obj(name);
+                println!("  lea {}(%rbp), %rax", -self.afunc.stack_size+obj.unwrap().offset);
             },
             Deref(expr) => {
                 self.expr_gen(expr);
@@ -225,16 +210,6 @@ impl Generator {
                 let err_msg = self.error_expr(expr, "can't get addr of this expr");
                 println!("{}", err_msg);
             },
-        }
-    }
-
-    fn change_enum_test(&mut self, expr: &mut Expr) {
-        match &mut expr.content {
-            Var(name) => {
-                println!("variable name: {}", name);
-                *name = "changed".to_string();
-            }
-            _ => (),
         }
     }
 }

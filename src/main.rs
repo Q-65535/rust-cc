@@ -35,11 +35,19 @@ fn main() {
     let src = input.clone();
     // parse
     let mut parser = Parser::new(&src, tokens);
-    let mut res = parser.parse().unwrap();
-    // analyze
-    let mut analyzer = Analyzer::new();
-    analyzer.analyze(&mut res);
-    // codegen
-    let mut gen = Generator::new(&src, parser.ident_count);
-    gen.gen_code(&res);
+
+    match parser.parse() {
+        Ok(program) => {
+            // analyze
+            let mut analyzer = Analyzer::new();
+            let analyzed_program = analyzer.analyze(program);
+            // codegen
+            let mut gen = Generator::new(&src, analyzed_program);
+            gen.gen_code();
+        }
+        Err(err) => {
+            println!("{}", err);
+            exit(0);
+        }
+    }
 }

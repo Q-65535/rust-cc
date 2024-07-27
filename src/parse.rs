@@ -3,7 +3,7 @@ use colored::*;
 use crate::Precedence::{self, *};
 use crate::TokenKind::{self, *};
 use crate::ExprType::*;
-use crate::KeywordToken::*;
+use crate::KeywordToken::{self, *};
 use crate::Type::{self, *};
 use crate::Token;
 
@@ -11,11 +11,47 @@ use crate::Token;
 pub enum StmtType {
     Ex(Expr),
     Return(Expr),
-    Block(Vec<StmtType>),
+    Block(Vec<BlockItem>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
     For {init: Option<Expr>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>},
 }
 use StmtType::*;
+
+#[derive(Debug)]
+pub enum BlockItem {
+    Stmt(StmtType),
+    Decl(Declaration),
+}
+use BlockItem::*;
+
+#[derive(Debug)]
+pub struct Function {
+    pub items: Vec<BlockItem>,
+}
+
+#[derive(Debug)]
+pub struct Declaration {
+    pub decl_spec: DeclarationSpecifier,
+    pub init_declarators: Vec<InitDeclarator>,
+}
+
+#[derive(Debug)]
+pub enum DeclarationSpecifier {
+    SpecInt
+}
+use DeclarationSpecifier::*;
+
+#[derive(Debug)]
+pub struct InitDeclarator {
+    pub declarator: Declarator,
+    pub init_expr: Option<Expr>,
+}
+
+#[derive(Debug)]
+pub struct Declarator {
+    pub star_count: i32,
+    pub name: String,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
@@ -63,14 +99,14 @@ impl Expr {
     }
 
     pub fn is_integer(&self) -> bool {
-        if let TY_INT = &self.ty {
+        if let TyInt = &self.ty {
             true
         } else {
             false
         }
     }
     pub fn is_ptr(&self) -> bool {
-        if let TY_PTR(_) = &self.ty {
+        if let TyPtr(_) = &self.ty {
             true
         } else {
             false
@@ -147,19 +183,82 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<StmtType>, String> {
-        let mut stmts: Vec<StmtType> = Vec::new();
+    pub fn parse(&mut self) -> Result<Function, String> {
+        let mut items: Vec<BlockItem> = Vec::new();
         loop {
-            match self.cur_token().kind {
+            let kind = &self.cur_token().kind;
+            match kind {
                 Eof => break,
+                Keyword(Int) => {
+                    let decl = self.parse_decl()?;
+                    items.push(Decl(decl));
+                }
                 _ => {
                     let stmt = self.parse_stmt()?;
-                    stmts.push(stmt);
+                    items.push(Stmt(stmt));
                 }
             }
             self.next_token();
         } 
-        Ok(stmts)
+        Ok(Function{items})
+    }
+
+    fn parse_decl(&mut self) -> Result<Declaration, String> {
+        let kind = &self.cur_token().kind;
+        let decl_spec: DeclarationSpecifier;
+        match kind {
+            Keyword(Int) => decl_spec = SpecInt,
+            _ => {
+                let err_msg = self.error_token(self.cur_token(), "unknown declaration specifer!");
+                return Err(err_msg);
+            }
+        }
+        self.next_token();
+
+        // parse init declarators
+        let mut init_declarators: Vec<InitDeclarator> = Vec::new();
+        loop {
+            let declarator = self.parse_declarator()?;
+            let mut init_expr = None;
+            if let Assignment = self.cur_token().kind {
+                self.next_token();
+                let expr = self.parse_expr(Lowest)?;
+                self.next_token();
+                init_expr = Some(expr);
+            }
+            let init_declarator = InitDeclarator {declarator, init_expr};
+            init_declarators.push(init_declarator);
+            match self.cur_token().kind {
+                Comma => {
+                    self.next_token();
+                    continue;
+                }
+                Semicolon => break,
+                _ => {
+                    let err_msg = self.error_token(self.cur_token(), "invalid token");
+                    return Err(err_msg);
+                }
+            }
+        }
+        let declaration = Declaration{decl_spec, init_declarators};
+        Ok(declaration)
+    }
+
+    fn parse_declarator(&mut self) -> Result<Declarator, String> {
+        let mut star_count = 0;
+        let name: String;
+        while let Mul = self.cur_token().kind {
+            star_count += 1;
+            self.next_token();
+        }
+        if let Ident(s) = &self.cur_token().kind {
+            name = s.clone();
+            self.next_token();
+        } else {
+            let err_msg = self.error_token(self.cur_token(), "not an identifier");
+            return Err(err_msg);
+        }
+        Ok(Declarator{star_count, name})
     }
 
     fn parse_stmt(&mut self) -> Result<StmtType, String> {
@@ -170,7 +269,7 @@ impl Parser {
             Keyword(For) => Ok(self.parse_for_stmt()?),
             Keyword(While) => Ok(self.parse_while_stmt()?),
             Semicolon => {
-                let empty: Vec<StmtType> = Vec::new();
+                let empty: Vec<BlockItem> = Vec::new();
                 Ok(Block(empty))
             },
             LBrace => Ok(self.parse_block()?),
@@ -198,20 +297,29 @@ impl Parser {
     }
 
     fn parse_block(&mut self) -> Result<StmtType, String> {
-        let mut stmts: Vec<StmtType> = Vec::new();
+        let mut items: Vec<BlockItem> = Vec::new();
         // skip '{'
         self.next_token();
         let mut cur_kind: TokenKind = self.cur_token().kind.clone();
         while cur_kind != RBrace {
-            let stmt = self.parse_stmt()?;
-            stmts.push(stmt);
+            let item: BlockItem;
+            if cur_kind == Keyword(Int) {
+                item = Decl(self.parse_decl()?);
+            } else {
+                item = Stmt(self.parse_stmt()?);
+            }
+            items.push(item);
             self.next_token();
             if matches!(cur_kind, Eof) {
                 return Err("parsing block statement error: reach the end of file.".to_string())
             }
             cur_kind = self.cur_token().kind.clone();
         }
-        Ok(Block(stmts))
+        Ok(Block(items))
+    }
+
+    fn parse_declaration(&mut self) -> Result<BlockItem, String> {
+        todo!()
     }
 
     fn parse_ret_stmt(&mut self) -> Result<StmtType, String> {

@@ -15,10 +15,10 @@ pub enum TokenKind {
     Assignment,
     Compare(CompareToken),
     Not,
-    // Star,
     Ampersand,
     Num(i32),
     Semicolon,
+    Comma,
     Ident(String),
     Keyword(KeywordToken),
     Eof,
@@ -43,6 +43,7 @@ pub enum KeywordToken {
     Else,
     For,
     While,
+    Int,
 }
 use KeywordToken::*;
 
@@ -108,6 +109,7 @@ impl Lexer {
             ("else".to_string(), Keyword(Else)),
             ("for".to_string(), Keyword(For)),
             ("while".to_string(), Keyword(While)),
+            ("int".to_string(), Keyword(Int)),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),
@@ -166,6 +168,7 @@ impl Lexer {
             match c {
                 ' ' => (),
                 ';' => tokens.push(Self::gen_token(Semicolon, ";", i, 1)),
+                ',' => tokens.push(Self::gen_token(Comma, ",", i, 1)),
                 '+' => tokens.push(Self::gen_token(Plus, "+", i, 1)),
                 '-' => tokens.push(Self::gen_token(Minus, "-", i, 1)),
                 '*' => tokens.push(Self::gen_token(Mul, "*", i, 1)),

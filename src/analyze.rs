@@ -3,24 +3,32 @@ use crate::ExprType::{self, *};
 use crate::StmtType::{self, *};
 use crate::TokenKind::{self, *};
 use crate::CompareToken::{self, *};
+use crate::BlockItem::{self, *};
+use crate::DeclarationSpecifier::{self, *};
+use crate::Declaration;
+use crate::Function;
+use crate::Declarator;
 use crate::Expr;
 use crate::Lexer;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    TY_PTR(Box<Type>),
-    TY_INT,
+    TyPtr(Box<Type>),
+    TyInt,
     ty_none,
 }
 use Type::*;
 
-struct Obj {
+#[derive(Debug, Clone)]
+pub struct Obj {
     name: String,
     ty: Type,
+    pub offset: i32,
 }
 
-struct SblTable {
-    objs: Vec<Obj>,
+#[derive(Debug, Clone)]
+pub struct SblTable {
+    pub objs: Vec<Obj>,
 }
 
 impl SblTable {
@@ -28,7 +36,7 @@ impl SblTable {
         SblTable {objs: Vec::new()}
     }
 
-    fn find_obj(&self, s: &str) -> Option<&Obj> {
+    pub fn find_obj(&self, s: &str) -> Option<&Obj> {
         for o in &self.objs {
             if o.name == s {
                 return Some(o);
@@ -37,34 +45,81 @@ impl SblTable {
         None
     }
 
-    fn add_new_obj(&mut self, name: &str, ty: Type) {
-        let o = Obj{name: name.to_string(), ty};
+    pub fn add_obj(&mut self, o: Obj) {
         self.objs.push(o);
     }
 }
 
+pub struct AnalyzedFunc {
+    pub func: Function,
+    pub sbl_table: SblTable,
+    pub stack_size: i32,
+}
+
 pub struct Analyzer {
     sbl_table: SblTable,
+    cur_offset: i32,
 }
 
 impl Analyzer {
 
     pub fn new() -> Self {
         let sbl_table = SblTable::new();
-        let mut analyzer = Analyzer{sbl_table};
+        let mut analyzer = Analyzer{sbl_table, cur_offset: 0};
         analyzer
     }
 
-    pub fn analyze(&mut self, stmts: &mut Vec<StmtType>) {
-        for stmt in stmts {
-            self.analyze_stmt(stmt);
+    pub fn analyze(&mut self, mut func: Function) -> AnalyzedFunc {
+        for item in &mut func.items {
+            match item {
+                Stmt(stmt) => self.analyze_stmt(stmt),
+                Decl(decl) => self.analyze_decl(decl),
+            }
         }
+        AnalyzedFunc{func, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset}
+    }
+
+    fn analyze_items(&mut self, items: &mut Vec<BlockItem>) {
+        for item in items {
+            match item {
+                Stmt(stmt) => self.analyze_stmt(stmt),
+                Decl(decl) => self.analyze_decl(decl),
+            }
+        }
+    }
+
+    fn analyze_decl(&mut self, decl: &mut Declaration) {
+        let base_type: Type;
+        match &decl.decl_spec {
+            SpecInt => base_type = TyInt,
+        }
+        for init in &mut decl.init_declarators {
+            let obj = self.create_obj(&base_type, &init.declarator);
+            if let Some(_) = self.sbl_table.find_obj(&obj.name) {
+                println!("variable {} already defined", obj.name);
+                exit(0);
+            }
+            self.sbl_table.add_obj(obj);
+            if let Some(expr) = &mut init.init_expr {
+                self.analyze_expr(expr);
+            }
+        }
+    }
+
+    fn create_obj(&mut self, base_type: &Type, declarator: &Declarator) -> Obj {
+        let mut cur_type = base_type.clone();
+        for i in 0..declarator.star_count {
+            cur_type = pointer_to(&cur_type);
+        }
+        let obj = Obj{name: declarator.name.clone(), ty: cur_type, offset: self.cur_offset};
+        self.cur_offset += 8;
+        obj
     }
 
     fn analyze_stmt(&mut self, stmt: &mut StmtType) {
         match stmt {
             Ex(expr) | Return(expr) => self.analyze_expr(expr),
-            Block(stmts) => self.analyze(stmts),
+            Block(items) => self.analyze_items(items),
             If{cond, then, otherwise} => {
                 self.analyze_expr(cond);
                 self.analyze_stmt(then);
@@ -92,7 +147,7 @@ impl Analyzer {
             return;
         }
         match &mut expr.content {
-            Number(n) => expr.ty = TY_INT,
+            Number(n) => expr.ty = TyInt,
             Binary(lhs, rhs, tokenKind) => {
                 self.analyze_expr(lhs);
                 self.analyze_expr(rhs);
@@ -123,7 +178,7 @@ impl Analyzer {
                             scal_expr(rhs, Mul, 8);
                             expr.ty = lhs.ty.clone();
                         } else if lhs.is_ptr() && rhs.is_ptr() {
-                            expr.ty = TY_INT;
+                            expr.ty = TyInt;
                             scal_expr(expr, Div, 8);
                         }
                     }
@@ -132,12 +187,6 @@ impl Analyzer {
             }
             Assign(lhs, rhs) => {
                 self.analyze_expr(rhs);
-                // special case: add type for new variable (this case will be removed
-                // after we implement declaration)
-                // @Difference: for now in chibicc, every variable has type int
-                if let Var(name)  = &lhs.content {
-                    self.sbl_table.add_new_obj(name, rhs.ty.clone());
-                }
                 self.analyze_expr(lhs);
                 expr.ty = lhs.ty.clone();
             }
@@ -148,7 +197,7 @@ impl Analyzer {
             Deref(val) => {
                 self.analyze_expr(val);
                 match &val.ty {
-                    TY_PTR(base) => expr.ty = *base.clone(),
+                    TyPtr(base) => expr.ty = *base.clone(),
                     _ => println!("dereferencing a non-pointer {:?}", val.content),
                 }
             }
@@ -171,7 +220,7 @@ impl Analyzer {
 
 fn pointer_to(ty: &Type) -> Type {
     let base = Box::new(ty.clone());
-    TY_PTR(base)
+    TyPtr(base)
 }
 
 fn scal_expr(expr: &mut Expr, operation: TokenKind, scal: i32) {
