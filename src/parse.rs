@@ -25,6 +25,11 @@ pub enum BlockItem {
 use BlockItem::*;
 
 #[derive(Debug)]
+pub struct Program {
+    pub func: Function,
+}
+
+#[derive(Debug)]
 pub struct Function {
     pub items: Vec<BlockItem>,
 }
@@ -51,6 +56,8 @@ pub struct InitDeclarator {
 pub struct Declarator {
     pub star_count: i32,
     pub name: String,
+    pub start: usize,
+    pub end: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,7 +126,6 @@ pub struct Parser {
     src: String,
     tokens: Vec<Token>,
     cur_index: usize,
-    pub ident_count :i32,
 }
 
 impl Parser {
@@ -128,7 +134,6 @@ impl Parser {
             src: src.to_string(),
             tokens,
             cur_index: 0,
-            ident_count: 0,
         }
     }
 
@@ -155,35 +160,34 @@ impl Parser {
         }
     }
 
-    fn check_jumpto_peek(&mut self, target: &TokenKind) {
+    fn check_jumpto_peek(&mut self, target: &TokenKind) -> Result<(), String> {
         match self.expect_peek(target) {
-            Err(err_msg) => {
-                println!("{}", err_msg);
-                // @Improve: instead of directly exiting here, we can collect all error messages and report them all later.
-                exit(0);
-            },
-            Ok(_) => (),
+            Err(err_msg) => return Err(err_msg),
+            _ => Ok(()),
         }
     }
 
-    fn check_skip_peek(&mut self, target: &TokenKind) {
-        self.check_jumpto_peek(target);
-        self.next_token();
+    fn check_skip_peek(&mut self, target: &TokenKind) -> Result<(), String> {
+        if let Err(err) = self.check_jumpto_peek(target) {
+            return Err(err)
+        } else {
+            self.next_token();
+            return Ok(())
+        }
     }
 
-    fn check_skip_current(&mut self, target: &TokenKind) {
+    fn check_skip_current(&mut self, target: &TokenKind) -> Result<(), String> {
         let actual = &self.cur_token().kind;
         if actual == target {
-            self.cur_index += 1;
+            self.next_token();
+            return Ok(())
         } else {
             let err_msg = self.error_token(self.cur_token(), format!("want '{:?}', but got '{:?}'", target, actual).as_str());
-            println!("{}", err_msg);
-            // @Improve: instead of directly exiting here, we can collect all error messages and report them all later.
-            exit(0);
+            return Err(err_msg)
         }
     }
 
-    pub fn parse(&mut self) -> Result<Function, String> {
+    pub fn parse(&mut self) -> Result<Program, String> {
         let mut items: Vec<BlockItem> = Vec::new();
         loop {
             let kind = &self.cur_token().kind;
@@ -200,7 +204,8 @@ impl Parser {
             }
             self.next_token();
         } 
-        Ok(Function{items})
+        let func = Function{items};
+        Ok(Program{func})
     }
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
@@ -252,13 +257,15 @@ impl Parser {
             self.next_token();
         }
         if let Ident(s) = &self.cur_token().kind {
+            let start = self.cur_token().start;
+            let end = self.cur_token().end;
             name = s.clone();
             self.next_token();
+            Ok(Declarator{star_count, name, start, end})
         } else {
             let err_msg = self.error_token(self.cur_token(), "not an identifier");
             return Err(err_msg);
         }
-        Ok(Declarator{star_count, name})
     }
 
     fn parse_stmt(&mut self) -> Result<StmtType, String> {
@@ -278,10 +285,10 @@ impl Parser {
     }
 
     fn parse_if_stmt(&mut self) -> Result<StmtType, String> {
-        self.check_skip_peek(&LParen);
+        self.check_skip_peek(&LParen)?;
         // parse condition
         let cond = self.parse_expr(Lowest)?;
-        self.check_skip_peek(&RParen);
+        self.check_skip_peek(&RParen)?;
         // parse then
         let then = Box::new(self.parse_stmt()?);
         self.next_token();
@@ -330,7 +337,7 @@ impl Parser {
     }
 
     fn parse_for_stmt(&mut self) -> Result<StmtType, String> {
-        self.check_skip_peek(&LParen);
+        self.check_skip_peek(&LParen)?;
         let init: Option<Expr>;
         let cond: Option<Expr>;
         let inc: Option<Expr>;
@@ -340,34 +347,34 @@ impl Parser {
         // @Duplication
         init  = match self.cur_token().kind {
             Semicolon => {
-                self.check_skip_current(&Semicolon);
+                self.check_skip_current(&Semicolon)?;
                 None
             },
             _ => {
                 let expr = self.parse_expr(Lowest)?;
-                self.check_skip_peek(&Semicolon);
+                self.check_skip_peek(&Semicolon)?;
                 Some(expr)
             },
         };
         cond = match self.cur_token().kind {
             Semicolon => {
-                self.check_skip_current(&Semicolon);
+                self.check_skip_current(&Semicolon)?;
                 None
             },
             _ => {
                 let expr = self.parse_expr(Lowest)?;
-                self.check_skip_peek(&Semicolon);
+                self.check_skip_peek(&Semicolon)?;
                 Some(expr)
             },
         };
         inc = match self.cur_token().kind {
             RParen => {
-                self.check_skip_current(&RParen);
+                self.check_skip_current(&RParen)?;
                 None
             },
             _ => {
                 let expr = self.parse_expr(Lowest)?;
-                self.check_skip_peek(&RParen);
+                self.check_skip_peek(&RParen)?;
                 Some(expr)
             },
         };
@@ -378,16 +385,16 @@ impl Parser {
     }
 
     fn parse_while_stmt(&mut self) -> Result<StmtType, String> {
-        self.check_skip_peek(&LParen);
+        self.check_skip_peek(&LParen)?;
         let cond: Option<Expr>;
         cond = match self.cur_token().kind {
             RParen => {
-                self.check_skip_current(&RParen);
+                self.check_skip_current(&RParen)?;
                 None
             },
             _ => {
                 let expr = self.parse_expr(Lowest)?;
-                self.check_skip_peek(&RParen);
+                self.check_skip_peek(&RParen)?;
                 Some(expr)
             },
         };
@@ -440,9 +447,9 @@ impl Parser {
     }
 
     fn parse_paren(&mut self) -> Result<Expr, String> {
-        self.check_skip_current(&LParen);
+        self.check_skip_current(&LParen)?;
         let res = self.parse_expr(Precedence::Lowest);
-        self.check_jumpto_peek(&RParen);
+        self.check_jumpto_peek(&RParen)?;
         res
     }
 
@@ -477,10 +484,7 @@ impl Parser {
                 Ok(expr)
             },
             Ident(_) => self.parse_ident(),
-            _ => {
-                let err_msg = self.error_token(&cur_token, "can't parse prefix expression here");
-                Err(err_msg)
-            }
+            _ => Err(self.error_token(&cur_token, "parsing error: can't parse prefix expression here"))
         }
     }
     
@@ -489,7 +493,6 @@ impl Parser {
         if let Ident(name) = &tok.kind {
             let mut var = Var(name.clone());
             let expr = Expr::new(var, tok.clone());
-            self.ident_count += 1;
             Ok(expr)
         } else {
             Err(self.error_token(self.cur_token(), "expect an identifier"))

@@ -11,16 +11,16 @@ use crate::Expr;
 use crate::Function;
 use crate::Obj;
 use crate::SblTable;
-use crate::AnalyzedFunc;
+use crate::AnalyzedProgram;
 
 pub struct Generator {
     src: String,
-    afunc: AnalyzedFunc,
+    afunc: AnalyzedProgram,
     lable_count: Cell<i32>,
 }
 
 impl Generator {
-    pub fn new(src: &String, afunc: AnalyzedFunc) -> Self {
+    pub fn new(src: &String, afunc: AnalyzedProgram) -> Self {
         Self {src: src.clone(), afunc, lable_count: 0.into()}
     }
     

@@ -1,4 +1,5 @@
 use std::{io::{self, Write}, collections::VecDeque, process::exit, mem::swap};
+use colored::*;
 use crate::ExprType::{self, *};
 use crate::StmtType::{self, *};
 use crate::TokenKind::{self, *};
@@ -6,6 +7,7 @@ use crate::CompareToken::{self, *};
 use crate::BlockItem::{self, *};
 use crate::DeclarationSpecifier::{self, *};
 use crate::Declaration;
+use crate::Program;
 use crate::Function;
 use crate::Declarator;
 use crate::Expr;
@@ -50,33 +52,34 @@ impl SblTable {
     }
 }
 
-pub struct AnalyzedFunc {
+pub struct AnalyzedProgram {
     pub func: Function,
     pub sbl_table: SblTable,
     pub stack_size: i32,
 }
 
 pub struct Analyzer {
+    src: String,
     sbl_table: SblTable,
     cur_offset: i32,
 }
 
 impl Analyzer {
 
-    pub fn new() -> Self {
+    pub fn new(src: &str) -> Self {
         let sbl_table = SblTable::new();
-        let mut analyzer = Analyzer{sbl_table, cur_offset: 0};
+        let mut analyzer = Analyzer{src: src.to_string(), sbl_table, cur_offset: 0};
         analyzer
     }
 
-    pub fn analyze(&mut self, mut func: Function) -> AnalyzedFunc {
-        for item in &mut func.items {
+    pub fn analyze(&mut self, mut program: Program) -> AnalyzedProgram {
+        for item in &mut program.func.items {
             match item {
                 Stmt(stmt) => self.analyze_stmt(stmt),
                 Decl(decl) => self.analyze_decl(decl),
             }
         }
-        AnalyzedFunc{func, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset}
+        AnalyzedProgram{func: program.func, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset}
     }
 
     fn analyze_items(&mut self, items: &mut Vec<BlockItem>) {
@@ -96,7 +99,9 @@ impl Analyzer {
         for init in &mut decl.init_declarators {
             let obj = self.create_obj(&base_type, &init.declarator);
             if let Some(_) = self.sbl_table.find_obj(&obj.name) {
-                println!("variable {} already defined", obj.name);
+                let err_msg = format!("variable {} already defined", obj.name);
+                let s = self.err_declarator(&init.declarator, &err_msg);
+                println!("{}", s);
                 exit(0);
             }
             self.sbl_table.add_obj(obj);
@@ -215,6 +220,24 @@ impl Analyzer {
                 }
             }
         }
+    }
+
+    fn error_expr(&self, expr: &Expr, info: &str) -> String {
+        let mut err_msg = String::from("");
+        err_msg.push_str(&format!("{}\n", self.src));
+        let spaces = " ".repeat(expr.start);
+        let arrows = "^".repeat(expr.end - expr.start);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+        err_msg
+    }
+
+    fn err_declarator(&self, declarator: &Declarator, info: &str) -> String {
+        let mut err_msg = String::from("");
+        err_msg.push_str(&format!("{}\n", self.src));
+        let spaces = " ".repeat(declarator.start);
+        let arrows = "^".repeat(declarator.end - declarator.start);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+        err_msg
     }
 }
 

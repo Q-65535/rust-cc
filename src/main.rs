@@ -13,11 +13,6 @@ pub mod lex;
 pub mod analyze;
 pub mod codegen;
 
-// static global_src: &str = "-10-1234*(2-3423)/11112;1+2;";
-static global_src: &str = "c = 1; b = 10;";
-
-
-
 fn main() {
     let args: Vec<String> = env::args().collect();
     let input: &String;
@@ -35,11 +30,10 @@ fn main() {
     let src = input.clone();
     // parse
     let mut parser = Parser::new(&src, tokens);
-
     match parser.parse() {
         Ok(program) => {
             // analyze
-            let mut analyzer = Analyzer::new();
+            let mut analyzer = Analyzer::new(&src);
             let analyzed_program = analyzer.analyze(program);
             // codegen
             let mut gen = Generator::new(&src, analyzed_program);
