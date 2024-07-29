@@ -85,8 +85,8 @@ impl Analyzer {
     fn analyze_items(&mut self, items: &mut Vec<BlockItem>) {
         for item in items {
             match item {
-                Stmt(stmt) => self.analyze_stmt(stmt),
-                Decl(decl) => self.analyze_decl(decl),
+                Stmt(stmt) => return self.analyze_stmt(stmt),
+                Decl(decl) => return self.analyze_decl(decl),
             }
         }
     }
@@ -99,14 +99,16 @@ impl Analyzer {
         for init in &mut decl.init_declarators {
             let obj = self.create_obj(&base_type, &init.declarator);
             if let Some(_) = self.sbl_table.find_obj(&obj.name) {
-                let err_msg = format!("variable {} already defined", obj.name);
-                let s = self.err_declarator(&init.declarator, &err_msg);
-                println!("{}", s);
+                let err_info = format!("variable {} already defined", obj.name);
+                println!("{}", self.err_declarator(&init.declarator, &err_info));
                 exit(0);
             }
             self.sbl_table.add_obj(obj);
             if let Some(expr) = &mut init.init_expr {
-                self.analyze_expr(expr);
+                if let Err(e) = self.analyze_expr(expr) {
+                    println!("{}", e);
+                    exit(0);
+                }
             }
         }
     }
@@ -123,10 +125,20 @@ impl Analyzer {
 
     fn analyze_stmt(&mut self, stmt: &mut StmtType) {
         match stmt {
-            Ex(expr) | Return(expr) => self.analyze_expr(expr),
-            Block(items) => self.analyze_items(items),
+            Ex(expr) | Return(expr) => {
+                if let Err(e) = self.analyze_expr(expr) {
+                    println!("{}", e);
+                    exit(0);
+                }
+            }
+            Block(items) => {
+                self.analyze_items(items);
+            }
             If{cond, then, otherwise} => {
-                self.analyze_expr(cond);
+                if let Err(e) = self.analyze_expr(cond) {
+                    println!("{}", e);
+                    exit(0);
+                }
                 self.analyze_stmt(then);
                 if let Some(otherwise) = otherwise {
                     self.analyze_stmt(otherwise);
@@ -134,35 +146,46 @@ impl Analyzer {
             }
             For{init, cond, inc, then} => {
                 if let Some(init) = init {
-                    self.analyze_expr(init);
+                    if let Err(e) = self.analyze_expr(init) {
+                        println!("{}", e);
+                        exit(0);
+                    }
                 }
                 if let Some(cond) = cond {
-                    self.analyze_expr(cond);
+                    if let Err(e) = self.analyze_expr(cond) {
+                        println!("{}", e);
+                        exit(0);
+                    }
                 }
                 if let Some(inc) = inc {
-                    self.analyze_expr(inc);
+                    if let Err(e) = self.analyze_expr(inc) {
+                        println!("{}", e);
+                        exit(0);
+                    }
                 }
                 self.analyze_stmt(then);
             }
         }
     }
 
-    fn analyze_expr(&mut self, expr: &mut Expr) {
+    fn analyze_expr(&mut self, expr: &mut Expr) -> Result<(), String> {
         if !matches!(&expr.ty, Type::ty_none) {
-            return;
+            return Err(self.error_expr(expr, "error: both lhs and rhs are of ptr type"));
         }
         match &mut expr.content {
-            Number(n) => expr.ty = TyInt,
+            Number(n) => Ok(expr.ty = TyInt),
             Binary(lhs, rhs, tokenKind) => {
-                self.analyze_expr(lhs);
-                self.analyze_expr(rhs);
+                self.analyze_expr(lhs)?;
+                self.analyze_expr(rhs)?;
                 // @TODO: check whether types of lhs and rhs match (when no pointer involved)
                 match tokenKind {
                     // deal with pointer arithmatic
                     Plus => {
                         if lhs.is_ptr() && rhs.is_ptr() {
-                            println!("error: both lhs and rhs are of ptr type");
-                            exit(0);
+                            // @TODO: report the error as a single error message
+                            let left_err = self.error_expr(lhs, "error: both lhs and rhs are of ptr type");
+                            let right_err = self.error_expr(rhs, "error: both lhs and rhs are of ptr type");
+                            return Err(left_err + &right_err);
                         }
                         if lhs.is_integer() && rhs.is_ptr() {
                             swap(lhs, rhs);
@@ -173,11 +196,11 @@ impl Analyzer {
                             scal_expr(rhs, Mul, 8);
                             expr.ty = lhs.ty.clone();
                         }
+                        return Ok(());
                     }
                     Minus => {
                         if lhs.is_integer() && rhs.is_ptr() {
-                            println!("error: integer - ptr");
-                            exit(0);
+                            return Err(self.error_expr(rhs, "error: integer - ptr"));
                         }
                         if lhs.is_ptr() && rhs.is_integer() {
                             scal_expr(rhs, Mul, 8);
@@ -186,37 +209,46 @@ impl Analyzer {
                             expr.ty = TyInt;
                             scal_expr(expr, Div, 8);
                         }
+                        Ok(())
                     }
-                    _ => (),
+                    _ => Ok(()),
                 }
             }
             Assign(lhs, rhs) => {
-                self.analyze_expr(rhs);
-                self.analyze_expr(lhs);
+                self.analyze_expr(rhs)?;
+                self.analyze_expr(lhs)?;
                 expr.ty = lhs.ty.clone();
+                Ok(())
             }
             Neg(val) => {
-                self.analyze_expr(val);
+                self.analyze_expr(val)?;
                 expr.ty = val.ty.clone();
+                Ok(())
             }
             Deref(val) => {
-                self.analyze_expr(val);
+                self.analyze_expr(val)?;
                 match &val.ty {
-                    TyPtr(base) => expr.ty = *base.clone(),
-                    _ => println!("dereferencing a non-pointer {:?}", val.content),
+                    TyPtr(base) => {
+                        expr.ty = *base.clone();
+                        Ok(())
+                    }
+                    _ => {
+                        return Err(self.error_expr(expr, "semantic error: dereferencing a non-pointer"));
+                    }
                 }
             }
             AddrOf(val) => {
-                self.analyze_expr(val);
+                self.analyze_expr(val)?;
                 expr.ty = pointer_to(&val.ty);
+                Ok(())
             }
             Var(s) => {
                 if let Some(o) = self.sbl_table.find_obj(s) {
                     expr.ty = o.ty.clone();
+                    Ok(())
                 } else {
-                    // @Improve: better way to handle error
-                    println!("analyze error: symbol {} not found", s);
-                    exit(0);
+                    let err_info = format!("semantic error: symbol '{}' not found", s);
+                    return Err(self.error_expr(expr, &err_info));
                 }
             }
         }

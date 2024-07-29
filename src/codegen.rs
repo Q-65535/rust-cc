@@ -15,17 +15,17 @@ use crate::AnalyzedProgram;
 
 pub struct Generator {
     src: String,
-    afunc: AnalyzedProgram,
+    aprogram: AnalyzedProgram,
     lable_count: Cell<i32>,
 }
 
 impl Generator {
-    pub fn new(src: &String, afunc: AnalyzedProgram) -> Self {
-        Self {src: src.clone(), afunc, lable_count: 0.into()}
+    pub fn new(src: &String, aprogram: AnalyzedProgram) -> Self {
+        Self {src: src.clone(), aprogram, lable_count: 0.into()}
     }
     
     pub fn gen_code(&self) {
-        let stack_size = self.afunc.stack_size;
+        let stack_size = self.aprogram.stack_size;
         let aligned_stack_size = align_to(stack_size, 16);
         // prologue
         println!("  .globl main");
@@ -34,7 +34,7 @@ impl Generator {
         println!("  mov %rsp, %rbp");
         println!("  sub ${}, %rsp", aligned_stack_size);
         println!();
-        let i = &self.afunc.func.items;
+        let i = &self.aprogram.func.items;
         self.block_gen(&i);
 
         // end
@@ -170,7 +170,7 @@ impl Generator {
             AddrOf(expr) => self.gen_addr(expr),
             Var(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
-                let obj = self.afunc.sbl_table.find_obj(s).expect(err_smg);
+                let obj = self.aprogram.sbl_table.find_obj(s).expect(err_smg);
                 self.gen_addr(expr);
                 println!("  mov (%rax), %rax\n");
             }
@@ -193,15 +193,15 @@ impl Generator {
     }
 
     fn gen_addr_by_name(&self, name: &str) {
-        let obj = self.afunc.sbl_table.find_obj(name);
-        println!("  lea {}(%rbp), %rax", -self.afunc.stack_size+obj.unwrap().offset);
+        let obj = self.aprogram.sbl_table.find_obj(name);
+        println!("  lea {}(%rbp), %rax", -self.aprogram.stack_size+obj.unwrap().offset);
     }
 
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Var(name) => {
-                let obj = self.afunc.sbl_table.find_obj(name);
-                println!("  lea {}(%rbp), %rax", -self.afunc.stack_size+obj.unwrap().offset);
+                let obj = self.aprogram.sbl_table.find_obj(name);
+                println!("  lea {}(%rbp), %rax", -self.aprogram.stack_size+obj.unwrap().offset);
             },
             Deref(expr) => {
                 self.expr_gen(expr);
