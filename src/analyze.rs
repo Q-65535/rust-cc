@@ -85,8 +85,8 @@ impl Analyzer {
     fn analyze_items(&mut self, items: &mut Vec<BlockItem>) {
         for item in items {
             match item {
-                Stmt(stmt) => return self.analyze_stmt(stmt),
-                Decl(decl) => return self.analyze_decl(decl),
+                Stmt(stmt) => self.analyze_stmt(stmt),
+                Decl(decl) => self.analyze_decl(decl),
             }
         }
     }
