@@ -242,7 +242,7 @@ impl Analyzer {
                 expr.ty = pointer_to(&val.ty);
                 Ok(())
             }
-            Var(s) => {
+            Ident(s) => {
                 if let Some(o) = self.sbl_table.find_obj(s) {
                     expr.ty = o.ty.clone();
                     Ok(())
@@ -251,6 +251,7 @@ impl Analyzer {
                     return Err(self.error_expr(expr, &err_info));
                 }
             }
+            FunCall(_, _) => todo!(),
         }
     }
 

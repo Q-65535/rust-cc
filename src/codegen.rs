@@ -168,7 +168,7 @@ impl Generator {
                 println!("  mov (%rax), %rax");
             }
             AddrOf(expr) => self.gen_addr(expr),
-            Var(s) => {
+            Ident(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
                 let obj = self.aprogram.sbl_table.find_obj(s).expect(err_smg);
                 self.gen_addr(expr);
@@ -199,7 +199,7 @@ impl Generator {
 
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
-            Var(name) => {
+            Ident(name) => {
                 let obj = self.aprogram.sbl_table.find_obj(name);
                 println!("  lea {}(%rbp), %rax", -self.aprogram.stack_size+obj.unwrap().offset);
             },

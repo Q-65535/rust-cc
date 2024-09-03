@@ -68,7 +68,8 @@ pub enum ExprType {
     Neg(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
-    Var(String),
+    Ident(String),
+    FunCall(Box<Expr>, Vec<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,18 +91,25 @@ impl Expr {
 
     fn cal_start_index(&self) -> usize {
         match &self.content {
-            Number(_) | Neg(_) | Var(_) | Deref(_) | AddrOf(_) => self.token.start,
+            Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.token.start,
             Binary(lhs, _, _) => lhs.cal_start_index(),
             ExprType::Assign(lhs, _) => lhs.cal_start_index(),
+            FunCall(ident, _) => ident.cal_start_index(),
         }
     }
 
     fn cal_end_index(&self) -> usize {
         match &self.content {
             Neg(e) | Deref(e) | AddrOf(e) => e.cal_end_index(),
-            Number(_) | Var(_) => self.token.end,
+            Number(_) | Ident(_) => self.token.end,
             Binary(_, rhs, _) => rhs.cal_end_index(),
             ExprType::Assign(_, rhs) => rhs.cal_end_index(),
+            FunCall(ident, args_list) => {
+                match args_list.last() {
+                    Some(last_arg) => return last_arg.cal_end_index(),
+                    None => return ident.cal_end_index() + 2,
+                }
+            }
         }
     }
 
@@ -147,6 +155,16 @@ impl Parser {
 
     fn peek_token(&self) -> &Token {
         &self.tokens[self.cur_index+1]
+    }
+
+    fn next_token_is(&self, expect: TokenKind) -> bool {
+        let peek = self.peek_token();
+        return  peek.kind == expect;
+    }
+
+    fn cur_token_is(&self, expect: TokenKind) -> bool {
+        let cur = self.cur_token();
+        return  cur.kind == expect;
     }
 
     fn expect_peek(&mut self, expect: &TokenKind) -> Result<&Token, String> {
@@ -242,7 +260,7 @@ impl Parser {
                 _ => {
                     let err_msg = self.error_token(self.cur_token(), "invalid token");
                     return Err(err_msg);
-                }
+                },
             }
         }
         let declaration = Declaration{decl_spec, init_declarators};
@@ -256,7 +274,7 @@ impl Parser {
             star_count += 1;
             self.next_token();
         }
-        if let Ident(s) = &self.cur_token().kind {
+        if let LexIdent(s) = &self.cur_token().kind {
             let start = self.cur_token().start;
             let end = self.cur_token().end;
             name = s.clone();
@@ -424,7 +442,11 @@ impl Parser {
                             self.next_token();
                             expr = self.parse_infix(expr)?;
                         },
-                        Num(_) | LParen => {
+                        LParen => {
+                            self.next_token();
+                            expr = self.parse_funcall(expr)?;
+                        },
+                        Num(_) => {
                             let err_msg = self.error_token(self.cur_token(), "expect an operator");
                             return Err(err_msg);
                         },
@@ -483,15 +505,15 @@ impl Parser {
                 let expr = Expr::new(AddrOf(operand), cur_token);
                 Ok(expr)
             },
-            Ident(_) => self.parse_ident(),
+            LexIdent(_) => self.parse_ident(),
             _ => Err(self.error_token(&cur_token, "parsing error: can't parse prefix expression here"))
         }
     }
     
     fn parse_ident(&mut self) -> Result<Expr, String> {
         let tok = self.cur_token();
-        if let Ident(name) = &tok.kind {
-            let mut var = Var(name.clone());
+        if let LexIdent(name) = &tok.kind {
+            let mut var = Ident(name.clone());
             let expr = Expr::new(var, tok.clone());
             Ok(expr)
         } else {
@@ -521,7 +543,7 @@ impl Parser {
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
         let tok = self.cur_token().clone();
         match lhs.content {
-            Var(_) | Deref(_) => {
+            Ident(_) | Deref(_) => {
                 self.next_token();
                 let val = self.parse_expr(Lowest)?;
                 let content = ExprType::Assign(Box::new(lhs), Box::new(val));
@@ -529,6 +551,36 @@ impl Parser {
             },
             _ => Err(self.error_token(&lhs.token, "not a variable name")),
         }
+    }
+
+    fn parse_funcall(&mut self, lhs:Expr) -> Result<Expr, String> {
+        let cur_tok = self.cur_token().clone();
+        let args_list = self.parse_args()?;
+        let content = FunCall(Box::new(lhs), args_list);
+        return Ok(Expr::new(content, cur_tok));
+    }
+
+    fn parse_args(&mut self) -> Result<Vec<Expr>, String> {
+        let mut args: Vec<Expr> = Vec::new();
+        // skip LParen
+        self.next_token();
+        while(self.cur_token().kind != RParen) {
+            let expr = self.parse_expr(Lowest)?;
+            args.push(expr);
+            self.next_token();
+            let cur_tok = self.cur_token();
+            match cur_tok.kind {
+                Comma => self.next_token(),
+                RParen => break,
+                // error case:
+                _ => {
+                    let err_msg = format!("parsing function call error: expect comma as arguments separator or RParen
+                    as enclosing of args list, but got {:?} kind token\n", cur_tok.kind);
+                    return Err(self.error_token(cur_tok, err_msg.as_str()));
+                }
+            }
+        }
+        return Ok(args);
     }
 
     fn error_token(&self, tok: &Token, info: &str) -> String {

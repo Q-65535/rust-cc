@@ -19,7 +19,7 @@ pub enum TokenKind {
     Num(i32),
     Semicolon,
     Comma,
-    Ident(String),
+    LexIdent(String),
     Keyword(KeywordToken),
     Eof,
 }
@@ -183,7 +183,7 @@ impl Lexer {
                     let tok_kind = if self.is_keyword(&name) {
                         self.get_tok_kind(&name)
                     } else {
-                        Ident(name.clone())
+                        LexIdent(name.clone())
                     };
                     let tok = Self::gen_token(tok_kind, &name, i, name.len());
                     tokens.push(tok);
