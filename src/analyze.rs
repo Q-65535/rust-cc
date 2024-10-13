@@ -251,7 +251,10 @@ impl Analyzer {
                     return Err(self.error_expr(expr, &err_info));
                 }
             }
-            FunCall(_, _) => todo!(),
+            FunCall(ident, args) => {
+                // the function name may be in another elf file, we don't check its validaity
+                Ok(())
+            }
         }
     }
 

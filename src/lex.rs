@@ -54,6 +54,7 @@ pub enum Precedence {
     Comparison,
     PlusMinus,
     MulDiv,
+    Funcall,
     Prefix,
 }
 
@@ -77,6 +78,7 @@ impl Token {
                 return Precedence::Comparison;
             },
             Assignment => Precedence::Assign,
+            LParen => Precedence::Funcall,
             _ => {
                 return Precedence::Lowest;
             }

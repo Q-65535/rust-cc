@@ -123,7 +123,7 @@ impl Generator {
                 println!("  push %rax");
                 self.expr_gen(lhs);
                 println!("  pop %rdi");
-                match kind  {
+                match kind {
                     Plus => println!("  add %rdi, %rax"),
                     Minus => println!("  sub %rdi, %rax"),
                     Mul => println!("  imul %rdi, %rax"),
@@ -173,6 +173,16 @@ impl Generator {
                 let obj = self.aprogram.sbl_table.find_obj(s).expect(err_smg);
                 self.gen_addr(expr);
                 println!("  mov (%rax), %rax\n");
+            }
+            FunCall(func_ref, args) => {
+                match &func_ref.content {
+                    Ident(func_name) => {
+                        println!("  mov $0, %rax");
+                        println!("  call {}", func_name);
+                    }
+                    // @Robustness: improve error message
+                    _ => println!("currently only support function name as call reference"),
+                }
             }
             _ => println!("gen_code error: not support {:?}", content),
         }
