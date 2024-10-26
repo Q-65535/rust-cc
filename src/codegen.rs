@@ -17,11 +17,13 @@ pub struct Generator {
     src: String,
     aprogram: AnalyzedProgram,
     lable_count: Cell<i32>,
+    argregs: Vec<&'static str>,
 }
 
 impl Generator {
     pub fn new(src: &String, aprogram: AnalyzedProgram) -> Self {
-        Self {src: src.clone(), aprogram, lable_count: 0.into()}
+        let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+        Self {src: src.clone(), aprogram, lable_count: 0.into(), argregs}
     }
     
     pub fn gen_code(&self) {
@@ -177,6 +179,17 @@ impl Generator {
             FunCall(func_ref, args) => {
                 match &func_ref.content {
                     Ident(func_name) => {
+                        let mut nargs = 0;
+                        for arg in args {
+                            self.expr_gen(arg);
+                            println!("  push %rax");
+                            nargs += 1;
+                        }
+                        // put arguments in designated registers
+                        for i in (0..nargs).rev() {
+                            self.pop(self.argregs[i]);
+                        }
+
                         println!("  mov $0, %rax");
                         println!("  call {}", func_name);
                     }
@@ -221,6 +234,14 @@ impl Generator {
                 println!("{}", err_msg);
             },
         }
+    }
+
+    fn push(&self, reg: &str) {
+        println!("  push {}", reg);
+    }
+
+    fn pop(&self, reg: &str) {
+        println!("  pop {}", reg);
     }
 }
 

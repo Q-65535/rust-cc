@@ -252,6 +252,9 @@ impl Analyzer {
                 }
             }
             FunCall(ident, args) => {
+                for arg in args {
+                    self.analyze_expr(arg)?;
+                }
                 // the function name may be in another elf file, we don't check its validaity
                 Ok(())
             }
