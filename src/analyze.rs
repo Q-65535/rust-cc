@@ -15,8 +15,11 @@ use crate::Lexer;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
+    // pointer to ... type
     TyPtr(Box<Type>),
     TyInt,
+    // function return ... type
+    TyFunc(Box<Type>),
     ty_none,
 }
 use Type::*;
@@ -283,6 +286,11 @@ impl Analyzer {
 fn pointer_to(ty: &Type) -> Type {
     let base = Box::new(ty.clone());
     TyPtr(base)
+}
+
+fn function_type(ty: &Type) -> Type {
+    let return_type = Box::new(ty.clone());
+    TyFunc(return_type)
 }
 
 fn scal_expr(expr: &mut Expr, operation: TokenKind, scal: i32) {

@@ -49,6 +49,7 @@ use DeclarationSpecifier::*;
 #[derive(Debug)]
 pub struct InitDeclarator {
     pub declarator: Declarator,
+    // Declaration may include initialization
     pub init_expr: Option<Expr>,
 }
 
@@ -227,15 +228,7 @@ impl Parser {
     }
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
-        let kind = &self.cur_token().kind;
-        let decl_spec: DeclarationSpecifier;
-        match kind {
-            Keyword(Int) => decl_spec = SpecInt,
-            _ => {
-                let err_msg = self.error_token(self.cur_token(), "unknown declaration specifer!");
-                return Err(err_msg);
-            }
-        }
+        let decl_spec = self.parse_decl_spec()?;
         self.next_token();
 
         // parse init declarators
@@ -267,18 +260,36 @@ impl Parser {
         Ok(declaration)
     }
 
+    fn parse_decl_spec(&mut self) -> Result<DeclarationSpecifier, String> {
+        let kind = &self.cur_token().kind;
+        let decl_spec: DeclarationSpecifier;
+        match kind {
+            Keyword(Int) => Ok(SpecInt),
+            _ => {
+                let err_msg = self.error_token(self.cur_token(), "unknown declaration specifer!");
+                return Err(err_msg);
+            }
+        }
+    }
+
     fn parse_declarator(&mut self) -> Result<Declarator, String> {
         let mut star_count = 0;
         let name: String;
+        // here, Mul is the pointer mark "*"
         while let Mul = self.cur_token().kind {
             star_count += 1;
             self.next_token();
         }
-        if let LexIdent(s) = &self.cur_token().kind {
+        if let LexIdent(ident) = &self.cur_token().kind {
             let start = self.cur_token().start;
             let end = self.cur_token().end;
-            name = s.clone();
+            name = ident.clone();
             self.next_token();
+            // Parse function parameters
+            if let LParen = &self.cur_token().kind {
+                
+            }
+
             Ok(Declarator{star_count, name, start, end})
         } else {
             let err_msg = self.error_token(self.cur_token(), "not an identifier");
