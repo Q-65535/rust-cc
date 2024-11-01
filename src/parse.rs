@@ -31,6 +31,8 @@ pub struct Program {
 
 #[derive(Debug)]
 pub struct Function {
+    pub name: String,
+    pub star_count: i32,
     pub items: Vec<BlockItem>,
 }
 
@@ -223,7 +225,8 @@ impl Parser {
             }
             self.next_token();
         } 
-        let func = Function{items};
+        // @Temporal: for test
+        let func = Function{name: "main".to_string(), star_count: 0, items};
         Ok(Program{func})
     }
 
@@ -287,9 +290,9 @@ impl Parser {
             self.next_token();
             // Parse function parameters
             if let LParen = &self.cur_token().kind {
-                
+                // for parsing 0 parameter function
+                self.expect_peek(&RParen);
             }
-
             Ok(Declarator{star_count, name, start, end})
         } else {
             let err_msg = self.error_token(self.cur_token(), "not an identifier");
@@ -352,10 +355,6 @@ impl Parser {
             cur_kind = self.cur_token().kind.clone();
         }
         Ok(Block(items))
-    }
-
-    fn parse_declaration(&mut self) -> Result<BlockItem, String> {
-        todo!()
     }
 
     fn parse_ret_stmt(&mut self) -> Result<StmtType, String> {
@@ -592,6 +591,21 @@ impl Parser {
             }
         }
         return Ok(args);
+    }
+
+    fn parse_fundef(&mut self) -> Result<Function, String> {
+        let return_type = self.parse_decl_spec()?;
+        let declarator = self.parse_declarator()?;
+        self.expect_peek(&LBrace);
+        // parse statemens in this function.
+        // @Readability: parse_block should definitely return a code block, we don't need to
+        // check it
+        let res = self.parse_block()?;
+        match res {
+            Block(items) => Ok(Function{name: declarator.name, star_count: declarator.star_count, items}),
+            _ => Err(self.error_token(self.cur_token(), "(this is the end of parsing result) error
+             parsing function definition: we want to parse code block of function definition, but got this result")),
+        }
     }
 
     fn error_token(&self, tok: &Token, info: &str) -> String {
