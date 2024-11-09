@@ -12,35 +12,58 @@ use crate::Function;
 use crate::Obj;
 use crate::SblTable;
 use crate::AnalyzedProgram;
+use crate::AnalyzedFun;
 
 pub struct Generator {
     src: String,
     aprogram: AnalyzedProgram,
     lable_count: Cell<i32>,
+
+
+    //pack these variables as one struct
+    cur_sbl_table: SblTable,
+    cur_stack_size: i32,
+    cur_fun_name: String,
+    //pack these variables as one struct
+
+
     argregs: Vec<&'static str>,
 }
 
 impl Generator {
     pub fn new(src: &String, aprogram: AnalyzedProgram) -> Self {
         let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
-        Self {src: src.clone(), aprogram, lable_count: 0.into(), argregs}
+        let cur_sbl_table = aprogram.afuns.get(0).unwrap().sbl_table.clone();
+        let cur_stack_size = 0;
+        let cur_fun_name = "dummy".to_string();
+        Self {src: src.clone(), aprogram, lable_count: 0.into(), cur_sbl_table, cur_stack_size, cur_fun_name, argregs}
+    }
+
+    pub fn gen_code(&mut self) {
+        for afun in &self.aprogram.afuns {
+            self.cur_sbl_table = afun.sbl_table.clone();
+            self.cur_stack_size = afun.stack_size;
+            self.cur_fun_name = afun.fun.name.clone();
+            self.fun_gen(afun);
+        }
     }
     
-    pub fn gen_code(&self) {
-        let stack_size = self.aprogram.stack_size;
+    pub fn fun_gen(&self, afun: &AnalyzedFun) {
+        let stack_size = afun.stack_size;
+        let fun = &afun.fun;
         let aligned_stack_size = align_to(stack_size, 16);
         // prologue
-        println!("  .globl main");
-        println!("main:");
+        println!();
+        println!("  .globl {}", fun.name);
+        println!("{}:", fun.name);
         println!("  push %rbp");
         println!("  mov %rsp, %rbp");
         println!("  sub ${}, %rsp", aligned_stack_size);
         println!();
-        let i = &self.aprogram.func.items;
-        self.block_gen(&i);
+        self.block_gen(&afun.fun.items);
 
         // end
-        println!(".L.return:");
+        println!(".L.return.{}:",fun.name);
         println!("  mov %rbp, %rsp");
         println!("  pop %rbp");
         println!("  ret");
@@ -80,7 +103,7 @@ impl Generator {
 
     fn ret_gen(&self, expr: &Expr) {
         self.expr_gen(expr);
-        println!("  jmp .L.return\n");
+        println!("  jmp .L.return.{}\n", self.cur_fun_name);
     }
 
     fn if_gen(&self, cond: &Expr, then: &StmtType, otherwise: &Option<Box<StmtType>>) {
@@ -172,7 +195,7 @@ impl Generator {
             AddrOf(expr) => self.gen_addr(expr),
             Ident(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
-                let obj = self.aprogram.sbl_table.find_obj(s).expect(err_smg);
+                let obj = self.cur_sbl_table.find_obj(s).expect(err_smg);
                 self.gen_addr(expr);
                 println!("  mov (%rax), %rax\n");
             }
@@ -216,15 +239,15 @@ impl Generator {
     }
 
     fn gen_addr_by_name(&self, name: &str) {
-        let obj = self.aprogram.sbl_table.find_obj(name);
-        println!("  lea {}(%rbp), %rax", -self.aprogram.stack_size+obj.unwrap().offset);
+        let obj = self.cur_sbl_table.find_obj(name);
+        println!("  lea {}(%rbp), %rax", -self.cur_stack_size+obj.unwrap().offset);
     }
 
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Ident(name) => {
-                let obj = self.aprogram.sbl_table.find_obj(name);
-                println!("  lea {}(%rbp), %rax", -self.aprogram.stack_size+obj.unwrap().offset);
+                let obj = self.cur_sbl_table.find_obj(name);
+                println!("  lea {}(%rbp), %rax", -self.cur_stack_size+obj.unwrap().offset);
             },
             Deref(expr) => {
                 self.expr_gen(expr);

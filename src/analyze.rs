@@ -56,7 +56,11 @@ impl SblTable {
 }
 
 pub struct AnalyzedProgram {
-    pub func: Function,
+    pub afuns: Vec<AnalyzedFun>,
+}
+
+pub struct AnalyzedFun {
+    pub fun: Function,
     pub sbl_table: SblTable,
     pub stack_size: i32,
 }
@@ -76,13 +80,22 @@ impl Analyzer {
     }
 
     pub fn analyze(&mut self, mut program: Program) -> AnalyzedProgram {
-        for item in &mut program.func.items {
+        let mut afuns: Vec<AnalyzedFun> = Vec::new();
+        for fun in program.funs {
+            let afun = self.analyze_fun(fun);
+            afuns.push(afun);
+        }
+        AnalyzedProgram{afuns}
+    }
+
+    pub fn analyze_fun(&mut self, mut fun: Function) -> AnalyzedFun {
+        for item in &mut fun.items {
             match item {
                 Stmt(stmt) => self.analyze_stmt(stmt),
                 Decl(decl) => self.analyze_decl(decl),
             }
         }
-        AnalyzedProgram{func: program.func, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset}
+        AnalyzedFun{fun, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset}
     }
 
     fn analyze_items(&mut self, items: &mut Vec<BlockItem>) {

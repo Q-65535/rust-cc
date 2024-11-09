@@ -26,7 +26,7 @@ use BlockItem::*;
 
 #[derive(Debug)]
 pub struct Program {
-    pub func: Function,
+    pub funs: Vec<Function>,
 }
 
 #[derive(Debug)]
@@ -209,25 +209,19 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Result<Program, String> {
-        let mut items: Vec<BlockItem> = Vec::new();
+        let mut funs: Vec<Function> = Vec::new();
         loop {
             let kind = &self.cur_token().kind;
             match kind {
                 Eof => break,
-                Keyword(Int) => {
-                    let decl = self.parse_decl()?;
-                    items.push(Decl(decl));
-                }
                 _ => {
-                    let stmt = self.parse_stmt()?;
-                    items.push(Stmt(stmt));
+                    let fun = self.parse_fundef()?;
+                    funs.push(fun);
                 }
             }
             self.next_token();
         } 
-        // @Temporal: for test
-        let func = Function{name: "main".to_string(), star_count: 0, items};
-        Ok(Program{func})
+        Ok(Program{funs})
     }
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
@@ -595,12 +589,13 @@ impl Parser {
 
     fn parse_fundef(&mut self) -> Result<Function, String> {
         let return_type = self.parse_decl_spec()?;
+        self.next_token();
         let declarator = self.parse_declarator()?;
         self.expect_peek(&LBrace);
         // parse statemens in this function.
+        let res = self.parse_block()?;
         // @Readability: parse_block should definitely return a code block, we don't need to
         // check it
-        let res = self.parse_block()?;
         match res {
             Block(items) => Ok(Function{name: declarator.name, star_count: declarator.star_count, items}),
             _ => Err(self.error_token(self.cur_token(), "(this is the end of parsing result) error
