@@ -12,6 +12,7 @@ use crate::Function;
 use crate::Declarator;
 use crate::Expr;
 use crate::Lexer;
+use crate::SRC;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -67,28 +68,44 @@ pub struct AnalyzedFun {
 
 pub struct Analyzer {
     src: String,
+    // @Fix: these should be created for each function
     sbl_table: SblTable,
     cur_offset: i32,
 }
 
 impl Analyzer {
-
-    pub fn new(src: &str) -> Self {
+    pub fn new() -> Self {
         let sbl_table = SblTable::new();
-        let mut analyzer = Analyzer{src: src.to_string(), sbl_table, cur_offset: 0};
+        let gsrc = SRC.lock().unwrap();
+        let mut analyzer = Analyzer{src: gsrc.clone(), sbl_table, cur_offset: 0};
         analyzer
     }
 
     pub fn analyze(&mut self, mut program: Program) -> AnalyzedProgram {
         let mut afuns: Vec<AnalyzedFun> = Vec::new();
         for fun in program.funs {
-            let afun = self.analyze_fun(fun);
+            let mut fun_analyzer = FunAnalyzer::new();
+            let afun = fun_analyzer.analyze(fun);
             afuns.push(afun);
         }
         AnalyzedProgram{afuns}
     }
+}
 
-    pub fn analyze_fun(&mut self, mut fun: Function) -> AnalyzedFun {
+pub struct FunAnalyzer {
+    src: String,
+    sbl_table: SblTable,
+    cur_offset: i32,
+}
+
+impl FunAnalyzer {
+    pub fn new() -> Self {
+        let sbl_table = SblTable::new();
+        let gsrc = SRC.lock().unwrap();
+        FunAnalyzer{src: gsrc.clone(), sbl_table, cur_offset: 0}
+    }
+
+    pub fn analyze(&mut self, mut fun: Function) -> AnalyzedFun {
         for item in &mut fun.items {
             match item {
                 Stmt(stmt) => self.analyze_stmt(stmt),
@@ -287,8 +304,10 @@ impl Analyzer {
     }
 
     fn err_declarator(&self, declarator: &Declarator, info: &str) -> String {
+        let gsrc = SRC.lock().unwrap();
+        let src = gsrc.to_string();
         let mut err_msg = String::from("");
-        err_msg.push_str(&format!("{}\n", self.src));
+        err_msg.push_str(&format!("{}\n", src));
         let spaces = " ".repeat(declarator.start);
         let arrows = "^".repeat(declarator.end - declarator.start);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));

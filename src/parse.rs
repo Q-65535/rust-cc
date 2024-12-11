@@ -7,7 +7,7 @@ use crate::KeywordToken::{self, *};
 use crate::Type::{self, *};
 use crate::Token;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StmtType {
     Ex(Expr),
     Return(Expr),
@@ -17,7 +17,7 @@ pub enum StmtType {
 }
 use StmtType::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockItem {
     Stmt(StmtType),
     Decl(Declaration),
@@ -29,33 +29,34 @@ pub struct Program {
     pub funs: Vec<Function>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
+    pub return_type: DeclarationSpecifier,
     pub star_count: i32,
     pub items: Vec<BlockItem>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Declaration {
     pub decl_spec: DeclarationSpecifier,
     pub init_declarators: Vec<InitDeclarator>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DeclarationSpecifier {
     SpecInt
 }
 use DeclarationSpecifier::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InitDeclarator {
     pub declarator: Declarator,
     // Declaration may include initialization
     pub init_expr: Option<Expr>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Declarator {
     pub star_count: i32,
     pub name: String,
@@ -597,9 +598,11 @@ impl Parser {
         // @Readability: parse_block should definitely return a code block, we don't need to
         // check it
         match res {
-            Block(items) => Ok(Function{name: declarator.name, star_count: declarator.star_count, items}),
-            _ => Err(self.error_token(self.cur_token(), "(this is the end of parsing result) error
-             parsing function definition: we want to parse code block of function definition, but got this result")),
+            Block(items) => Ok(Function{name: declarator.name, return_type,
+                star_count: declarator.star_count, items}),
+            _ => Err(self.error_token(self.cur_token(), "(this is the end of
+             parsing result) error parsing function definition: we want to
+              parse code block of function definition, but got this result")),
         }
     }
 

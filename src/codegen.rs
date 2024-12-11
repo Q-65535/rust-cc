@@ -30,6 +30,12 @@ pub struct Generator {
     argregs: Vec<&'static str>,
 }
 
+struct FunContext {
+    cur_sbl_table: SblTable,
+    cur_stack_size: i32,
+    cur_fun_name: String,
+}
+
 impl Generator {
     pub fn new(src: &String, aprogram: AnalyzedProgram) -> Self {
         let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
