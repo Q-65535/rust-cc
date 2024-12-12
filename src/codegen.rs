@@ -18,15 +18,7 @@ pub struct Generator {
     src: String,
     aprogram: AnalyzedProgram,
     lable_count: Cell<i32>,
-
-
-    //pack these variables as one struct
-    cur_sbl_table: SblTable,
-    cur_stack_size: i32,
-    cur_fun_name: String,
-    //pack these variables as one struct
-
-
+    cur_afun: AnalyzedFun,
     argregs: Vec<&'static str>,
 }
 
@@ -37,26 +29,24 @@ struct FunContext {
 }
 
 impl Generator {
+    // @Smell: Strange to use &String in rust
     pub fn new(src: &String, aprogram: AnalyzedProgram) -> Self {
         let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
-        let cur_sbl_table = aprogram.afuns.get(0).unwrap().sbl_table.clone();
-        let cur_stack_size = 0;
-        let cur_fun_name = "dummy".to_string();
-        Self {src: src.clone(), aprogram, lable_count: 0.into(), cur_sbl_table, cur_stack_size, cur_fun_name, argregs}
+        let cur_afun = aprogram.afuns[0].clone();
+        Self {src: src.clone(), aprogram, lable_count: 0.into(), cur_afun, argregs}
     }
 
     pub fn gen_code(&mut self) {
         for afun in &self.aprogram.afuns {
-            self.cur_sbl_table = afun.sbl_table.clone();
-            self.cur_stack_size = afun.stack_size;
-            self.cur_fun_name = afun.fun.name.clone();
-            self.fun_gen(afun);
+            // @Space: clone() unnecessarily wastes memory
+            self.cur_afun = afun.clone();
+            self.fun_gen();
         }
     }
     
-    pub fn fun_gen(&self, afun: &AnalyzedFun) {
-        let stack_size = afun.stack_size;
-        let fun = &afun.fun;
+    pub fn fun_gen(&self) {
+        let stack_size = self.cur_afun.stack_size;
+        let fun = &self.cur_afun.fun;
         let aligned_stack_size = align_to(stack_size, 16);
         // prologue
         println!();
@@ -66,7 +56,7 @@ impl Generator {
         println!("  mov %rsp, %rbp");
         println!("  sub ${}, %rsp", aligned_stack_size);
         println!();
-        self.block_gen(&afun.fun.items);
+        self.block_gen(&self.cur_afun.fun.items);
 
         // end
         println!(".L.return.{}:",fun.name);
@@ -109,7 +99,7 @@ impl Generator {
 
     fn ret_gen(&self, expr: &Expr) {
         self.expr_gen(expr);
-        println!("  jmp .L.return.{}\n", self.cur_fun_name);
+        println!("  jmp .L.return.{}\n", self.cur_afun.fun.name);
     }
 
     fn if_gen(&self, cond: &Expr, then: &StmtType, otherwise: &Option<Box<StmtType>>) {
@@ -201,7 +191,7 @@ impl Generator {
             AddrOf(expr) => self.gen_addr(expr),
             Ident(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
-                let obj = self.cur_sbl_table.find_obj(s).expect(err_smg);
+                let obj = self.cur_afun.sbl_table.find_obj(s).expect(err_smg);
                 self.gen_addr(expr);
                 println!("  mov (%rax), %rax\n");
             }
@@ -245,15 +235,16 @@ impl Generator {
     }
 
     fn gen_addr_by_name(&self, name: &str) {
-        let obj = self.cur_sbl_table.find_obj(name);
-        println!("  lea {}(%rbp), %rax", -self.cur_stack_size+obj.unwrap().offset);
+        let obj = self.cur_afun.sbl_table.find_obj(name);
+        println!("  lea {}(%rbp), %rax", -self.cur_afun.stack_size+obj.unwrap().offset);
     }
 
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Ident(name) => {
-                let obj = self.cur_sbl_table.find_obj(name);
-                println!("  lea {}(%rbp), %rax", -self.cur_stack_size+obj.unwrap().offset);
+                let obj = self.cur_afun.sbl_table.find_obj(name);
+                println!("  lea {}(%rbp), %rax", -self.cur_afun.stack_size+obj.unwrap().offset);
+
             },
             Deref(expr) => {
                 self.expr_gen(expr);

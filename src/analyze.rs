@@ -60,6 +60,7 @@ pub struct AnalyzedProgram {
     pub afuns: Vec<AnalyzedFun>,
 }
 
+#[derive(Clone)]
 pub struct AnalyzedFun {
     pub fun: Function,
     pub sbl_table: SblTable,
