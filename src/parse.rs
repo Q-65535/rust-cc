@@ -6,6 +6,7 @@ use crate::ExprType::*;
 use crate::KeywordToken::{self, *};
 use crate::Type::{self, *};
 use crate::Token;
+use crate::SRC;
 
 #[derive(Debug, Clone)]
 pub enum StmtType {
@@ -34,6 +35,7 @@ pub struct Function {
     pub name: String,
     pub return_type: DeclarationSpecifier,
     pub star_count: i32,
+    // pub parms: Declaration,
     pub items: Vec<BlockItem>,
 }
 
@@ -135,15 +137,13 @@ impl Expr {
 
 
 pub struct Parser {
-    src: String,
     tokens: Vec<Token>,
     cur_index: usize,
 }
 
 impl Parser {
-    pub fn new(src: &str, tokens: Vec<Token>) -> Self {
+    pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
-            src: src.to_string(),
             tokens,
             cur_index: 0,
         }
@@ -233,6 +233,7 @@ impl Parser {
         let mut init_declarators: Vec<InitDeclarator> = Vec::new();
         loop {
             let declarator = self.parse_declarator()?;
+            self.next_token();
             let mut init_expr = None;
             if let Assignment = self.cur_token().kind {
                 self.next_token();
@@ -282,12 +283,6 @@ impl Parser {
             let start = self.cur_token().start;
             let end = self.cur_token().end;
             name = ident.clone();
-            self.next_token();
-            // Parse function parameters
-            if let LParen = &self.cur_token().kind {
-                // for parsing 0 parameter function
-                self.expect_peek(&RParen);
-            }
             Ok(Declarator{star_count, name, start, end})
         } else {
             let err_msg = self.error_token(self.cur_token(), "not an identifier");
@@ -592,6 +587,13 @@ impl Parser {
         let return_type = self.parse_decl_spec()?;
         self.next_token();
         let declarator = self.parse_declarator()?;
+        self.next_token();
+
+        // Parse function parameters
+        if let LParen = &self.cur_token().kind {
+            // for parsing 0 parameter function
+            self.expect_peek(&RParen);
+        }
         self.expect_peek(&LBrace);
         // parse statemens in this function.
         let res = self.parse_block()?;
@@ -608,7 +610,8 @@ impl Parser {
 
     fn error_token(&self, tok: &Token, info: &str) -> String {
         let mut err_msg = String::from("");
-        err_msg.push_str(&format!("{}\n", self.src));
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
         let spaces = " ".repeat(tok.start);
         let arrows = "^".repeat(tok.end - tok.start);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));

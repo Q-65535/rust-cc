@@ -68,7 +68,6 @@ pub struct AnalyzedFun {
 }
 
 pub struct Analyzer {
-    src: String,
     // @Fix: these should be created for each function
     sbl_table: SblTable,
     cur_offset: i32,
@@ -77,8 +76,7 @@ pub struct Analyzer {
 impl Analyzer {
     pub fn new() -> Self {
         let sbl_table = SblTable::new();
-        let gsrc = SRC.lock().unwrap();
-        let mut analyzer = Analyzer{src: gsrc.clone(), sbl_table, cur_offset: 0};
+        let mut analyzer = Analyzer{sbl_table, cur_offset: 0};
         analyzer
     }
 
@@ -94,7 +92,6 @@ impl Analyzer {
 }
 
 pub struct FunAnalyzer {
-    src: String,
     sbl_table: SblTable,
     cur_offset: i32,
 }
@@ -102,8 +99,7 @@ pub struct FunAnalyzer {
 impl FunAnalyzer {
     pub fn new() -> Self {
         let sbl_table = SblTable::new();
-        let gsrc = SRC.lock().unwrap();
-        FunAnalyzer{src: gsrc.clone(), sbl_table, cur_offset: 0}
+        FunAnalyzer{sbl_table, cur_offset: 0}
     }
 
     pub fn analyze(&mut self, mut fun: Function) -> AnalyzedFun {
@@ -297,7 +293,8 @@ impl FunAnalyzer {
 
     fn error_expr(&self, expr: &Expr, info: &str) -> String {
         let mut err_msg = String::from("");
-        err_msg.push_str(&format!("{}\n", self.src));
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
         let spaces = " ".repeat(expr.start);
         let arrows = "^".repeat(expr.end - expr.start);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
@@ -305,10 +302,9 @@ impl FunAnalyzer {
     }
 
     fn err_declarator(&self, declarator: &Declarator, info: &str) -> String {
-        let gsrc = SRC.lock().unwrap();
-        let src = gsrc.to_string();
         let mut err_msg = String::from("");
-        err_msg.push_str(&format!("{}\n", src));
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
         let spaces = " ".repeat(declarator.start);
         let arrows = "^".repeat(declarator.end - declarator.start);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));

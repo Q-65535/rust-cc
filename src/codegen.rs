@@ -13,9 +13,9 @@ use crate::Obj;
 use crate::SblTable;
 use crate::AnalyzedProgram;
 use crate::AnalyzedFun;
+use crate::SRC;
 
 pub struct Generator {
-    src: String,
     aprogram: AnalyzedProgram,
     lable_count: Cell<i32>,
     cur_afun: AnalyzedFun,
@@ -30,15 +30,15 @@ struct FunContext {
 
 impl Generator {
     // @Smell: Strange to use &String in rust
-    pub fn new(src: &String, aprogram: AnalyzedProgram) -> Self {
+    pub fn new(aprogram: AnalyzedProgram) -> Self {
         let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
         let cur_afun = aprogram.afuns[0].clone();
-        Self {src: src.clone(), aprogram, lable_count: 0.into(), cur_afun, argregs}
+        Self {aprogram, lable_count: 0.into(), cur_afun, argregs}
     }
 
     pub fn gen_code(&mut self) {
         for afun in &self.aprogram.afuns {
-            // @Space: clone() unnecessarily wastes memory
+            // @Space: clone() wastes memory
             self.cur_afun = afun.clone();
             self.fun_gen();
         }
@@ -227,7 +227,8 @@ impl Generator {
 
     fn error_expr(&self, expr: &Expr, info: &str) -> String {
         let mut err_msg = String::from("");
-        err_msg.push_str(&format!("{}\n", self.src));
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
         let spaces = " ".repeat(expr.start);
         let arrows = "^".repeat(expr.end - expr.start);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));

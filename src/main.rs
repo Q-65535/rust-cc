@@ -28,20 +28,22 @@ fn main() {
         return;
     }
 
-    let src = SRC.lock().unwrap().clone();
+    // @FixMe: conflicts will happen when other places use lock() during the following compilation.
+    // @FixMe: conflicts will happen when other places use lock() during the following compilation.
+    // @FixMe: conflicts will happen when other places use lock() during the following compilation.
+    let src_str: &str = &SRC.lock().unwrap();
     // lex
-    let mut lexer = Lexer::new(&src);
-    let mut tokens: Vec<Token> = Vec::new();
-    let tokens = lexer.lex();
+    let mut lexer = Lexer::new(src_str);
+    let mut tokens = lexer.lex();
     // parse
-    let mut parser = Parser::new(&src, tokens);
+    let mut parser = Parser::new(tokens);
     match parser.parse() {
         Ok(program) => {
             // analyze
             let mut analyzer = Analyzer::new();
             let analyzed_program = analyzer.analyze(program);
             // codegen
-            let mut gen = Generator::new(&src, analyzed_program);
+            let mut gen = Generator::new(analyzed_program);
             gen.gen_code();
         }
         Err(err) => {

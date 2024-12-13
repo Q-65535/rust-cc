@@ -1,6 +1,7 @@
 use std::{io::{self, Write}, process::exit};
 use std::collections::HashMap;
 use crate::*;
+use crate::SRC;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
@@ -301,7 +302,7 @@ impl Lexer {
     }
 
     fn error_at(&self, index: usize, err_msg: &str) {
-        let src_str: &String = &self.src[0..self.src.len()].iter().collect(); 
+        let src_str: &str = &SRC.lock().unwrap().to_string();
         println!("{}", src_str);
         let spaces = " ".repeat(index);
         println!("{}^ {}", spaces, err_msg.red());
