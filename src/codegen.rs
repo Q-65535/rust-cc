@@ -56,6 +56,13 @@ impl Generator {
         println!("  mov %rsp, %rbp");
         println!("  sub ${}, %rsp", aligned_stack_size);
         println!();
+        let mut i = 0;
+        for param in &self.cur_afun.fun.params {
+            let obj = self.cur_afun.sbl_table.find_obj(&param.declarator.name);
+                                                              // @Cleanup: offset should be expressed more properly
+            println!("  mov {}, {}(%rbp)\n", self.argregs[i], -self.cur_afun.stack_size+obj.unwrap().offset);
+            i += 1;
+        }
         self.block_gen(&self.cur_afun.fun.items);
 
         // end
@@ -244,6 +251,7 @@ impl Generator {
         match &expr.content {
             Ident(name) => {
                 let obj = self.cur_afun.sbl_table.find_obj(name);
+                                                 // @Cleanup: offset should be expressed more properly
                 println!("  lea {}(%rbp), %rax", -self.cur_afun.stack_size+obj.unwrap().offset);
 
             },

@@ -9,6 +9,7 @@ use crate::DeclarationSpecifier::{self, *};
 use crate::Declaration;
 use crate::Program;
 use crate::Function;
+use crate::Parameter;
 use crate::Declarator;
 use crate::Expr;
 use crate::Lexer;
@@ -29,6 +30,7 @@ use Type::*;
 pub struct Obj {
     name: String,
     ty: Type,
+    // this offset should be based on %rbp
     pub offset: i32,
 }
 
@@ -103,6 +105,9 @@ impl FunAnalyzer {
     }
 
     pub fn analyze(&mut self, mut fun: Function) -> AnalyzedFun {
+        for param in &fun.params {
+            self.analyze_param(param);
+        }
         for item in &mut fun.items {
             match item {
                 Stmt(stmt) => self.analyze_stmt(stmt),
@@ -119,6 +124,20 @@ impl FunAnalyzer {
                 Decl(decl) => self.analyze_decl(decl),
             }
         }
+    }
+
+    fn analyze_param(&mut self, param: &Parameter) {
+        let base_type: Type;
+        match &param.decl_spec {
+            SpecInt => base_type = TyInt,
+        }
+        let obj = self.create_obj(&base_type, &param.declarator);
+        if let Some(_) = self.sbl_table.find_obj(&obj.name) {
+            let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
+            println!("{}", self.err_declarator(&param.declarator, &err_info));
+            exit(0);
+        }
+        self.sbl_table.add_obj(obj);
     }
 
     fn analyze_decl(&mut self, decl: &mut Declaration) {

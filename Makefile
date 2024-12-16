@@ -1,6 +1,10 @@
 build:
 	cargo build
 
+rebuild:
+	cargo clean
+	cargo build
+
 test: 
 	cargo build
 	./test.sh

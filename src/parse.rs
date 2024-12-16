@@ -35,8 +35,14 @@ pub struct Function {
     pub name: String,
     pub return_type: DeclarationSpecifier,
     pub star_count: i32,
-    // pub parms: Declaration,
+    pub params: Vec<Parameter>,
     pub items: Vec<BlockItem>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Parameter {
+    pub decl_spec: DeclarationSpecifier,
+    pub declarator: Declarator,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +167,16 @@ impl Parser {
         &self.tokens[self.cur_index+1]
     }
 
+    fn skip_cur_token(&mut self, expect_cur: &TokenKind) -> Result<(), String> {
+        if self.cur_token_is(expect_cur.clone()) {
+            self.next_token();
+            Ok(())
+        } else {
+            let err_msg = format!("parsing error: expect {:?} kind token, but got {:?} kind token\n", expect_cur, self.cur_token().kind);
+            return Err(self.error_token(self.cur_token(), err_msg.as_str()));
+        }
+    }
+
     fn next_token_is(&self, expect: TokenKind) -> bool {
         let peek = self.peek_token();
         return  peek.kind == expect;
@@ -283,6 +299,7 @@ impl Parser {
             let start = self.cur_token().start;
             let end = self.cur_token().end;
             name = ident.clone();
+            // @TODO: consider function declaration that includes parameter list
             Ok(Declarator{star_count, name, start, end})
         } else {
             let err_msg = self.error_token(self.cur_token(), "not an identifier");
@@ -338,6 +355,7 @@ impl Parser {
                 item = Stmt(self.parse_stmt()?);
             }
             items.push(item);
+            // skip semicolon ';'
             self.next_token();
             if matches!(cur_kind, Eof) {
                 return Err("parsing block statement error: reach the end of file.".to_string())
@@ -590,18 +608,30 @@ impl Parser {
         self.next_token();
 
         // Parse function parameters
-        if let LParen = &self.cur_token().kind {
-            // for parsing 0 parameter function
-            self.expect_peek(&RParen);
+        let mut params: Vec<Parameter> = Vec::new();
+        match &self.cur_token().kind {
+            LParen => self.next_token(),
+            _ => return Err(self.error_token(self.cur_token(), "expect '(' token for parsing function parameters")),
+        }
+        while self.cur_token().kind != RParen {
+            if &self.cur_token().kind == &Comma {
+                self.next_token();
+            }
+            let decl_spec = self.parse_decl_spec()?;
+            self.next_token();
+            let declarator = self.parse_declarator()?;
+            self.next_token();
+            let param = Parameter{decl_spec, declarator};
+            params.push(param);
         }
         self.expect_peek(&LBrace);
-        // parse statemens in this function.
+        // parse function body
         let res = self.parse_block()?;
         // @Readability: parse_block should definitely return a code block, we don't need to
         // check it
         match res {
             Block(items) => Ok(Function{name: declarator.name, return_type,
-                star_count: declarator.star_count, items}),
+                star_count: declarator.star_count, params, items}),
             _ => Err(self.error_token(self.cur_token(), "(this is the end of
              parsing result) error parsing function definition: we want to
               parse code block of function definition, but got this result")),

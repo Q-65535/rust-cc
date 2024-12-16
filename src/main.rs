@@ -28,12 +28,12 @@ fn main() {
         return;
     }
 
-    // @FixMe: conflicts will happen when other places use lock() during the following compilation.
-    // @FixMe: conflicts will happen when other places use lock() during the following compilation.
-    // @FixMe: conflicts will happen when other places use lock() during the following compilation.
-    let src_str: &str = &SRC.lock().unwrap();
     // lex
-    let mut lexer = Lexer::new(src_str);
+    let mut lexer: Lexer;
+    {
+        let src_str: &str = &SRC.lock().unwrap();
+        lexer = Lexer::new(src_str);
+    }
     let mut tokens = lexer.lex();
     // parse
     let mut parser = Parser::new(tokens);
