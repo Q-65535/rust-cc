@@ -25,6 +25,13 @@ pub enum BlockItem {
 }
 use BlockItem::*;
 
+#[derive(Debug, Clone)]
+pub enum DeclaratorSuffix {
+    ArrayLen(i32),
+    FunParam(Vec<Parameter>),
+}
+use DeclaratorSuffix::*;
+
 #[derive(Debug)]
 pub struct Program {
     pub funs: Vec<Function>,
@@ -68,6 +75,7 @@ pub struct InitDeclarator {
 pub struct Declarator {
     pub star_count: i32,
     pub name: String,
+    pub suffix: Option<DeclaratorSuffix>,
     pub start: usize,
     pub end: usize,
 }
@@ -133,10 +141,9 @@ impl Expr {
         }
     }
     pub fn is_ptr(&self) -> bool {
-        if let TyPtr(_) = &self.ty {
-            true
-        } else {
-            false
+        match &self.ty {
+            TyPtr(_) | ArrayOf(_) => true,
+            _ => false
         }
     }
 }
@@ -232,7 +239,7 @@ impl Parser {
             match kind {
                 Eof => break,
                 _ => {
-                    let fun = self.parse_fundef()?;
+                    let fun = self.parse_fun_def()?;
                     funs.push(fun);
                 }
             }
@@ -299,8 +306,38 @@ impl Parser {
             let start = self.cur_token().start;
             let end = self.cur_token().end;
             name = ident.clone();
-            // @TODO: consider function declaration that includes parameter list
-            Ok(Declarator{star_count, name, start, end})
+
+            // parse suffix of a declarator
+            let mut suffix = None;
+            match &self.peek_token().kind {
+                // array size
+                LSqureBracket => {
+                    self.check_skip_peek(&LSqureBracket);
+                    let array_size: i32 = self.parse_raw_integer()?;
+                    suffix = Some(ArrayLen(array_size));
+                    self.expect_peek(&RSqureBracket);
+                }
+                // function parameters
+                LParen => {
+                    let mut params: Vec<Parameter> = Vec::new();
+                    self.check_skip_peek(&LParen);
+                    while self.cur_token().kind != RParen {
+                        if &self.cur_token().kind == &Comma {
+                            self.next_token();
+                        }
+                        let decl_spec = self.parse_decl_spec()?;
+                        self.next_token();
+                        let declarator = self.parse_declarator()?;
+                        self.next_token();
+                        let param = Parameter{decl_spec, declarator};
+                        params.push(param);
+                    }
+                    suffix = Some(FunParam(params));
+                }
+                _ => {},
+            }
+
+            Ok(Declarator{star_count, name, suffix, start, end})
         } else {
             let err_msg = self.error_token(self.cur_token(), "not an identifier");
             return Err(err_msg);
@@ -549,6 +586,15 @@ impl Parser {
         }
     }
 
+    fn parse_raw_integer(&self) -> Result<i32, String> {
+        let cur_token = self.cur_token();
+        if let Num(n) = cur_token.kind {
+            return Ok(n);
+        } else {
+            return Err(self.error_token(self.cur_token(), "expect a number"));
+        }
+    }
+
     fn parse_infix(&mut self, lhs: Expr) -> Result<Expr, String> {
         let tok = self.cur_token().clone();
         let p = tok.precedence();
@@ -601,40 +647,25 @@ impl Parser {
         return Ok(args);
     }
 
-    fn parse_fundef(&mut self) -> Result<Function, String> {
+    fn parse_fun_def(&mut self) -> Result<Function, String> {
         let return_type = self.parse_decl_spec()?;
         self.next_token();
         let declarator = self.parse_declarator()?;
-        self.next_token();
-
-        // Parse function parameters
-        let mut params: Vec<Parameter> = Vec::new();
-        match &self.cur_token().kind {
-            LParen => self.next_token(),
-            _ => return Err(self.error_token(self.cur_token(), "expect '(' token for parsing function parameters")),
-        }
-        while self.cur_token().kind != RParen {
-            if &self.cur_token().kind == &Comma {
-                self.next_token();
+        if let Some(FunParam(params)) = &declarator.suffix {
+            self.expect_peek(&LBrace);
+            // parse function body
+            let res = self.parse_block()?;
+            // @Cleanup: parse_block should definitely return a code block, we don't need to
+            // check it
+            match res {
+                Block(items) => Ok(Function{name: declarator.name, return_type,
+                    star_count: declarator.star_count, params: params.clone(), items}),
+                _ => Err(self.error_token(self.cur_token(), "(this is the end of
+                parsing result) error parsing function definition: we want to
+                parse code block of function definition, but got this result")),
             }
-            let decl_spec = self.parse_decl_spec()?;
-            self.next_token();
-            let declarator = self.parse_declarator()?;
-            self.next_token();
-            let param = Parameter{decl_spec, declarator};
-            params.push(param);
-        }
-        self.expect_peek(&LBrace);
-        // parse function body
-        let res = self.parse_block()?;
-        // @Readability: parse_block should definitely return a code block, we don't need to
-        // check it
-        match res {
-            Block(items) => Ok(Function{name: declarator.name, return_type,
-                star_count: declarator.star_count, params, items}),
-            _ => Err(self.error_token(self.cur_token(), "(this is the end of
-             parsing result) error parsing function definition: we want to
-              parse code block of function definition, but got this result")),
+        } else {
+            Err(self.error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
     }
 

@@ -13,6 +13,8 @@ pub enum TokenKind {
     RParen,
     LBrace,
     RBrace,
+    LSqureBracket,
+    RSqureBracket,
     Assignment,
     Compare(CompareToken),
     Not,
@@ -180,6 +182,8 @@ impl Lexer {
                 ')' => tokens.push(Self::gen_token(RParen, ")", i, 1)),
                 '{' => tokens.push(Self::gen_token(LBrace, "{", i, 1)),
                 '}' => tokens.push(Self::gen_token(RBrace, "}", i, 1)),
+                '[' => tokens.push(Self::gen_token(LSqureBracket, "{", i, 1)),
+                ']' => tokens.push(Self::gen_token(RSqureBracket, "}", i, 1)),
                 '&' => tokens.push(Self::gen_token(Ampersand, "&", i, 1)),
                 'a'..='z' | '_' => {
                     let name = self.read_ident();

@@ -11,6 +11,7 @@ use crate::Program;
 use crate::Function;
 use crate::Parameter;
 use crate::Declarator;
+use crate::DeclaratorSuffix;
 use crate::Expr;
 use crate::Lexer;
 use crate::SRC;
@@ -20,6 +21,7 @@ pub enum Type {
     // pointer to ... type
     TyPtr(Box<Type>),
     TyInt,
+    ArrayOf(Box<Type>),
     // function return ... type
     TyFunc(Box<Type>),
     ty_none,
@@ -146,12 +148,25 @@ impl FunAnalyzer {
             SpecInt => base_type = TyInt,
         }
         for init in &mut decl.init_declarators {
-            let obj = self.create_obj(&base_type, &init.declarator);
-            if let Some(_) = self.sbl_table.find_obj(&obj.name) {
-                let err_info = format!("variable {} already defined", obj.name);
+            if let Some(_) = self.sbl_table.find_obj(&init.declarator.name) {
+                let err_info = format!("variable {} already defined", init.declarator.name);
                 println!("{}", self.err_declarator(&init.declarator, &err_info));
                 exit(0);
             }
+            // deal with pointers
+            let mut cur_type = base_type.clone();
+            for i in 0..init.declarator.star_count {
+                cur_type = pointer_to(&cur_type);
+            }
+            // deal with suffix
+            if let Some(suffix) = &init.declarator.suffix {
+                match suffix {
+                    DeclaratorSuffix::ArrayLen(len) => cur_type = array_of(&cur_type),
+                    DeclaratorSuffix::FunParam(_) => todo!(),
+                }
+            }
+
+            let obj = self.create_obj(&cur_type, &init.declarator);
             self.sbl_table.add_obj(obj);
             if let Some(expr) = &mut init.init_expr {
                 if let Err(e) = self.analyze_expr(expr) {
@@ -167,8 +182,15 @@ impl FunAnalyzer {
         for i in 0..declarator.star_count {
             cur_type = pointer_to(&cur_type);
         }
+        let mut size: i32 = 8;
+        if let Some(suffix) = &declarator.suffix {
+            match suffix {
+                DeclaratorSuffix::ArrayLen(len) => size = (*len) * 8,
+                DeclaratorSuffix::FunParam(_) => {},
+            }
+        }
         let obj = Obj{name: declarator.name.clone(), ty: cur_type, offset: self.cur_offset};
-        self.cur_offset += 8;
+        self.cur_offset += size;
         obj
     }
 
@@ -281,8 +303,14 @@ impl FunAnalyzer {
                         expr.ty = *base.clone();
                         Ok(())
                     }
+                    ArrayOf(base) => {
+                        expr.ty = *base.clone();
+                        Ok(())
+                    }
                     _ => {
-                        return Err(self.error_expr(expr, "semantic error: dereferencing a non-pointer"));
+                        let err_msg = format!("semantic error: invalid dereferencing: 
+                        try to dereference {:?}", expr.ty);
+                        return Err(self.error_expr(expr, &err_msg));
                     }
                 }
             }
@@ -334,6 +362,11 @@ impl FunAnalyzer {
 fn pointer_to(ty: &Type) -> Type {
     let base = Box::new(ty.clone());
     TyPtr(base)
+}
+
+fn array_of(ty: &Type) -> Type {
+    let base = Box::new(ty.clone());
+    ArrayOf(base)
 }
 
 fn function_type(ty: &Type) -> Type {

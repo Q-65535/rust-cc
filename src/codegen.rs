@@ -13,6 +13,7 @@ use crate::Obj;
 use crate::SblTable;
 use crate::AnalyzedProgram;
 use crate::AnalyzedFun;
+use crate::Type::{self, *};
 use crate::SRC;
 
 pub struct Generator {
@@ -29,7 +30,6 @@ struct FunContext {
 }
 
 impl Generator {
-    // @Smell: Strange to use &String in rust
     pub fn new(aprogram: AnalyzedProgram) -> Self {
         let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
         let cur_afun = aprogram.afuns[0].clone();
@@ -74,10 +74,12 @@ impl Generator {
 
     fn block_gen(&self, items: &Vec<BlockItem>) {
         for item in items {
+            println!(";;;;;;;;;;;;;;;;;;;;;;;");
             match item {
                 Stmt(stmt) => self.stmt_gen(stmt),
                 Decl(decl) => self.decl_gen(decl),
             }
+            print!(";;;;;;;;;;;;;;;;;;;;;;;;");
         }
         println!();
     }
@@ -184,23 +186,22 @@ impl Generator {
                 self.gen_addr(var);
                 println!("  push %rax");
                 self.expr_gen(val);
-                println!("  pop %rdi");
-                println!("  mov %rax, (%rdi)");
+                store();
             }
             Neg(expr) => {
                 self.expr_gen(expr);
                 println!("  neg %rax");
             }
-            Deref(expr) => {
-                self.expr_gen(expr);
-                println!("  mov (%rax), %rax");
+            Deref(inner_expr) => {
+                self.expr_gen(inner_expr);
+                load_according_to_type(&expr.ty);
             }
             AddrOf(expr) => self.gen_addr(expr),
             Ident(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
                 let obj = self.cur_afun.sbl_table.find_obj(s).expect(err_smg);
                 self.gen_addr(expr);
-                println!("  mov (%rax), %rax\n");
+                load_according_to_type(&expr.ty);
             }
             FunCall(func_ref, args) => {
                 match &func_ref.content {
@@ -272,6 +273,19 @@ impl Generator {
     fn pop(&self, reg: &str) {
         println!("  pop {}", reg);
     }
+}
+
+fn load_according_to_type(ty: &Type) {
+    if let ArrayOf(_) = ty {
+
+    } else {
+        println!("  mov (%rax), %rax");
+    }
+}
+
+fn store() {
+    println!("  pop %rdi");
+    println!("  mov %rax, (%rdi)");
 }
 
 fn align_to(n: i32, align: i32) -> i32 {
