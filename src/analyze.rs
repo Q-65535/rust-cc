@@ -21,12 +21,22 @@ pub enum Type {
     // pointer to ... type
     TyPtr(Box<Type>),
     TyInt,
-    ArrayOf(Box<Type>),
+    ArrayOf(Box<Type>, i32),
     // function return ... type
     TyFunc(Box<Type>),
     ty_none,
 }
 use Type::*;
+
+fn sizeof(ty: &Type) -> i32 {
+    match ty {
+        TyPtr(_) => 8,
+        TyInt => 8,
+        ArrayOf(inner_ty, len) => sizeof(inner_ty) * len,
+        TyFunc(_) => 8,
+        ty_none => 8,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Obj {
@@ -133,7 +143,7 @@ impl FunAnalyzer {
         match &param.decl_spec {
             SpecInt => base_type = TyInt,
         }
-        let obj = self.create_obj(&base_type, &param.declarator);
+        let obj = self.create_obj(&base_type, &param.declarator.name);
         if let Some(_) = self.sbl_table.find_obj(&obj.name) {
             let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
             println!("{}", self.err_declarator(&param.declarator, &err_info));
@@ -159,14 +169,19 @@ impl FunAnalyzer {
                 cur_type = pointer_to(&cur_type);
             }
             // deal with suffix
-            if let Some(suffix) = &init.declarator.suffix {
+            if let Some(suffix) = &mut init.declarator.suffix {
                 match suffix {
-                    DeclaratorSuffix::ArrayLen(len) => cur_type = array_of(&cur_type),
+                    DeclaratorSuffix::ArrayLen(lens) => {
+                        while lens.len() > 0 {
+                            let len: i32 = lens.pop().unwrap();
+                            cur_type = array_of(&cur_type, len);
+                        }
+                    }
                     DeclaratorSuffix::FunParam(_) => todo!(),
                 }
             }
 
-            let obj = self.create_obj(&cur_type, &init.declarator);
+            let obj = self.create_obj(&cur_type, &init.declarator.name);
             self.sbl_table.add_obj(obj);
             if let Some(expr) = &mut init.init_expr {
                 if let Err(e) = self.analyze_expr(expr) {
@@ -177,19 +192,10 @@ impl FunAnalyzer {
         }
     }
 
-    fn create_obj(&mut self, base_type: &Type, declarator: &Declarator) -> Obj {
+    fn create_obj(&mut self, base_type: &Type, name: &str) -> Obj {
         let mut cur_type = base_type.clone();
-        for i in 0..declarator.star_count {
-            cur_type = pointer_to(&cur_type);
-        }
-        let mut size: i32 = 8;
-        if let Some(suffix) = &declarator.suffix {
-            match suffix {
-                DeclaratorSuffix::ArrayLen(len) => size = (*len) * 8,
-                DeclaratorSuffix::FunParam(_) => {},
-            }
-        }
-        let obj = Obj{name: declarator.name.clone(), ty: cur_type, offset: self.cur_offset};
+        let mut size: i32 = sizeof(base_type);
+        let obj = Obj{name: name.to_string(), ty: cur_type, offset: self.cur_offset};
         self.cur_offset += size;
         obj
     }
@@ -260,13 +266,17 @@ impl FunAnalyzer {
                         }
                         if lhs.is_integer() && rhs.is_ptr() {
                             swap(lhs, rhs);
-                            scal_expr(rhs, Mul, 8);
-                            expr.ty = lhs.ty.clone();
                         }
                         if lhs.is_ptr() && rhs.is_integer() {
-                            scal_expr(rhs, Mul, 8);
-                            expr.ty = lhs.ty.clone();
+                            let mut scal: i32 = 8;
+                            match &lhs.ty {
+                                TyPtr(..) => scal = sizeof(&lhs.ty),
+                                ArrayOf(element_type, _) => scal = sizeof(element_type),
+                                _ => {},
+                            }
+                            scal_expr(rhs, Mul, scal);
                         }
+                        expr.ty = lhs.ty.clone();
                         return Ok(());
                     }
                     Minus => {
@@ -274,11 +284,21 @@ impl FunAnalyzer {
                             return Err(self.error_expr(rhs, "error: integer - ptr"));
                         }
                         if lhs.is_ptr() && rhs.is_integer() {
-                            scal_expr(rhs, Mul, 8);
+                            let mut scal: i32 = 8;
+                            match &lhs.ty {
+                                TyPtr(..) => scal = sizeof(&lhs.ty),
+                                ArrayOf(element_type, _) => scal = sizeof(element_type),
+                                _ => {},
+                            }
+                            scal_expr(rhs, Mul, scal);
                             expr.ty = lhs.ty.clone();
                         } else if lhs.is_ptr() && rhs.is_ptr() {
+                            // @Incomplete: consider array and pointer
                             expr.ty = TyInt;
-                            scal_expr(expr, Div, 8);
+                            let scal = sizeof(&lhs.ty);
+                            scal_expr(expr, Div, scal);
+                        } else if lhs.is_integer() && rhs.is_integer() {
+                            expr.ty = TyInt;
                         }
                         Ok(())
                     }
@@ -303,7 +323,7 @@ impl FunAnalyzer {
                         expr.ty = *base.clone();
                         Ok(())
                     }
-                    ArrayOf(base) => {
+                    ArrayOf(base, _) => {
                         expr.ty = *base.clone();
                         Ok(())
                     }
@@ -364,9 +384,9 @@ fn pointer_to(ty: &Type) -> Type {
     TyPtr(base)
 }
 
-fn array_of(ty: &Type) -> Type {
+fn array_of(ty: &Type, len: i32) -> Type {
     let base = Box::new(ty.clone());
-    ArrayOf(base)
+    ArrayOf(base, len)
 }
 
 fn function_type(ty: &Type) -> Type {

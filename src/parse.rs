@@ -27,7 +27,7 @@ use BlockItem::*;
 
 #[derive(Debug, Clone)]
 pub enum DeclaratorSuffix {
-    ArrayLen(i32),
+    ArrayLen(Vec<i32>),
     FunParam(Vec<Parameter>),
 }
 use DeclaratorSuffix::*;
@@ -142,7 +142,7 @@ impl Expr {
     }
     pub fn is_ptr(&self) -> bool {
         match &self.ty {
-            TyPtr(_) | ArrayOf(_) => true,
+            TyPtr(_) | ArrayOf(_, _) => true,
             _ => false
         }
     }
@@ -310,12 +310,16 @@ impl Parser {
             // parse suffix of a declarator
             let mut suffix = None;
             match &self.peek_token().kind {
-                // array size
+                // array sizes
                 LSqureBracket => {
-                    self.check_skip_peek(&LSqureBracket);
-                    let array_size: i32 = self.parse_raw_integer()?;
-                    suffix = Some(ArrayLen(array_size));
-                    self.expect_peek(&RSqureBracket);
+                    let mut lens: Vec<i32> = Vec::new();
+                    while &self.peek_token().kind == &LSqureBracket {
+                        self.check_skip_peek(&LSqureBracket);
+                        let cur_array_len: i32 = self.parse_raw_integer()?;
+                        lens.push(cur_array_len);
+                        self.expect_peek(&RSqureBracket);
+                    }
+                    suffix = Some(ArrayLen(lens));
                 }
                 // function parameters
                 LParen => {

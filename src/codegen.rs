@@ -276,7 +276,7 @@ impl Generator {
 }
 
 fn load_according_to_type(ty: &Type) {
-    if let ArrayOf(_) = ty {
+    if let ArrayOf(_, _) = ty {
 
     } else {
         println!("  mov (%rax), %rax");
