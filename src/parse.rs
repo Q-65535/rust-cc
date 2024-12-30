@@ -89,12 +89,14 @@ pub enum ExprType {
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
     Ident(String),
+    ArrayIndexing(Box<Expr>, Vec<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
     pub content: ExprType,
+    // @Smell: Do we really need a token for each expression?
     pub token: Token,
     pub ty: Type,
     pub start: usize,
@@ -114,6 +116,7 @@ impl Expr {
             Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.token.start,
             Binary(lhs, _, _) => lhs.cal_start_index(),
             ExprType::Assign(lhs, _) => lhs.cal_start_index(),
+            ArrayIndexing(array_ref, _) => array_ref.cal_start_index(),
             FunCall(ident, _) => ident.cal_start_index(),
         }
     }
@@ -124,6 +127,7 @@ impl Expr {
             Number(_) | Ident(_) => self.token.end,
             Binary(_, rhs, _) => rhs.cal_end_index(),
             ExprType::Assign(_, rhs) => rhs.cal_end_index(),
+            ArrayIndexing(array_ref, _) => array_ref.cal_end_index(),
             FunCall(ident, args_list) => {
                 match args_list.last() {
                     Some(last_arg) => return last_arg.cal_end_index(),
@@ -505,17 +509,20 @@ impl Parser {
                             self.next_token();
                             expr = self.parse_funcall(expr)?;
                         },
-                        Num(_) => {
-                            let err_msg = self.error_token(self.cur_token(), "expect an operator");
-                            return Err(err_msg);
-                        },
-                        Eof | RParen => {
-                            break;
-                        },
+                        LSqureBracket => {
+                            expr = self.parse_array_indexing(expr)?;
+                        }
                         Assignment => {
                             self.next_token();
                             expr = self.parse_assign(expr)?;
                         }
+                        Eof | RParen => {
+                            break;
+                        },
+                        Num(_) => {
+                            let err_msg = self.error_token(self.cur_token(), "expect an operator");
+                            return Err(err_msg);
+                        },
                         _ => {
                             let err_msg = self.error_token(self.peek_token(), "not support parsing this token");
                             return Err(err_msg);
@@ -611,7 +618,7 @@ impl Parser {
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
         let tok = self.cur_token().clone();
         match lhs.content {
-            Ident(_) | Deref(_) => {
+            Ident(_) | Deref(_) | ArrayIndexing(_, _) => {
                 self.next_token();
                 let val = self.parse_expr(Lowest)?;
                 let content = ExprType::Assign(Box::new(lhs), Box::new(val));
@@ -626,6 +633,19 @@ impl Parser {
         let args_list = self.parse_args()?;
         let content = FunCall(Box::new(lhs), args_list);
         return Ok(Expr::new(content, cur_tok));
+    }
+
+    fn parse_array_indexing(&mut self, lhs: Expr) -> Result<Expr, String> {
+        let prime_token = self.cur_token().clone();
+        let mut indices: Vec<Expr> = Vec::new();
+        while self.peek_token().kind == LSqureBracket {
+            self.check_skip_peek(&LSqureBracket);
+            let cur_index = self.parse_expr(Lowest)?;
+            indices.push(cur_index);
+            self.expect_peek(&RSqureBracket);
+        }
+        let content = ArrayIndexing(Box::new(lhs), indices);
+        return Ok(Expr::new(content, prime_token))
     }
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, String> {

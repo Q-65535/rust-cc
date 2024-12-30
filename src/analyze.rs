@@ -184,6 +184,7 @@ impl FunAnalyzer {
             let obj = self.create_obj(&cur_type, &init.declarator.name);
             self.sbl_table.add_obj(obj);
             if let Some(expr) = &mut init.init_expr {
+                // @Incomplete: check whether two types (obj and expr) match
                 if let Err(e) = self.analyze_expr(expr) {
                     println!("{}", e);
                     exit(0);
@@ -246,8 +247,9 @@ impl FunAnalyzer {
     }
 
     fn analyze_expr(&mut self, expr: &mut Expr) -> Result<(), String> {
-        if !matches!(&expr.ty, Type::ty_none) {
-            return Err(self.error_expr(expr, "error: both lhs and rhs are of ptr type"));
+        // if already analyzed, skip
+        if !(expr.ty == Type::ty_none) {
+            return Ok(());
         }
         match &mut expr.content {
             Number(n) => Ok(expr.ty = TyInt),
@@ -306,6 +308,7 @@ impl FunAnalyzer {
                 }
             }
             Assign(lhs, rhs) => {
+                // @Incomplete: check whether two types (lhs and rhs) match
                 self.analyze_expr(rhs)?;
                 self.analyze_expr(lhs)?;
                 expr.ty = lhs.ty.clone();
@@ -348,6 +351,34 @@ impl FunAnalyzer {
                     return Err(self.error_expr(expr, &err_info));
                 }
             }
+            // array indexing is converted to pointer arithmatic
+            ArrayIndexing(arr_ref, indices) => {
+                self.analyze_expr(arr_ref)?;
+                             // reborrow here
+                for index in &mut *indices {
+                    self.analyze_expr(index)?;
+                }
+                let mut cur_ref = arr_ref;
+                for index in indices {
+                    let mut depth = depth_of(&cur_ref.ty);
+                    // type checking
+                    if !cur_ref.is_ptr() {
+                        let err_msg = self.error_expr(index, "subscripted value is neither array nor pointer nor vector");
+                        return Err(err_msg);
+                    } else {
+                        let pointer_arithmatic = Binary(cur_ref.clone(), Box::new(index.clone()), Plus);
+                        let mut pointer_arithmatic_expr = Expr::new(pointer_arithmatic, index.token.clone());
+                        self.analyze_expr(&mut pointer_arithmatic_expr);
+                        let deref = Deref(Box::new(pointer_arithmatic_expr));
+                        let mut deref_expr = Expr::new(deref, index.token.clone());
+                        self.analyze_expr(&mut deref_expr);
+                        depth = depth_of(&deref_expr.ty);
+                        *cur_ref = Box::new(deref_expr);
+                    }
+                }
+                expr.content = cur_ref.content.clone();
+                Ok(())
+            }
             FunCall(ident, args) => {
                 for arg in args {
                     self.analyze_expr(arg)?;
@@ -387,6 +418,16 @@ fn pointer_to(ty: &Type) -> Type {
 fn array_of(ty: &Type, len: i32) -> Type {
     let base = Box::new(ty.clone());
     ArrayOf(base, len)
+}
+
+fn depth_of(ty: &Type) -> i32 {
+    let mut cur_ty = ty;
+    let mut res = 0;
+    while let ArrayOf(inner, _) = cur_ty {
+        res += 1;
+        cur_ty = inner;
+    }
+    res
 }
 
 fn function_type(ty: &Type) -> Type {
