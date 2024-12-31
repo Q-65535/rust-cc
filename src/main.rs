@@ -1,4 +1,8 @@
  #![allow(warnings)]
+pub mod parse;
+pub mod lex;
+pub mod analyze;
+pub mod codegen;
 use std::{io::{self, Write}, process::exit, env};
 use colored::*;
 use crate::lex::*;
@@ -9,10 +13,6 @@ use crate::CompareToken::*;
 use crate::ExprType::*;
 use crate::codegen::*;
 use std::sync::Mutex;
-pub mod parse;
-pub mod lex;
-pub mod analyze;
-pub mod codegen;
 
 static SRC: Mutex<String> = Mutex::new(String::new());
 
@@ -25,7 +25,6 @@ fn main() {
         *src = input.clone();
     } else {
         println!("No arguments provided.");
-        return;
     }
 
     // lex

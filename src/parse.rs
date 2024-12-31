@@ -1,9 +1,10 @@
 use std::{io::{self, Write}, process::exit};
 use colored::*;
-use crate::Precedence::{self, *};
-use crate::TokenKind::{self, *};
+use crate::lex::{self, *};
+use crate::Precedence::*;
+use crate::TokenKind::*;
 use crate::ExprType::*;
-use crate::KeywordToken::{self, *};
+use crate::KeywordToken::*;
 use crate::Type::{self, *};
 use crate::Token;
 use crate::SRC;

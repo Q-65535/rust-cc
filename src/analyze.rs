@@ -1,11 +1,13 @@
 use std::{io::{self, Write}, collections::VecDeque, process::exit, mem::swap};
 use colored::*;
-use crate::ExprType::{self, *};
-use crate::StmtType::{self, *};
-use crate::TokenKind::{self, *};
-use crate::CompareToken::{self, *};
-use crate::BlockItem::{self, *};
-use crate::DeclarationSpecifier::{self, *};
+use crate::parse::{self, *};
+use crate::lex::{self, *};
+use crate::ExprType::*;
+use crate::StmtType::*;
+use crate::TokenKind::*;
+use crate::CompareToken::*;
+use crate::BlockItem::*;
+use crate::DeclarationSpecifier::*;
 use crate::Declaration;
 use crate::Program;
 use crate::Function;
@@ -32,7 +34,7 @@ fn sizeof(ty: &Type) -> i32 {
     match ty {
         TyPtr(_) => 8,
         TyInt => 8,
-        ArrayOf(inner_ty, len) => sizeof(inner_ty) * len,
+        ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         TyFunc(_) => 8,
         ty_none => 8,
     }
@@ -98,8 +100,10 @@ impl Analyzer {
         let mut afuns: Vec<AnalyzedFun> = Vec::new();
         for fun in program.funs {
             let mut fun_analyzer = FunAnalyzer::new();
-            let afun = fun_analyzer.analyze(fun);
-            afuns.push(afun);
+            match fun_analyzer.analyze(fun) {
+                Ok(afun) => afuns.push(afun),
+                Err(e) => println!("{}", e),
+            }
         }
         AnalyzedProgram{afuns}
     }
@@ -116,29 +120,30 @@ impl FunAnalyzer {
         FunAnalyzer{sbl_table, cur_offset: 0}
     }
 
-    pub fn analyze(&mut self, mut fun: Function) -> AnalyzedFun {
+    pub fn analyze(&mut self, mut fun: Function) -> Result<AnalyzedFun, String> {
         for param in &fun.params {
-            self.analyze_param(param);
+            self.analyze_param(param)?;
         }
         for item in &mut fun.items {
             match item {
-                Stmt(stmt) => self.analyze_stmt(stmt),
-                Decl(decl) => self.analyze_decl(decl),
+                Stmt(stmt) => self.analyze_stmt(stmt)?,
+                Decl(decl) => self.analyze_decl(decl)?,
             }
         }
-        AnalyzedFun{fun, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset}
+        Ok(AnalyzedFun{fun, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset})
     }
 
-    fn analyze_items(&mut self, items: &mut Vec<BlockItem>) {
+    fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Result<(), String> {
         for item in items {
             match item {
-                Stmt(stmt) => self.analyze_stmt(stmt),
-                Decl(decl) => self.analyze_decl(decl),
+                Stmt(stmt) => self.analyze_stmt(stmt)?,
+                Decl(decl) => self.analyze_decl(decl)?,
             }
         }
+        Ok(())
     }
 
-    fn analyze_param(&mut self, param: &Parameter) {
+    fn analyze_param(&mut self, param: &Parameter) -> Result<(), String> {
         let base_type: Type;
         match &param.decl_spec {
             SpecInt => base_type = TyInt,
@@ -146,13 +151,13 @@ impl FunAnalyzer {
         let obj = self.create_obj(&base_type, &param.declarator.name);
         if let Some(_) = self.sbl_table.find_obj(&obj.name) {
             let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
-            println!("{}", self.err_declarator(&param.declarator, &err_info));
-            exit(0);
+            return Err(self.err_declarator(&param.declarator, &err_info));
         }
         self.sbl_table.add_obj(obj);
+        Ok(())
     }
 
-    fn analyze_decl(&mut self, decl: &mut Declaration) {
+    fn analyze_decl(&mut self, decl: &mut Declaration) -> Result<(), String> {
         let base_type: Type;
         match &decl.decl_spec {
             SpecInt => base_type = TyInt,
@@ -160,8 +165,7 @@ impl FunAnalyzer {
         for init in &mut decl.init_declarators {
             if let Some(_) = self.sbl_table.find_obj(&init.declarator.name) {
                 let err_info = format!("variable {} already defined", init.declarator.name);
-                println!("{}", self.err_declarator(&init.declarator, &err_info));
-                exit(0);
+                return Err(self.err_declarator(&init.declarator, &err_info));
             }
             // deal with pointers
             let mut cur_type = base_type.clone();
@@ -185,12 +189,10 @@ impl FunAnalyzer {
             self.sbl_table.add_obj(obj);
             if let Some(expr) = &mut init.init_expr {
                 // @Incomplete: check whether two types (obj and expr) match
-                if let Err(e) = self.analyze_expr(expr) {
-                    println!("{}", e);
-                    exit(0);
-                }
+                self.analyze_expr(expr)?;
             }
         }
+        Ok(())
     }
 
     fn create_obj(&mut self, base_type: &Type, name: &str) -> Obj {
@@ -201,22 +203,12 @@ impl FunAnalyzer {
         obj
     }
 
-    fn analyze_stmt(&mut self, stmt: &mut StmtType) {
+    fn analyze_stmt(&mut self, stmt: &mut StmtType) -> Result<(), String> {
         match stmt {
-            Ex(expr) | Return(expr) => {
-                if let Err(e) = self.analyze_expr(expr) {
-                    println!("{}", e);
-                    exit(0);
-                }
-            }
-            Block(items) => {
-                self.analyze_items(items);
-            }
+            Ex(expr) | Return(expr) => self.analyze_expr(expr)?,
+            Block(items) => self.analyze_items(items)?,
             If{cond, then, otherwise} => {
-                if let Err(e) = self.analyze_expr(cond) {
-                    println!("{}", e);
-                    exit(0);
-                }
+                self.analyze_expr(cond)?;
                 self.analyze_stmt(then);
                 if let Some(otherwise) = otherwise {
                     self.analyze_stmt(otherwise);
@@ -224,26 +216,18 @@ impl FunAnalyzer {
             }
             For{init, cond, inc, then} => {
                 if let Some(init) = init {
-                    if let Err(e) = self.analyze_expr(init) {
-                        println!("{}", e);
-                        exit(0);
-                    }
+                    self.analyze_expr(init)?;
                 }
                 if let Some(cond) = cond {
-                    if let Err(e) = self.analyze_expr(cond) {
-                        println!("{}", e);
-                        exit(0);
-                    }
+                    self.analyze_expr(cond)?;
                 }
                 if let Some(inc) = inc {
-                    if let Err(e) = self.analyze_expr(inc) {
-                        println!("{}", e);
-                        exit(0);
-                    }
+                    self.analyze_expr(inc)?;
                 }
                 self.analyze_stmt(then);
             }
         }
+        Ok(())
     }
 
     fn analyze_expr(&mut self, expr: &mut Expr) -> Result<(), String> {
@@ -360,7 +344,6 @@ impl FunAnalyzer {
                 }
                 let mut cur_ref = arr_ref;
                 for index in indices {
-                    let mut depth = depth_of(&cur_ref.ty);
                     // type checking
                     if !cur_ref.is_ptr() {
                         let err_msg = self.error_expr(index, "subscripted value is neither array nor pointer nor vector");
@@ -372,7 +355,6 @@ impl FunAnalyzer {
                         let deref = Deref(Box::new(pointer_arithmatic_expr));
                         let mut deref_expr = Expr::new(deref, index.token.clone());
                         self.analyze_expr(&mut deref_expr);
-                        depth = depth_of(&deref_expr.ty);
                         *cur_ref = Box::new(deref_expr);
                     }
                 }
