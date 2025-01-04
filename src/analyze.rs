@@ -186,10 +186,15 @@ impl FunAnalyzer {
             }
 
             let obj = self.create_obj(&cur_type, &init.declarator.name);
-            self.sbl_table.add_obj(obj);
+            self.sbl_table.add_obj(obj.clone());
             if let Some(expr) = &mut init.init_expr {
                 // @Incomplete: check whether two types (obj and expr) match
                 self.analyze_expr(expr)?;
+                if !can_assign(&obj.ty, &expr.ty) {
+                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+                    obj.name, &obj.ty, &expr.ty);
+                    return Err(self.err_declarator(&init.declarator, &err_info));
+                }
             }
         }
         Ok(())
@@ -295,6 +300,11 @@ impl FunAnalyzer {
                 // @Incomplete: check whether two types (lhs and rhs) match
                 self.analyze_expr(rhs)?;
                 self.analyze_expr(lhs)?;
+                if !can_assign(&lhs.ty, &rhs.ty) {
+                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+                    lhs.token.val, &lhs.ty, &rhs.ty);
+                    return Err(self.error_expr(&lhs, &err_info));
+                }
                 expr.ty = lhs.ty.clone();
                 Ok(())
             }
@@ -355,9 +365,11 @@ impl FunAnalyzer {
                         let deref = Deref(Box::new(pointer_arithmatic_expr));
                         let mut deref_expr = Expr::new(deref, index.token.clone());
                         self.analyze_expr(&mut deref_expr);
+                        self.analyze_expr(&mut deref_expr);
                         *cur_ref = Box::new(deref_expr);
                     }
                 }
+                expr.ty = cur_ref.ty.clone();
                 expr.content = cur_ref.content.clone();
                 Ok(())
             }
@@ -415,6 +427,25 @@ fn depth_of(ty: &Type) -> i32 {
 fn function_type(ty: &Type) -> Type {
     let return_type = Box::new(ty.clone());
     TyFunc(return_type)
+}
+
+// evaluate whether a expression of right type can be assigned to a "stuff"
+// of left type
+fn can_assign(left: &Type, right: &Type) -> bool {
+    // although pointer and array are internally different types, array can be
+    // assigned to a pointer type, BUT not the other way around!
+    if is_pointer_or_array(left) && is_pointer_or_array(right) {
+        return true
+    } else {
+        return left == right
+    }
+}
+
+pub fn is_pointer_or_array(t: &Type) -> bool {
+    match t {
+        TyPtr(_) | ArrayOf(_, _) => true,
+        _ => false
+    }
 }
 
 fn scal_expr(expr: &mut Expr, operation: TokenKind, scal: i32) {
