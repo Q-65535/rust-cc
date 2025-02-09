@@ -2,20 +2,12 @@ use std::{io::{self, Write}, collections::VecDeque, process::exit, mem::swap};
 use colored::*;
 use crate::parse::{self, *};
 use crate::lex::{self, *};
-use crate::ExprType::*;
-use crate::StmtType::*;
-use crate::TokenKind::*;
-use crate::CompareToken::*;
-use crate::BlockItem::*;
-use crate::DeclarationSpecifier::*;
-use crate::Declaration;
-use crate::Program;
-use crate::Function;
-use crate::Parameter;
-use crate::Declarator;
-use crate::DeclaratorSuffix;
-use crate::Expr;
-use crate::Lexer;
+use ExprType::*;
+use StmtType::*;
+use TokenKind::*;
+use CompareToken::*;
+use BlockItem::*;
+use DeclarationSpecifier::*;
 use crate::SRC;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,15 +76,12 @@ pub struct AnalyzedFun {
 }
 
 pub struct Analyzer {
-    // @Fix: these should be created for each function
-    sbl_table: SblTable,
     cur_offset: i32,
 }
 
 impl Analyzer {
     pub fn new() -> Self {
-        let sbl_table = SblTable::new();
-        let mut analyzer = Analyzer{sbl_table, cur_offset: 0};
+        let mut analyzer = Analyzer{cur_offset: 0};
         analyzer
     }
 
@@ -188,7 +177,6 @@ impl FunAnalyzer {
             let obj = self.create_obj(&cur_type, &init.declarator.name);
             self.sbl_table.add_obj(obj.clone());
             if let Some(expr) = &mut init.init_expr {
-                // @Incomplete: check whether two types (obj and expr) match
                 self.analyze_expr(expr)?;
                 if !can_assign(&obj.ty, &expr.ty) {
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
@@ -274,7 +262,7 @@ impl FunAnalyzer {
                         if lhs.is_integer() && rhs.is_ptr() {
                             return Err(self.error_expr(rhs, "error: integer - ptr"));
                         }
-                        if lhs.is_ptr() && rhs.is_integer() {
+                        if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
                             let mut scal: i32 = 8;
                             match &lhs.ty {
                                 TyPtr(..) => scal = sizeof(&lhs.ty),
@@ -283,10 +271,18 @@ impl FunAnalyzer {
                             }
                             scal_expr(rhs, Mul, scal);
                             expr.ty = lhs.ty.clone();
-                        } else if lhs.is_ptr() && rhs.is_ptr() {
-                            // @Incomplete: consider array and pointer
+                        } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
+                            let mut basic_ty = lhs.ty.clone();
+							if let ArrayOf(basic, _) = &lhs.ty {
+								basic_ty = *basic.clone();
+							} else if let TyPtr(basic) = &lhs.ty {
+								basic_ty = *basic.clone();
+                            }
+							if lhs.ty != rhs.ty {
+								return Err(self.error_expr(rhs, "pointer arithmatic warning: type doesn't match"));
+							}
                             expr.ty = TyInt;
-                            let scal = sizeof(&lhs.ty);
+                            let scal = sizeof(&basic_ty);
                             scal_expr(expr, Div, scal);
                         } else if lhs.is_integer() && rhs.is_integer() {
                             expr.ty = TyInt;
@@ -297,9 +293,17 @@ impl FunAnalyzer {
                 }
             }
             Assign(lhs, rhs) => {
-                // @Incomplete: check whether two types (lhs and rhs) match
                 self.analyze_expr(rhs)?;
                 self.analyze_expr(lhs)?;
+                if !can_be_lvalue(lhs) {
+                    // @Incomplete: more precise error report: the reason why lhs cannot be lvalue
+                    let err_info = format!("lhs cannot be lvalue: {:?}", &lhs.ty);
+                    return Err(self.error_expr(&lhs, &err_info));
+                }
+                if !can_be_rvalue(rhs) {
+                    let err_info = format!("rhs cannot be rvalue: {:?}", &rhs.ty);
+                    return Err(self.error_expr(&lhs, &err_info));
+                }
                 if !can_assign(&lhs.ty, &rhs.ty) {
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                     lhs.token.val, &lhs.ty, &rhs.ty);
@@ -414,7 +418,7 @@ fn array_of(ty: &Type, len: i32) -> Type {
     ArrayOf(base, len)
 }
 
-fn depth_of(ty: &Type) -> i32 {
+fn dimension_of(ty: &Type) -> i32 {
     let mut cur_ty = ty;
     let mut res = 0;
     while let ArrayOf(inner, _) = cur_ty {
@@ -432,18 +436,49 @@ fn function_type(ty: &Type) -> Type {
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
 fn can_assign(left: &Type, right: &Type) -> bool {
-    // although pointer and array are internally different types, array can be
-    // assigned to a pointer type, BUT not the other way around!
-    if is_pointer_or_array(left) && is_pointer_or_array(right) {
+    // array can be assigned to a pointer type, BUT not the other way around!
+    if is_pointer(left) && is_pointer_or_array(right) {
         return true
     } else {
         return left == right
     }
 }
 
+fn can_be_lvalue(expr: &Expr) -> bool {
+    match expr.content {
+        FunCall(_, _) => false,
+        Ident(_) => {
+            if let ArrayOf(_, _) = expr.ty {
+                false
+            } else {
+                true
+            }
+        }
+		_ => true,
+    }
+}
+
+fn can_be_rvalue(expr: &Expr) -> bool {
+    return true;
+}
+
 pub fn is_pointer_or_array(t: &Type) -> bool {
     match t {
         TyPtr(_) | ArrayOf(_, _) => true,
+        _ => false
+    }
+}
+
+pub fn is_pointer(t: &Type) -> bool {
+    match t {
+        TyPtr(_) => true,
+        _ => false
+    }
+}
+
+pub fn is_array(t: &Type) -> bool {
+    match t {
+        ArrayOf(_, _) => true,
         _ => false
     }
 }

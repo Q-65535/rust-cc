@@ -3,6 +3,7 @@ pub mod parse;
 pub mod lex;
 pub mod analyze;
 pub mod codegen;
+pub mod ir;
 use std::{io::{self, Write}, process::exit, env};
 use colored::*;
 use crate::lex::*;

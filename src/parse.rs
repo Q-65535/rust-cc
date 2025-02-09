@@ -1,12 +1,11 @@
 use std::{io::{self, Write}, process::exit};
 use colored::*;
 use crate::lex::{self, *};
-use crate::Precedence::*;
-use crate::TokenKind::*;
-use crate::ExprType::*;
-use crate::KeywordToken::*;
+use Precedence::*;
+use TokenKind::*;
+use ExprType::*;
+use KeywordToken::*;
 use crate::Type::{self, *};
-use crate::Token;
 use crate::SRC;
 
 #[derive(Debug, Clone)]
@@ -625,7 +624,7 @@ impl Parser {
                 let content = ExprType::Assign(Box::new(lhs), Box::new(val));
                 Ok(Expr::new(content, tok))
             },
-            _ => Err(self.error_token(&lhs.token, "not a variable name")),
+            _ => Err(self.error_token(&lhs.token, "not a lvalue name")),
         }
     }
 
