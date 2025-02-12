@@ -81,6 +81,13 @@ pub struct Declarator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Location {
+    start: usize,
+    len: usize,
+    line_number: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
     Number(i32),
     Binary(Box<Expr>, Box<Expr>, TokenKind),

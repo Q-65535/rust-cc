@@ -2,6 +2,7 @@ use std::{io::{self, Write}, collections::VecDeque, process::exit, mem::swap};
 use colored::*;
 use crate::parse::{self, *};
 use crate::lex::{self, *};
+use crate::ir;
 use ExprType::*;
 use StmtType::*;
 use TokenKind::*;
@@ -85,6 +86,17 @@ impl Analyzer {
         analyzer
     }
 
+    pub fn analyze_refactor(&mut self, mut program: Program) -> ir::AnalyzedProgram {
+        use ir::Function;
+        let mut afuns: Vec<ir::Function> = Vec::new();
+        for fun in program.funs {
+            let mut fun_analyzer = FunAnalyzer::new();
+            let afun = fun_analyzer.analyze_refactor(fun);
+            afuns.push(afun);
+        }
+        ir::AnalyzedProgram{afuns}
+    }
+
     pub fn analyze(&mut self, mut program: Program) -> AnalyzedProgram {
         let mut afuns: Vec<AnalyzedFun> = Vec::new();
         for fun in program.funs {
@@ -109,6 +121,33 @@ impl FunAnalyzer {
         FunAnalyzer{sbl_table, cur_offset: 0}
     }
 
+    pub fn analyze_refactor(&mut self, mut fun: Function) -> ir::Function {
+        let base = match &fun.return_type {
+            SpecInt => TyInt,
+        };
+        let mut return_type = base;
+        for i in 0..fun.star_count {
+            return_type = pointer_to(&return_type);
+        }
+        let name = fun.name;
+        let mut param_names: Vec<String> = Vec::new();
+        for param in &fun.params {
+            self.analyze_param_refactor(param);
+            param_names.push(param.declarator.name.clone());
+        }
+        let mut stmts: Vec<ir::StmtType> = Vec::new();
+        for item in &mut fun.items {
+            match item {
+                Stmt(stmt) => stmts.push(self.analyze_stmt_refactor(stmt)),
+                Decl(decl) => stmts.push(self.analyze_decl_refactor(decl)),
+            }
+        }
+        let sbl_table = self.sbl_table.clone();
+        let stack_size = self.cur_offset;
+
+        ir::Function{name, return_type, param_names, stmts, sbl_table, stack_size}
+    }
+
     pub fn analyze(&mut self, mut fun: Function) -> Result<AnalyzedFun, String> {
         for param in &fun.params {
             self.analyze_param(param)?;
@@ -122,6 +161,16 @@ impl FunAnalyzer {
         Ok(AnalyzedFun{fun, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset})
     }
 
+    fn analyze_items_refactor(&mut self, items: &mut Vec<BlockItem>) {
+        let mut stmts: Vec<ir::StmtType> = Vec::new();
+        for item in items {
+            match item {
+                Stmt(stmt) => stmts.push(self.analyze_stmt_refactor(stmt)),
+                Decl(decl) => stmts.push(self.analyze_decl_refactor(decl)),
+            }
+        }
+    }
+
     fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Result<(), String> {
         for item in items {
             match item {
@@ -130,6 +179,10 @@ impl FunAnalyzer {
             }
         }
         Ok(())
+    }
+
+    fn analyze_param_refactor(&mut self, param: &Parameter) -> Obj {
+        todo!();
     }
 
     fn analyze_param(&mut self, param: &Parameter) -> Result<(), String> {
@@ -144,6 +197,10 @@ impl FunAnalyzer {
         }
         self.sbl_table.add_obj(obj);
         Ok(())
+    }
+
+    fn analyze_decl_refactor(&mut self, decl: &mut Declaration) -> ir::StmtType {
+        todo!();
     }
 
     fn analyze_decl(&mut self, decl: &mut Declaration) -> Result<(), String> {
@@ -196,6 +253,10 @@ impl FunAnalyzer {
         obj
     }
 
+    fn analyze_stmt_refactor(&mut self, stmt: &mut StmtType) -> ir::StmtType {
+        todo!();
+    }
+
     fn analyze_stmt(&mut self, stmt: &mut StmtType) -> Result<(), String> {
         match stmt {
             Ex(expr) | Return(expr) => self.analyze_expr(expr)?,
@@ -221,6 +282,10 @@ impl FunAnalyzer {
             }
         }
         Ok(())
+    }
+
+    fn analyze_expr_refactor(&mut self, expr: &mut Expr) -> ir::Expr {
+        todo!();
     }
 
     fn analyze_expr(&mut self, expr: &mut Expr) -> Result<(), String> {

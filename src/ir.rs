@@ -1,19 +1,15 @@
+use crate::analyze::{self, *};
+use crate::parse::{Location};
+
 #[derive(Debug, Clone)]
 pub enum StmtType {
     Ex(Expr),
     Return(Expr),
-    Block(Vec<BlockItem>),
+    Block(Vec<StmtType>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
     For {init: Option<Expr>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>},
 }
 use StmtType::*;
-
-#[derive(Debug, Clone)]
-pub enum BlockItem {
-    Stmt(StmtType),
-    // Decl(Declaration),
-}
-use BlockItem::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
@@ -31,8 +27,22 @@ pub enum ExprType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
     pub content: ExprType,
-    pub start: usize,
-    pub end: usize,
+    pub ty: Type,
+    pub span: Location,
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: String,
+    pub return_type: Type,
+    pub param_names: Vec<String>,
+    pub stmts: Vec<StmtType>,
+    pub sbl_table: SblTable,
+    pub stack_size: i32,
+}
+
+pub struct AnalyzedProgram {
+    pub afuns: Vec<Function>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
