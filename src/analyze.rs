@@ -161,7 +161,7 @@ impl FunAnalyzer {
         Ok(AnalyzedFun{fun, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset})
     }
 
-    fn analyze_items_refactor(&mut self, items: &mut Vec<BlockItem>) {
+    fn analyze_items_refactor(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in items {
             match item {
@@ -169,6 +169,7 @@ impl FunAnalyzer {
                 Decl(decl) => stmts.push(self.analyze_decl_refactor(decl)),
             }
         }
+        stmts
     }
 
     fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Result<(), String> {
@@ -254,7 +255,55 @@ impl FunAnalyzer {
     }
 
     fn analyze_stmt_refactor(&mut self, stmt: &mut StmtType) -> ir::StmtType {
-        todo!();
+        use ir::StmtType;
+        match stmt {
+            Ex(expr) => {
+                let expr = self.analyze_expr_refactor(expr);
+                StmtType::Ex(expr)
+            },
+            Return(expr) => {
+                let expr = self.analyze_expr_refactor(expr);
+                StmtType::Return(expr)
+            },
+            Block(items) => {
+                let stmts = self.analyze_items_refactor(items);
+                StmtType::Block(stmts)
+            }
+            If{cond, then, otherwise} => {
+                let cond = self.analyze_expr_refactor(cond);
+                let then = self.analyze_stmt_refactor(then);
+                let then = Box::new(then);
+                let otherwise = if let Some(otherwise) = otherwise {
+                    Some(Box::new(self.analyze_stmt_refactor(otherwise)))
+                } else {
+                    None
+                };
+                StmtType::If{cond, then, otherwise}
+            }
+            For{init, cond, inc, then} => {
+                todo!();
+                let init = if let Some(init) = init {
+                    let init = self.analyze_expr_refactor(init);
+                    Some(init)
+                } else {
+                    None
+                };
+                let cond = if let Some(cond) = cond {
+                    let cond = self.analyze_expr_refactor(cond);
+                    Some(cond)
+                } else {
+                    None
+                };
+                let inc = if let Some(inc) = inc {
+                    let inc = self.analyze_expr_refactor(inc);
+                    Some(inc)
+                } else {
+                    None
+                };
+                let then = Box::new(self.analyze_stmt_refactor(then));
+                StmtType::For{init, cond, inc, then}
+            }
+        }
     }
 
     fn analyze_stmt(&mut self, stmt: &mut StmtType) -> Result<(), String> {
