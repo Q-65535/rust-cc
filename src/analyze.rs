@@ -281,7 +281,6 @@ impl FunAnalyzer {
                 StmtType::If{cond, then, otherwise}
             }
             For{init, cond, inc, then} => {
-                todo!();
                 let init = if let Some(init) = init {
                     let init = self.analyze_expr_refactor(init);
                     Some(init)
@@ -335,6 +334,170 @@ impl FunAnalyzer {
 
     fn analyze_expr_refactor(&mut self, expr: &mut Expr) -> ir::Expr {
         todo!();
+        // use ir::ExprType;
+        // match &mut expr.content {
+        //     Number(n) => {
+        //         let content = ExprType::Number(*n);
+        //         let ty = TyInt;
+        //         let location = expr.location;
+        //         ir::Expr {content, ty, location}
+        //     }
+        //     todo!();
+        //     Binary(lhs, rhs, tokenKind) => {
+        //         self.analyze_expr(lhs)?;
+        //         self.analyze_expr(rhs)?;
+        //         // @TODO: check whether types of lhs and rhs match (when no pointer involved)
+        //         match tokenKind {
+        //             // deal with pointer arithmatic
+        //             Plus => {
+        //                 if lhs.is_ptr() && rhs.is_ptr() {
+        //                     // @TODO: report the error as a single error message
+        //                     let left_err = self.error_expr(lhs, "error: both lhs and rhs are of ptr type");
+        //                     let right_err = self.error_expr(rhs, "error: both lhs and rhs are of ptr type");
+        //                     return Err(left_err + &right_err);
+        //                 }
+        //                 if lhs.is_integer() && rhs.is_ptr() {
+        //                     swap(lhs, rhs);
+        //                 }
+        //                 if lhs.is_ptr() && rhs.is_integer() {
+        //                     let mut scal: i32 = 8;
+        //                     match &lhs.ty {
+        //                         TyPtr(..) => scal = sizeof(&lhs.ty),
+        //                         ArrayOf(element_type, _) => scal = sizeof(element_type),
+        //                         _ => {},
+        //                     }
+        //                     scal_expr(rhs, Mul, scal);
+        //                 }
+        //                 expr.ty = lhs.ty.clone();
+        //                 return Ok(());
+        //             }
+        //             Minus => {
+        //                 if lhs.is_integer() && rhs.is_ptr() {
+        //                     return Err(self.error_expr(rhs, "error: integer - ptr"));
+        //                 }
+        //                 if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
+        //                     let mut scal: i32 = 8;
+        //                     match &lhs.ty {
+        //                         TyPtr(..) => scal = sizeof(&lhs.ty),
+        //                         ArrayOf(element_type, _) => scal = sizeof(element_type),
+        //                         _ => {},
+        //                     }
+        //                     scal_expr(rhs, Mul, scal);
+        //                     expr.ty = lhs.ty.clone();
+        //                 } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
+        //                     let mut basic_ty = lhs.ty.clone();
+		// 					if let ArrayOf(basic, _) = &lhs.ty {
+		// 						basic_ty = *basic.clone();
+		// 					} else if let TyPtr(basic) = &lhs.ty {
+		// 						basic_ty = *basic.clone();
+        //                     }
+		// 					if lhs.ty != rhs.ty {
+		// 						return Err(self.error_expr(rhs, "pointer arithmatic warning: type doesn't match"));
+		// 					}
+        //                     expr.ty = TyInt;
+        //                     let scal = sizeof(&basic_ty);
+        //                     scal_expr(expr, Div, scal);
+        //                 } else if lhs.is_integer() && rhs.is_integer() {
+        //                     expr.ty = TyInt;
+        //                 }
+        //                 Ok(())
+        //             }
+        //             _ => Ok(()),
+        //         }
+        //     }
+        //     Assign(lhs, rhs) => {
+        //         self.analyze_expr(rhs)?;
+        //         self.analyze_expr(lhs)?;
+        //         if !can_be_lvalue(lhs) {
+        //             // @Incomplete: more precise error report: the reason why lhs cannot be lvalue
+        //             let err_info = format!("lhs cannot be lvalue: {:?}", &lhs.ty);
+        //             return Err(self.error_expr(&lhs, &err_info));
+        //         }
+        //         if !can_be_rvalue(rhs) {
+        //             let err_info = format!("rhs cannot be rvalue: {:?}", &rhs.ty);
+        //             return Err(self.error_expr(&lhs, &err_info));
+        //         }
+        //         if !can_assign(&lhs.ty, &rhs.ty) {
+        //             let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+        //             lhs.token.val, &lhs.ty, &rhs.ty);
+        //             return Err(self.error_expr(&lhs, &err_info));
+        //         }
+        //         expr.ty = lhs.ty.clone();
+        //         Ok(())
+        //     }
+        //     Neg(val) => {
+        //         self.analyze_expr(val)?;
+        //         expr.ty = val.ty.clone();
+        //         Ok(())
+        //     }
+        //     Deref(val) => {
+        //         self.analyze_expr(val)?;
+        //         match &val.ty {
+        //             TyPtr(base) => {
+        //                 expr.ty = *base.clone();
+        //                 Ok(())
+        //             }
+        //             ArrayOf(base, _) => {
+        //                 expr.ty = *base.clone();
+        //                 Ok(())
+        //             }
+        //             _ => {
+        //                 let err_msg = format!("semantic error: invalid dereferencing: 
+        //                 try to dereference {:?}", expr.ty);
+        //                 return Err(self.error_expr(expr, &err_msg));
+        //             }
+        //         }
+        //     }
+        //     AddrOf(val) => {
+        //         self.analyze_expr(val)?;
+        //         expr.ty = pointer_to(&val.ty);
+        //         Ok(())
+        //     }
+        //     Ident(s) => {
+        //         if let Some(o) = self.sbl_table.find_obj(s) {
+        //             expr.ty = o.ty.clone();
+        //             Ok(())
+        //         } else {
+        //             let err_info = format!("semantic error: symbol '{}' not found", s);
+        //             return Err(self.error_expr(expr, &err_info));
+        //         }
+        //     }
+        //     // array indexing is converted to pointer arithmatic
+        //     ArrayIndexing(arr_ref, indices) => {
+        //         self.analyze_expr(arr_ref)?;
+        //                      // reborrow here
+        //         for index in &mut *indices {
+        //             self.analyze_expr(index)?;
+        //         }
+        //         let mut cur_ref = arr_ref;
+        //         for index in indices {
+        //             // type checking
+        //             if !cur_ref.is_ptr() {
+        //                 let err_msg = self.error_expr(index, "subscripted value is neither array nor pointer nor vector");
+        //                 return Err(err_msg);
+        //             } else {
+        //                 let pointer_arithmatic = Binary(cur_ref.clone(), Box::new(index.clone()), Plus);
+        //                 let mut pointer_arithmatic_expr = Expr::new(pointer_arithmatic, index.token.clone());
+        //                 self.analyze_expr(&mut pointer_arithmatic_expr);
+        //                 let deref = Deref(Box::new(pointer_arithmatic_expr));
+        //                 let mut deref_expr = Expr::new(deref, index.token.clone());
+        //                 self.analyze_expr(&mut deref_expr);
+        //                 self.analyze_expr(&mut deref_expr);
+        //                 *cur_ref = Box::new(deref_expr);
+        //             }
+        //         }
+        //         expr.ty = cur_ref.ty.clone();
+        //         expr.content = cur_ref.content.clone();
+        //         Ok(())
+        //     }
+        //     FunCall(ident, args) => {
+        //         for arg in args {
+        //             self.analyze_expr(arg)?;
+        //         }
+        //         // the function name may be in another elf file, we don't check its validaity
+        //         Ok(())
+        //     }
+        // }
     }
 
     fn analyze_expr(&mut self, expr: &mut Expr) -> Result<(), String> {
@@ -478,10 +641,19 @@ impl FunAnalyzer {
                         return Err(err_msg);
                     } else {
                         let pointer_arithmatic = Binary(cur_ref.clone(), Box::new(index.clone()), Plus);
-                        let mut pointer_arithmatic_expr = Expr::new(pointer_arithmatic, index.token.clone());
+                        let mut pointer_arithmatic_expr = Expr::new(
+                            pointer_arithmatic, 
+                            index.token.clone(),
+                            Location::merge(cur_ref.location, index.location),
+                        );
                         self.analyze_expr(&mut pointer_arithmatic_expr);
+                        let location = pointer_arithmatic_expr.location;
                         let deref = Deref(Box::new(pointer_arithmatic_expr));
-                        let mut deref_expr = Expr::new(deref, index.token.clone());
+                        let mut deref_expr = Expr::new(
+                            deref,
+                            index.token.clone(),
+                            location,
+                        );
                         self.analyze_expr(&mut deref_expr);
                         self.analyze_expr(&mut deref_expr);
                         *cur_ref = Box::new(deref_expr);
@@ -505,8 +677,8 @@ impl FunAnalyzer {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.start);
-        let arrows = "^".repeat(expr.end - expr.start);
+        let spaces = " ".repeat(expr.location.start_index);
+        let arrows = "^".repeat(expr.location.end_index - expr.location.start_index);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }
@@ -599,14 +771,14 @@ pub fn is_array(t: &Type) -> bool {
 
 fn scal_expr(expr: &mut Expr, operation: TokenKind, scal: i32) {
     // expr for scal num
-    let tok = Lexer::gen_token(Num(scal), "num_from_analyze", 0, 0);
+    let tok = Lexer::gen_token(Num(scal), "num_from_analyze", 0, 1);
     let num_expr_type = Number(scal);
-    let num_expr = Expr::new(num_expr_type, tok);
+    let num_expr = Expr::new(num_expr_type, tok, expr.location);
 
     // scalled expr
     let new_expr_type = Binary(Box::new(expr.clone()), Box::new(num_expr), operation.clone());
-    let tok = Lexer::gen_token(operation, "op_from_analyze", 0, 0);
-    let mut new_expr = Expr::new(new_expr_type, tok);
+    let tok = Lexer::gen_token(operation, "op_from_analyze", 0, 1);
+    let mut new_expr = Expr::new(new_expr_type, tok, expr.location);
     // type doesn't change
     new_expr.ty = expr.ty.clone();
     *expr = new_expr;

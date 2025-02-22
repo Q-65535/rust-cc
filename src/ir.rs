@@ -1,5 +1,5 @@
 use crate::analyze::{self, *};
-use crate::parse::{Location};
+use crate::lex::{Location};
 
 #[derive(Debug, Clone)]
 pub enum StmtType {
@@ -28,7 +28,7 @@ pub enum ExprType {
 pub struct Expr {
     pub content: ExprType,
     pub ty: Type,
-    pub span: Location,
+    pub location: Location,
 }
 
 #[derive(Debug, Clone)]

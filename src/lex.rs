@@ -1,4 +1,5 @@
 use std::{io::{self, Write}, process::exit};
+use std::cmp::{max, min};
 use std::collections::HashMap;
 use crate::*;
 use crate::SRC;
@@ -65,8 +66,24 @@ pub enum Precedence {
 pub struct Token {
     pub kind: TokenKind,
     pub val: String,
-    pub start: usize,
-    pub end: usize,
+    pub location: Location,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Location {
+    pub start_index: usize,
+    pub end_index: usize,
+    // @Incomplete: What if start and end index have different line number?
+    // We need to create a new struct to location the accurate position of a charater(row and column atrribute).
+    pub line_number: usize,
+}
+
+impl Location {
+    pub fn merge(l1: Location, l2: Location) -> Location {
+        let start_index = min(l1.start_index, l2.start_index);
+        let end_index = max(l1.end_index, l2.end_index);
+        Location{start_index, end_index, line_number: l1.line_number}
+    }
 }
 
 impl Token {
@@ -92,11 +109,11 @@ impl Token {
 
 impl Default for Token {
     fn default() -> Token {
+        let default_location = Location{start_index: 0, end_index: 0, line_number: 123};
         Token{
             kind: Eof,
             val: "".to_string(),
-            start: 0,
-            end: 0,
+            location: default_location,
         }
     }
 }
@@ -159,12 +176,15 @@ impl Lexer {
         }
     }
 
-    pub fn gen_token(kind: TokenKind, content: &str, start: usize, size: usize) -> Token {
+    pub fn gen_token(kind: TokenKind, content: &str, start_index: usize, len: usize) -> Token {
+        if !(start_index+len >= 1) {
+            println!("fatal: this token {} has length of 0", content);
+        }
+        let location = Location{start_index, end_index: start_index+len-1, line_number: 123};
         Token {
             kind,
             val: content.to_string(),
-            start,
-            end: start+size,
+            location,
         }
     }
 

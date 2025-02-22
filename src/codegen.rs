@@ -237,8 +237,8 @@ impl Generator {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.start);
-        let arrows = "^".repeat(expr.end - expr.start);
+        let spaces = " ".repeat(expr.location.start_index);
+        let arrows = "^".repeat(expr.location.end_index - expr.location.start_index);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }

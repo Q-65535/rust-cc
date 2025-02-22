@@ -81,13 +81,6 @@ pub struct Declarator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Location {
-    start: usize,
-    len: usize,
-    line_number: usize,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
     Number(i32),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
@@ -105,22 +98,21 @@ pub struct Expr {
     pub content: ExprType,
     // @Smell: Do we really need a token for each expression?
     pub token: Token,
+    // @TODO: remove type attribute for AST epxression
     pub ty: Type,
-    pub start: usize,
-    pub end: usize,
+    pub location: Location,
 }
 
 impl Expr {
-    pub fn new(content: ExprType, token: Token) -> Self {
+    pub fn new(content: ExprType, token: Token, location: Location) -> Self {
         // @Improve: properly set initial type
-        let mut expr = Expr{content, token, ty: ty_none, start: 0, end: 0};
-        (expr.start, expr.end) = (expr.cal_start_index(), expr.cal_end_index());
+        let mut expr = Expr{content, token, ty: ty_none, location};
         expr
     }
 
     fn cal_start_index(&self) -> usize {
         match &self.content {
-            Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.token.start,
+            Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.token.location.start_index,
             Binary(lhs, _, _) => lhs.cal_start_index(),
             ExprType::Assign(lhs, _) => lhs.cal_start_index(),
             ArrayIndexing(array_ref, _) => array_ref.cal_start_index(),
@@ -131,7 +123,7 @@ impl Expr {
     fn cal_end_index(&self) -> usize {
         match &self.content {
             Neg(e) | Deref(e) | AddrOf(e) => e.cal_end_index(),
-            Number(_) | Ident(_) => self.token.end,
+            Number(_) | Ident(_) => self.token.location.end_index,
             Binary(_, rhs, _) => rhs.cal_end_index(),
             ExprType::Assign(_, rhs) => rhs.cal_end_index(),
             ArrayIndexing(array_ref, _) => array_ref.cal_end_index(),
@@ -314,8 +306,8 @@ impl Parser {
             self.next_token();
         }
         if let LexIdent(ident) = &self.cur_token().kind {
-            let start = self.cur_token().start;
-            let end = self.cur_token().end;
+            let start = self.cur_token().location.start_index;
+            let end = self.cur_token().location.end_index;
             name = ident.clone();
 
             // parse suffix of a declarator
@@ -512,6 +504,7 @@ impl Parser {
                             self.next_token();
                             expr = self.parse_infix(expr)?;
                         },
+                        // @TODO: We need to record the infomation about parenthesis positions
                         LParen => {
                             self.next_token();
                             expr = self.parse_funcall(expr)?;
@@ -549,8 +542,8 @@ impl Parser {
     }
 
     fn parse_prefix(&mut self) -> Result<Expr, String> {
-        let cur_token = self.cur_token().clone();
-        match cur_token.kind {
+        let cur_token_snapshot = self.cur_token().clone();
+        match cur_token_snapshot.kind {
             LParen => self.parse_paren(),
             Num(_) => self.parse_integer(),
             Plus => {
@@ -559,35 +552,47 @@ impl Parser {
             },
             Minus => {
                 self.next_token();
-                let prefix = self.parse_prefix()?;
-                let operand = Box::new(prefix);
-                let expr = Expr::new(Neg(operand), cur_token);
+                let operand = self.parse_prefix()?;
+                let operand = Box::new(operand);
+                let start_index = cur_token_snapshot.location.start_index;
+                let end_index = self.cur_token().location.end_index;
+                let location = Location{start_index, end_index, line_number: 123};
+                let expr = Expr::new(Neg(operand), cur_token_snapshot, location);
                 Ok(expr)
             },
             Mul => {
                 self.next_token();
-                let prefix = self.parse_prefix()?;
-                let operand = Box::new(prefix);
-                let expr = Expr::new(Deref(operand), cur_token);
+                let operand = self.parse_prefix()?;
+                let operand = Box::new(operand);
+                let start_index = cur_token_snapshot.location.start_index;
+                let end_index = self.cur_token().location.end_index;
+                let location = Location{start_index, end_index, line_number: 123};
+                let expr = Expr::new(Deref(operand), cur_token_snapshot, location);
                 Ok(expr)
             },
             Ampersand => {
                 self.next_token();
-                let prefix = self.parse_prefix()?;
-                let operand = Box::new(prefix);
-                let expr = Expr::new(AddrOf(operand), cur_token);
+                let operand = self.parse_prefix()?;
+                let operand = Box::new(operand);
+                let start_index = cur_token_snapshot.location.start_index;
+                let end_index = self.cur_token().location.end_index;
+                let location = Location{start_index, end_index, line_number: 123};
+                let expr = Expr::new(AddrOf(operand), cur_token_snapshot, location);
                 Ok(expr)
             },
             LexIdent(_) => self.parse_ident(),
-            _ => Err(self.error_token(&cur_token, "parsing error: can't parse prefix expression here"))
+            _ => Err(self.error_token(&cur_token_snapshot, "parsing error: can't parse prefix expression here"))
         }
     }
     
     fn parse_ident(&mut self) -> Result<Expr, String> {
-        let tok = self.cur_token();
+        let tok = self.cur_token().clone();
         if let LexIdent(name) = &tok.kind {
             let mut var = Ident(name.clone());
-            let expr = Expr::new(var, tok.clone());
+            let start_index = tok.location.start_index;
+            let end_index = tok.location.end_index;
+            let location = Location{start_index, end_index, line_number: 123};
+            let expr = Expr::new(var, tok, location);
             Ok(expr)
         } else {
             Err(self.error_token(self.cur_token(), "expect an identifier"))
@@ -595,9 +600,14 @@ impl Parser {
     }
 
     fn parse_integer(&self) -> Result<Expr, String> {
-        let cur_token = self.cur_token();
-        if let Num(n) = cur_token.kind {
-            let expr = Expr::new(Number(n), cur_token.clone());
+        let tok = self.cur_token().clone();
+        if let Num(n) = tok.kind {
+            let location = Location {
+                start_index: tok.location.start_index,
+                end_index: tok.location.end_index,
+                line_number: 123,
+            };
+            let expr = Expr::new(Number(n), tok, location);
             return Ok(expr);
         } else {
             return Err(self.error_token(self.cur_token(), "expect a number"));
@@ -618,8 +628,13 @@ impl Parser {
         let p = tok.precedence();
         self.next_token();
         let rhs = self.parse_expr(p)?;
+        let location = Location {
+            start_index: lhs.location.start_index,
+            end_index: rhs.location.end_index,
+            line_number: 123,
+        };
         let content = Binary(Box::new(lhs), Box::new(rhs), tok.kind.clone());
-        Ok(Expr::new(content, tok))
+        Ok(Expr::new(content, tok, location))
     }
 
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
@@ -628,8 +643,13 @@ impl Parser {
             Ident(_) | Deref(_) | ArrayIndexing(_, _) => {
                 self.next_token();
                 let val = self.parse_expr(Lowest)?;
+                let location = Location {
+                    start_index: lhs.location.start_index,
+                    end_index: val.location.end_index,
+                    line_number: 123,
+                };
                 let content = ExprType::Assign(Box::new(lhs), Box::new(val));
-                Ok(Expr::new(content, tok))
+                Ok(Expr::new(content, tok, location))
             },
             _ => Err(self.error_token(&lhs.token, "not a lvalue name")),
         }
@@ -638,8 +658,18 @@ impl Parser {
     fn parse_funcall(&mut self, lhs:Expr) -> Result<Expr, String> {
         let cur_tok = self.cur_token().clone();
         let args_list = self.parse_args()?;
+
+        let end_index = match args_list.last() {
+            None => cur_tok.location.end_index,
+            Some(expr) => expr.location.end_index,
+        };
+        let location = Location {
+            start_index: cur_tok.location.start_index,
+            end_index,
+            line_number: 123,
+        };
         let content = FunCall(Box::new(lhs), args_list);
-        return Ok(Expr::new(content, cur_tok));
+        return Ok(Expr::new(content, cur_tok, location));
     }
 
     fn parse_array_indexing(&mut self, lhs: Expr) -> Result<Expr, String> {
@@ -651,8 +681,17 @@ impl Parser {
             indices.push(cur_index);
             self.expect_peek(&RSqureBracket);
         }
+        let end_index = match indices.last() {
+            None => prime_token.location.end_index,
+            Some(expr) => expr.location.end_index,
+        };
+        let location = Location {
+            start_index: lhs.location.start_index,
+            end_index,
+            line_number: 123,
+        };
         let content = ArrayIndexing(Box::new(lhs), indices);
-        return Ok(Expr::new(content, prime_token))
+        return Ok(Expr::new(content, prime_token, location))
     }
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, String> {
@@ -704,8 +743,8 @@ impl Parser {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(tok.start);
-        let arrows = "^".repeat(tok.end - tok.start);
+        let spaces = " ".repeat(tok.location.start_index);
+        let arrows = "^".repeat(tok.location.end_index - tok.location.end_index);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }
