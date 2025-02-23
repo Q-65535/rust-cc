@@ -678,7 +678,7 @@ impl FunAnalyzer {
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
         let spaces = " ".repeat(expr.location.start_index);
-        let arrows = "^".repeat(expr.location.end_index - expr.location.start_index);
+        let arrows = "^".repeat(expr.location.end_index - expr.location.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }
@@ -687,8 +687,8 @@ impl FunAnalyzer {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(declarator.start);
-        let arrows = "^".repeat(declarator.end - declarator.start);
+        let spaces = " ".repeat(declarator.location.start_index);
+        let arrows = "^".repeat(declarator.location.end_index - declarator.location.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }

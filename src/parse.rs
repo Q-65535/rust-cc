@@ -76,8 +76,7 @@ pub struct Declarator {
     pub star_count: i32,
     pub name: String,
     pub suffix: Option<DeclaratorSuffix>,
-    pub start: usize,
-    pub end: usize,
+    pub location: Location,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -306,8 +305,8 @@ impl Parser {
             self.next_token();
         }
         if let LexIdent(ident) = &self.cur_token().kind {
-            let start = self.cur_token().location.start_index;
-            let end = self.cur_token().location.end_index;
+            let start_index = self.cur_token().location.start_index;
+            let mut end_index = self.cur_token().location.end_index;
             name = ident.clone();
 
             // parse suffix of a declarator
@@ -322,6 +321,7 @@ impl Parser {
                         lens.push(cur_array_len);
                         self.expect_peek(&RSqureBracket);
                     }
+                    end_index = self.cur_token().location.end_index;
                     suffix = Some(ArrayLen(lens));
                 }
                 // function parameters
@@ -339,12 +339,14 @@ impl Parser {
                         let param = Parameter{decl_spec, declarator};
                         params.push(param);
                     }
+                    end_index = self.cur_token().location.end_index;
                     suffix = Some(FunParam(params));
                 }
                 _ => {},
             }
+            let location = Location{start_index, end_index, line_number: 123};
 
-            Ok(Declarator{star_count, name, suffix, start, end})
+            Ok(Declarator{star_count, name, suffix, location})
         } else {
             let err_msg = self.error_token(self.cur_token(), "not an identifier");
             return Err(err_msg);
@@ -744,7 +746,7 @@ impl Parser {
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
         let spaces = " ".repeat(tok.location.start_index);
-        let arrows = "^".repeat(tok.location.end_index - tok.location.end_index);
+        let arrows = "^".repeat(tok.location.end_index - tok.location.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }
