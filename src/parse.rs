@@ -68,6 +68,7 @@ use DeclarationSpecifier::*;
 pub struct InitDeclarator {
     pub declarator: Declarator,
     // Declaration may include initialization
+    // @Smell: Maybe we don't need InitDeclarator at all? This can be just in Declarator struct.
     pub init_expr: Option<Expr>,
 }
 

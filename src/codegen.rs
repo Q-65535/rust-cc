@@ -1,13 +1,15 @@
 use std::{io::{self, Write}, collections::VecDeque, process::exit};
 use std::cell::Cell;
 use colored::*;
-use crate::ExprType::{self, *};
-use crate::StmtType::{self, *};
-use crate::TokenKind::{self, *};
-use crate::CompareToken::{self, *};
-use crate::BlockItem::{self, *};
+use crate::ir::ExprType::{self, *};
+use crate::ir::StmtType::{self, *};
+// use crate::TokenKind::{self, *};
+// use crate::CompareToken::{self, *};
+use crate::ir::OP::{self, *};
+// use crate::BlockItem::{self, *};
+use ir::CompareToken::{self, *};
 use crate::Declaration;
-use crate::Expr;
+// use crate::Expr;
 use crate::Function;
 use crate::Obj;
 use crate::SblTable;
@@ -15,11 +17,14 @@ use crate::AnalyzedProgram;
 use crate::AnalyzedFun;
 use crate::Type::{self, *};
 use crate::SRC;
+use crate::ir::{self, *};
 
 pub struct Generator {
-    aprogram: AnalyzedProgram,
+    // aprogram: AnalyzedProgram,
+    aprogram_r: ir::AnalyzedProgram,
     lable_count: Cell<i32>,
-    cur_afun: AnalyzedFun,
+    // cur_afun: AnalyzedFun,
+    cur_afun_r: ir::Function,
     argregs: Vec<&'static str>,
 }
 
@@ -30,23 +35,64 @@ struct FunContext {
 }
 
 impl Generator {
-    pub fn new(aprogram: AnalyzedProgram) -> Self {
+    // pub fn new(aprogram: AnalyzedProgram) -> Self {
+    //     let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+    //     let cur_afun = aprogram.afuns[0].clone();
+    //     Self {aprogram, lable_count: 0.into(), cur_afun, argregs}
+    // }
+    pub fn new_refactor(aprogram_r: ir::AnalyzedProgram) -> Self {
         let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
-        let cur_afun = aprogram.afuns[0].clone();
-        Self {aprogram, lable_count: 0.into(), cur_afun, argregs}
+        let cur_afun_r = aprogram_r.afuns[0].clone();
+        Self {aprogram_r, lable_count: 0.into(), cur_afun_r, argregs}
     }
 
-    pub fn gen_code(&mut self) {
-        for afun in &self.aprogram.afuns {
+    // pub fn gen_code(&mut self) {
+    //     for afun in &self.aprogram.afuns {
+    //         // @Space: clone() wastes memory
+    //         self.cur_afun = afun.clone();
+    //         self.fun_gen();
+    //     }
+    // }
+
+    pub fn gen_code_refactor(&mut self) {
+        for afun in &self.aprogram_r.afuns {
             // @Space: clone() wastes memory
-            self.cur_afun = afun.clone();
-            self.fun_gen();
+            self.cur_afun_r = afun.clone();
+            self.fun_gen_refactor();
         }
     }
     
-    pub fn fun_gen(&self) {
-        let stack_size = self.cur_afun.stack_size;
-        let fun = &self.cur_afun.fun;
+    // pub fn fun_gen(&self) {
+    //     let stack_size = self.cur_afun.stack_size;
+    //     let fun = &self.cur_afun.fun;
+    //     let aligned_stack_size = align_to(stack_size, 16);
+    //     // prologue
+    //     println!();
+    //     println!("  .globl {}", fun.name);
+    //     println!("{}:", fun.name);
+    //     println!("  push %rbp");
+    //     println!("  mov %rsp, %rbp");
+    //     println!("  sub ${}, %rsp", aligned_stack_size);
+    //     println!();
+    //     let mut i = 0;
+    //     for param in &self.cur_afun.fun.params {
+    //         let obj = self.cur_afun.sbl_table.find_obj(&param.declarator.name);
+    //                                                           // @Cleanup: offset should be expressed more properly
+    //         println!("  mov {}, {}(%rbp)\n", self.argregs[i], -self.cur_afun.stack_size+obj.unwrap().offset);
+    //         i += 1;
+    //     }
+    //     self.block_gen(&self.cur_afun.fun.items);
+
+    //     // end
+    //     println!(".L.return.{}:",fun.name);
+    //     println!("  mov %rbp, %rsp");
+    //     println!("  pop %rbp");
+    //     println!("  ret");
+    // }
+
+    pub fn fun_gen_refactor(&self) {
+        let stack_size = self.cur_afun_r.stack_size;
+        let fun = &self.cur_afun_r;
         let aligned_stack_size = align_to(stack_size, 16);
         // prologue
         println!();
@@ -57,13 +103,13 @@ impl Generator {
         println!("  sub ${}, %rsp", aligned_stack_size);
         println!();
         let mut i = 0;
-        for param in &self.cur_afun.fun.params {
-            let obj = self.cur_afun.sbl_table.find_obj(&param.declarator.name);
+        for param in &self.cur_afun_r.param_names {
+            let obj = self.cur_afun_r.sbl_table.find_obj(&param);
                                                               // @Cleanup: offset should be expressed more properly
-            println!("  mov {}, {}(%rbp)\n", self.argregs[i], -self.cur_afun.stack_size+obj.unwrap().offset);
+            println!("  mov {}, {}(%rbp)\n", self.argregs[i], -self.cur_afun_r.stack_size+obj.unwrap().offset);
             i += 1;
         }
-        self.block_gen(&self.cur_afun.fun.items);
+        self.block_gen_refactor(&self.cur_afun_r.stmts);
 
         // end
         println!(".L.return.{}:",fun.name);
@@ -72,46 +118,55 @@ impl Generator {
         println!("  ret");
     }
 
-    fn block_gen(&self, items: &Vec<BlockItem>) {
-        for item in items {
-            println!(";;;;;;;;;;;;;;;;;;;;;;;");
-            match item {
-                Stmt(stmt) => self.stmt_gen(stmt),
-                Decl(decl) => self.decl_gen(decl),
-            }
+    // fn block_gen(&self, items: &Vec<BlockItem>) {
+    //     for item in items {
+    //         println!(";;;;;;;;;;;;;;;;;;;;;;;");
+    //         match item {
+    //             Stmt(stmt) => self.stmt_gen(stmt),
+    //             Decl(decl) => self.decl_gen(decl),
+    //         }
+    //         print!(";;;;;;;;;;;;;;;;;;;;;;;;");
+    //     }
+    //     println!();
+    // }
+
+    fn block_gen_refactor(&self, stmts: &Vec<ir::StmtType>) {
+        for stmt in stmts {
+            println!(";;;;;;;;;;;;;;;;;;;;;;;;");
+            self.stmt_gen(stmt);
             print!(";;;;;;;;;;;;;;;;;;;;;;;;");
         }
         println!();
     }
 
-    fn stmt_gen(&self, stmt: &StmtType) {
+    fn stmt_gen(&self, stmt: &ir::StmtType) {
         match stmt {
-            StmtType::Ex(expr) => self.expr_gen(&expr),
-            StmtType::Return(expr) =>self.ret_gen(&expr),
-            StmtType::Block(item) =>self.block_gen(item),
-            StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
-            StmtType::For{init, cond, inc, then} => self.for_gen(init, cond, inc, then),
+            ir::StmtType::Ex(expr) => self.expr_gen(&expr),
+            ir::StmtType::Return(expr) =>self.ret_gen(&expr),
+            ir::StmtType::Block(item) =>self.block_gen_refactor(item),
+            ir::StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
+            ir::StmtType::For{init, cond, inc, then} => self.for_gen(init, cond, inc, then),
         }
     }
 
-    fn decl_gen(&self, decl: &Declaration) {
-        for init in &decl.init_declarators {
-            if let Some(expr) = &init.init_expr {
-                self.gen_addr_by_name(&init.declarator.name);
-                println!("  push %rax");
-                self.expr_gen(expr);
-                println!("  pop %rdi");
-                println!("  mov %rax, (%rdi)");
-            }
-        }
-    }
+    // fn decl_gen(&self, decl: &Declaration) {
+    //     for init in &decl.init_declarators {
+    //         if let Some(expr) = &init.init_expr {
+    //             self.gen_addr_by_name(&init.declarator.name);
+    //             println!("  push %rax");
+    //             self.expr_gen(expr);
+    //             println!("  pop %rdi");
+    //             println!("  mov %rax, (%rdi)");
+    //         }
+    //     }
+    // }
 
-    fn ret_gen(&self, expr: &Expr) {
+    fn ret_gen(&self, expr: &ir::Expr) {
         self.expr_gen(expr);
-        println!("  jmp .L.return.{}\n", self.cur_afun.fun.name);
+        println!("  jmp .L.return.{}\n", self.cur_afun_r.name);
     }
 
-    fn if_gen(&self, cond: &Expr, then: &StmtType, otherwise: &Option<Box<StmtType>>) {
+    fn if_gen(&self, cond: &ir::Expr, then: &ir::StmtType, otherwise: &Option<Box<ir::StmtType>>) {
         let c = self.count();
         self.expr_gen(&cond);
         println!("  cmp $0, %rax");
@@ -125,7 +180,7 @@ impl Generator {
         println!(".L.end.{}:", c);
     }
 
-    fn for_gen(&self, init: &Option<Expr>, cond: &Option<Expr>, inc: &Option<Expr>, then: &Box<StmtType>) {
+    fn for_gen(&self, init: &Option<ir::Expr>, cond: &Option<ir::Expr>, inc: &Option<ir::Expr>, then: &Box<ir::StmtType>) {
         let c = self.count();
         if let Some(expr) = init {
             self.expr_gen(expr);
@@ -144,7 +199,7 @@ impl Generator {
         println!(".L.end.{}:", c);
     }
 
-    fn expr_gen(&self, expr: &Expr) {
+    fn expr_gen(&self, expr: &ir::Expr) {
         let content = &expr.content;
         match content {
             Number(n) => println!("  mov ${}, %rax", n),
@@ -199,7 +254,7 @@ impl Generator {
             AddrOf(expr) => self.gen_addr(expr),
             Ident(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
-                let obj = self.cur_afun.sbl_table.find_obj(s).expect(err_smg);
+                let obj = self.cur_afun_r.sbl_table.find_obj(s).expect(err_smg);
                 self.gen_addr(expr);
                 load_according_to_type(&expr.ty);
             }
@@ -244,16 +299,16 @@ impl Generator {
     }
 
     fn gen_addr_by_name(&self, name: &str) {
-        let obj = self.cur_afun.sbl_table.find_obj(name);
-        println!("  lea {}(%rbp), %rax", -self.cur_afun.stack_size+obj.unwrap().offset);
+        let obj = self.cur_afun_r.sbl_table.find_obj(name);
+        println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.unwrap().offset);
     }
 
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Ident(name) => {
-                let obj = self.cur_afun.sbl_table.find_obj(name);
+                let obj = self.cur_afun_r.sbl_table.find_obj(name);
                                                  // @Cleanup: offset should be expressed more properly
-                println!("  lea {}(%rbp), %rax", -self.cur_afun.stack_size+obj.unwrap().offset);
+                println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.unwrap().offset);
 
             },
             Deref(expr) => {
