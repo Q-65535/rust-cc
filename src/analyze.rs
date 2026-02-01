@@ -90,27 +90,15 @@ impl Analyzer {
         analyzer
     }
 
-    pub fn analyze_refactor(&mut self, mut program: Program) -> ir::AnalyzedProgram {
+    pub fn analyze(&mut self, mut program: Program) -> ir::AnalyzedProgram {
         use ir::Function;
         let mut afuns: Vec<ir::Function> = Vec::new();
         for fun in program.funs {
             let mut fun_analyzer = FunAnalyzer::new();
-            let afun = fun_analyzer.analyze_refactor(fun);
+            let afun = fun_analyzer.analyze(fun);
             afuns.push(afun);
         }
         ir::AnalyzedProgram{afuns}
-    }
-
-    pub fn analyze(&mut self, mut program: Program) -> AnalyzedProgram {
-        let mut afuns: Vec<AnalyzedFun> = Vec::new();
-        for fun in program.funs {
-            let mut fun_analyzer = FunAnalyzer::new();
-            match fun_analyzer.analyze(fun) {
-                Ok(afun) => afuns.push(afun),
-                Err(e) => println!("{}", e),
-            }
-        }
-        AnalyzedProgram{afuns}
     }
 }
 
@@ -125,7 +113,7 @@ impl FunAnalyzer {
         FunAnalyzer{sbl_table, cur_offset: 0}
     }
 
-    pub fn analyze_refactor(&mut self, mut fun: Function) -> ir::Function {
+    pub fn analyze(&mut self, mut fun: Function) -> ir::Function {
         let base = match &fun.return_type {
             SpecInt => TyInt,
         };
@@ -136,18 +124,18 @@ impl FunAnalyzer {
         let name = fun.name;
         let mut param_names: Vec<String> = Vec::new();
         for param in &fun.params {
-            self.analyze_param_refactor(param);
+            self.analyze_param(param);
             param_names.push(param.declarator.name.clone());
         }
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in &mut fun.items {
             match item {
                 Stmt(stmt) => {
-                    let ir_stmt = self.analyze_stmt_refactor(stmt);
+                    let ir_stmt = self.analyze_stmt(stmt);
                     stmts.push(ir_stmt);
                 }
                 Decl(decl) => {
-                    let mut ir_stmts = self.analyze_decl_refactor(decl);
+                    let mut ir_stmts = self.analyze_decl(decl);
                     stmts.append(&mut ir_stmts);
                 }
             }
@@ -158,41 +146,19 @@ impl FunAnalyzer {
         ir::Function{name, return_type, param_names, stmts, sbl_table, stack_size}
     }
 
-    pub fn analyze(&mut self, mut fun: Function) -> Result<AnalyzedFun, String> {
-        for param in &fun.params {
-            self.analyze_param(param)?;
-        }
-        for item in &mut fun.items {
-            match item {
-                Stmt(stmt) => self.analyze_stmt(stmt)?,
-                Decl(decl) => self.analyze_decl(decl)?,
-            }
-        }
-        Ok(AnalyzedFun{fun, sbl_table: self.sbl_table.clone(), stack_size: self.cur_offset})
-    }
-
-    fn analyze_items_refactor(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
+    fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in items {
             match item {
-                Stmt(stmt) => stmts.push(self.analyze_stmt_refactor(stmt)),
-                Decl(decl) => stmts.append(&mut self.analyze_decl_refactor(decl)),
+                Stmt(stmt) => stmts.push(self.analyze_stmt(stmt)),
+                Decl(decl) => stmts.append(&mut self.analyze_decl(decl)),
             }
         }
         stmts
     }
 
-    fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Result<(), String> {
-        for item in items {
-            match item {
-                Stmt(stmt) => self.analyze_stmt(stmt)?,
-                Decl(decl) => self.analyze_decl(decl)?,
-            }
-        }
-        Ok(())
-    }
 
-    fn analyze_param_refactor(&mut self, param: &Parameter) {
+    fn analyze_param(&mut self, param: &Parameter) {
         let base_type: Type;
         match &param.decl_spec {
             SpecInt => base_type = TyInt,
@@ -206,23 +172,10 @@ impl FunAnalyzer {
         }
     }
 
-    fn analyze_param(&mut self, param: &Parameter) -> Result<(), String> {
-        let base_type: Type;
-        match &param.decl_spec {
-            SpecInt => base_type = TyInt,
-        }
-        let obj = self.create_obj(&base_type, &param.declarator.name);
-        if let Some(_) = self.sbl_table.find_obj(&obj.name) {
-            let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
-            return Err(self.err_declarator(&param.declarator, &err_info));
-        }
-        self.sbl_table.add_obj(obj);
-        Ok(())
-    }
 
     // This function should return an array of statements
     // after analyze, declarations are all resolved to creating obj and assignment statement.
-    fn analyze_decl_refactor(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
+    fn analyze_decl(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         let base_type: Type;
         match &decl.decl_spec {
@@ -254,7 +207,7 @@ impl FunAnalyzer {
             let obj = self.create_obj(&cur_type, &init.declarator.name);
             self.sbl_table.add_obj(obj.clone());
             if let Some(expr) = &mut init.init_expr {
-                let analyzed_expr = self.analyze_expr_refactor(expr);
+                let analyzed_expr = self.analyze_expr(expr);
                 if !can_assign(&obj.ty, &analyzed_expr.ty) {
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                     obj.name, &obj.ty, &expr.ty);
@@ -281,47 +234,6 @@ impl FunAnalyzer {
         
     }
 
-    fn analyze_decl(&mut self, decl: &mut Declaration) -> Result<(), String> {
-        let base_type: Type;
-        match &decl.decl_spec {
-            SpecInt => base_type = TyInt,
-        }
-        for init in &mut decl.init_declarators {
-            if let Some(_) = self.sbl_table.find_obj(&init.declarator.name) {
-                let err_info = format!("variable {} already defined", init.declarator.name);
-                return Err(self.err_declarator(&init.declarator, &err_info));
-            }
-            // deal with pointers
-            let mut cur_type = base_type.clone();
-            for i in 0..init.declarator.star_count {
-                cur_type = pointer_to(&cur_type);
-            }
-            // deal with suffix
-            if let Some(suffix) = &mut init.declarator.suffix {
-                match suffix {
-                    DeclaratorSuffix::ArrayLen(lens) => {
-                        while lens.len() > 0 {
-                            let len: i32 = lens.pop().unwrap();
-                            cur_type = array_of(&cur_type, len);
-                        }
-                    }
-                    DeclaratorSuffix::FunParam(_) => todo!(),
-                }
-            }
-
-            let obj = self.create_obj(&cur_type, &init.declarator.name);
-            self.sbl_table.add_obj(obj.clone());
-            if let Some(expr) = &mut init.init_expr {
-                self.analyze_expr(expr)?;
-                if !can_assign(&obj.ty, &expr.ty) {
-                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                    obj.name, &obj.ty, &expr.ty);
-                    return Err(self.err_declarator(&init.declarator, &err_info));
-                }
-            }
-        }
-        Ok(())
-    }
 
     fn create_obj(&mut self, base_type: &Type, name: &str) -> Obj {
         let mut cur_type = base_type.clone();
@@ -331,27 +243,27 @@ impl FunAnalyzer {
         obj
     }
 
-    fn analyze_stmt_refactor(&mut self, stmt: &mut StmtType) -> ir::StmtType {
+    fn analyze_stmt(&mut self, stmt: &mut StmtType) -> ir::StmtType {
         use ir::StmtType;
         match stmt {
             Ex(expr) => {
-                let expr = self.analyze_expr_refactor(expr);
+                let expr = self.analyze_expr(expr);
                 StmtType::Ex(expr)
             },
             Return(expr) => {
-                let expr = self.analyze_expr_refactor(expr);
+                let expr = self.analyze_expr(expr);
                 StmtType::Return(expr)
             },
             Block(items) => {
-                let stmts = self.analyze_items_refactor(items);
+                let stmts = self.analyze_items(items);
                 StmtType::Block(stmts)
             }
             If{cond, then, otherwise} => {
-                let cond = self.analyze_expr_refactor(cond);
-                let then = self.analyze_stmt_refactor(then);
+                let cond = self.analyze_expr(cond);
+                let then = self.analyze_stmt(then);
                 let then = Box::new(then);
                 let otherwise = if let Some(otherwise) = otherwise {
-                    Some(Box::new(self.analyze_stmt_refactor(otherwise)))
+                    Some(Box::new(self.analyze_stmt(otherwise)))
                 } else {
                     None
                 };
@@ -359,57 +271,30 @@ impl FunAnalyzer {
             }
             For{init, cond, inc, then} => {
                 let init = if let Some(init) = init {
-                    let init = self.analyze_expr_refactor(init);
+                    let init = self.analyze_expr(init);
                     Some(init)
                 } else {
                     None
                 };
                 let cond = if let Some(cond) = cond {
-                    let cond = self.analyze_expr_refactor(cond);
+                    let cond = self.analyze_expr(cond);
                     Some(cond)
                 } else {
                     None
                 };
                 let inc = if let Some(inc) = inc {
-                    let inc = self.analyze_expr_refactor(inc);
+                    let inc = self.analyze_expr(inc);
                     Some(inc)
                 } else {
                     None
                 };
-                let then = Box::new(self.analyze_stmt_refactor(then));
+                let then = Box::new(self.analyze_stmt(then));
                 StmtType::For{init, cond, inc, then}
             }
         }
     }
 
-    fn analyze_stmt(&mut self, stmt: &mut StmtType) -> Result<(), String> {
-        match stmt {
-            Ex(expr) | Return(expr) => self.analyze_expr(expr)?,
-            Block(items) => self.analyze_items(items)?,
-            If{cond, then, otherwise} => {
-                self.analyze_expr(cond)?;
-                self.analyze_stmt(then);
-                if let Some(otherwise) = otherwise {
-                    self.analyze_stmt(otherwise);
-                }
-            }
-            For{init, cond, inc, then} => {
-                if let Some(init) = init {
-                    self.analyze_expr(init)?;
-                }
-                if let Some(cond) = cond {
-                    self.analyze_expr(cond)?;
-                }
-                if let Some(inc) = inc {
-                    self.analyze_expr(inc)?;
-                }
-                self.analyze_stmt(then);
-            }
-        }
-        Ok(())
-    }
-
-    fn analyze_expr_refactor(&mut self, expr: &mut Expr) -> ir::Expr {
+    fn analyze_expr(&mut self, expr: &mut Expr) -> ir::Expr {
         use ir::ExprType;
         use ir::OP;
         let location = expr.location;
@@ -420,8 +305,8 @@ impl FunAnalyzer {
                 ir::Expr {content, ty, location}
             }
             Binary(lhs, rhs, tokenKind) => {
-                let mut lhs = self.analyze_expr_refactor(lhs);
-                let mut rhs = self.analyze_expr_refactor(rhs);
+                let mut lhs = self.analyze_expr(lhs);
+                let mut rhs = self.analyze_expr(rhs);
                 match tokenKind {
                     // deal with pointer arithmatic
                     Plus => {
@@ -440,7 +325,7 @@ impl FunAnalyzer {
                                 ArrayOf(element_type, _) => scal = sizeof(element_type),
                                 _ => scal = 8,
                             }
-                            rhs = scal_expr_refactor(&mut rhs, Mul, scal);
+                            rhs = scal_expr(&mut rhs, Mul, scal);
                         }
                         let ty = lhs.ty.clone();
                         let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Plus);
@@ -457,7 +342,7 @@ impl FunAnalyzer {
                                 ArrayOf(element_type, _) => scal = sizeof(element_type),
                                 _ => scal = 8,
                             }
-                            rhs = scal_expr_refactor(&rhs, Mul, scal);
+                            rhs = scal_expr(&rhs, Mul, scal);
                         } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
                             let mut basic_ty = lhs.ty.clone();
 							if let ArrayOf(basic, _) = &lhs.ty {
@@ -472,7 +357,7 @@ impl FunAnalyzer {
                             let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
                             let expr = ir::Expr {content, ty, location};
                             let scal = sizeof(&basic_ty);
-                            return scal_expr_refactor(&expr, Div, scal);
+                            return scal_expr(&expr, Div, scal);
                         }
                         let ty = lhs.ty.clone();
                         let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
@@ -487,9 +372,9 @@ impl FunAnalyzer {
                 }
             }
             Assign(lhs, rhs) => {
-                let rhs = self.analyze_expr_refactor(rhs);
-                let lhs = self.analyze_expr_refactor(lhs);
-                if !can_be_lvalue_refactor(&lhs) {
+                let rhs = self.analyze_expr(rhs);
+                let lhs = self.analyze_expr(lhs);
+                if !can_be_lvalue(&lhs) {
                     // @Incomplete: more precise error report: the reason why lhs cannot be lvalue
                     let err_info = format!("lhs cannot be lvalue: {:?}", &lhs.ty);
                     self.print_error_at(lhs.location, &err_info);
@@ -504,13 +389,13 @@ impl FunAnalyzer {
                 ir::Expr{content, ty, location}
             }
             Neg(val) => {
-                let val = self.analyze_expr_refactor(val);
+                let val = self.analyze_expr(val);
                 let ty = val.ty.clone();
                 let content = ExprType::Neg(Box::new(val));
                 ir::Expr{content, ty, location}
             }
             Deref(val) => {
-                let val = self.analyze_expr_refactor(val);
+                let val = self.analyze_expr(val);
                 let base_ty = match &val.ty {
                     TyPtr(base) => {
                         *base.clone()
@@ -529,7 +414,7 @@ impl FunAnalyzer {
                 ir::Expr{content, ty: base_ty, location}
             }
             AddrOf(val) => {
-                let val = self.analyze_expr_refactor(val);
+                let val = self.analyze_expr(val);
                 let ty = pointer_to(&val.ty);
                 let content = ExprType::AddrOf(Box::new(val));
                 ir::Expr{content, ty, location}
@@ -547,10 +432,10 @@ impl FunAnalyzer {
             }
             ArrayIndexing(arr_ref, indices) => {
                 let mut analyzed_indices = Vec::new();
-                let mut arr_ref = self.analyze_expr_refactor(arr_ref);
+                let mut arr_ref = self.analyze_expr(arr_ref);
                              // reborrow here
                 for index in &mut *indices {
-                    let analyzed_index = self.analyze_expr_refactor(index);
+                    let analyzed_index = self.analyze_expr(index);
                     analyzed_indices.push(analyzed_index);
                 }
                 let cur_ref = &mut arr_ref;
@@ -566,7 +451,7 @@ impl FunAnalyzer {
                                 ArrayOf(element_type, _) => sizeof(element_type),
                                 _ => 8,
                             };
-                        let scaled = scal_expr_refactor(&index, Mul, size);
+                        let scaled = scal_expr(&index, Mul, size);
                         let pointer_arithmatic = ExprType::Binary(Box::new(cur_ref.clone()), Box::new(scaled), OP::Plus);
                         let mut pointer_arithmatic_expr = ir::Expr {
                             content: pointer_arithmatic,
@@ -602,7 +487,7 @@ impl FunAnalyzer {
                 (*cur_ref).clone()
             }
             FunCall(ident, args) => {
-                // @Fix: The problem is that analyze_expr_refactor(ident) will check whether ident is declared and if not declared,
+                // @Fix: The problem is that analyze_expr(ident) will check whether ident is declared and if not declared,
                 // that's an error, but the function name is intentionally to be undeclared. 
                 match &ident.content {
                     Ident(s) => {
@@ -611,11 +496,11 @@ impl FunAnalyzer {
                     }
                     _ => println!("currently only support function name as call reference"),
                 }
-                let ident = self.analyze_expr_refactor(ident);
+                let ident = self.analyze_expr(ident);
                 // let ident = self.to_ir_ident(ident);
                 let mut analyzed_args = Vec::new();
                 for arg in args {
-                    let analyzed_arg = self.analyze_expr_refactor(arg);
+                    let analyzed_arg = self.analyze_expr(arg);
                     analyzed_args.push(analyzed_arg);
                 }
                 // @Note: The function name may be in another elf file, we don't check its validaity.
@@ -626,179 +511,6 @@ impl FunAnalyzer {
                     ty,
                     location,
                 }
-            }
-        }
-    }
-
-    fn analyze_expr(&mut self, expr: &mut Expr) -> Result<(), String> {
-        // if already analyzed, skip
-        if !(expr.ty == Type::ty_none) {
-            return Ok(());
-        }
-        match &mut expr.content {
-            Number(n) => Ok(expr.ty = TyInt),
-            Binary(lhs, rhs, tokenKind) => {
-                self.analyze_expr(lhs)?;
-                self.analyze_expr(rhs)?;
-                // @TODO: check whether types of lhs and rhs match (when no pointer involved)
-                match tokenKind {
-                    // deal with pointer arithmatic
-                    Plus => {
-                        if lhs.is_ptr() && rhs.is_ptr() {
-                            // @TODO: report the error as a single error message
-                            let left_err = self.error_expr(lhs, "error: both lhs and rhs are of ptr type");
-                            let right_err = self.error_expr(rhs, "error: both lhs and rhs are of ptr type");
-                            return Err(left_err + &right_err);
-                        }
-                        if lhs.is_integer() && rhs.is_ptr() {
-                            swap(lhs, rhs);
-                        }
-                        if lhs.is_ptr() && rhs.is_integer() {
-                            let mut scal: i32 = 8;
-                            match &lhs.ty {
-                                TyPtr(..) => scal = sizeof(&lhs.ty),
-                                ArrayOf(element_type, _) => scal = sizeof(element_type),
-                                _ => {},
-                            }
-                            scal_expr(rhs, Mul, scal);
-                        }
-                        expr.ty = lhs.ty.clone();
-                        return Ok(());
-                    }
-                    Minus => {
-                        if lhs.is_integer() && rhs.is_ptr() {
-                            return Err(self.error_expr(rhs, "error: integer - ptr"));
-                        }
-                        if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
-                            let mut scal: i32 = 8;
-                            match &lhs.ty {
-                                TyPtr(..) => scal = sizeof(&lhs.ty),
-                                ArrayOf(element_type, _) => scal = sizeof(element_type),
-                                _ => {},
-                            }
-                            scal_expr(rhs, Mul, scal);
-                            expr.ty = lhs.ty.clone();
-                        } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
-                            let mut basic_ty = lhs.ty.clone();
-							if let ArrayOf(basic, _) = &lhs.ty {
-								basic_ty = *basic.clone();
-							} else if let TyPtr(basic) = &lhs.ty {
-								basic_ty = *basic.clone();
-                            }
-							if lhs.ty != rhs.ty {
-								return Err(self.error_expr(rhs, "pointer arithmatic warning: type doesn't match"));
-							}
-                            expr.ty = TyInt;
-                            let scal = sizeof(&basic_ty);
-                            scal_expr(expr, Div, scal);
-                        } else if lhs.is_integer() && rhs.is_integer() {
-                            expr.ty = TyInt;
-                        }
-                        Ok(())
-                    }
-                    _ => Ok(()),
-                }
-            }
-            Assign(lhs, rhs) => {
-                self.analyze_expr(rhs)?;
-                self.analyze_expr(lhs)?;
-                if !can_be_lvalue(lhs) {
-                    // @Incomplete: more precise error report: the reason why lhs cannot be lvalue
-                    let err_info = format!("lhs cannot be lvalue: {:?}", &lhs.ty);
-                    return Err(self.error_expr(&lhs, &err_info));
-                }
-                if !can_be_rvalue(rhs) {
-                    let err_info = format!("rhs cannot be rvalue: {:?}", &rhs.ty);
-                    return Err(self.error_expr(&lhs, &err_info));
-                }
-                if !can_assign(&lhs.ty, &rhs.ty) {
-                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                    lhs.token.val, &lhs.ty, &rhs.ty);
-                    return Err(self.error_expr(&lhs, &err_info));
-                }
-                expr.ty = lhs.ty.clone();
-                Ok(())
-            }
-            Neg(val) => {
-                self.analyze_expr(val)?;
-                expr.ty = val.ty.clone();
-                Ok(())
-            }
-            Deref(val) => {
-                self.analyze_expr(val)?;
-                match &val.ty {
-                    TyPtr(base) => {
-                        expr.ty = *base.clone();
-                        Ok(())
-                    }
-                    ArrayOf(base, _) => {
-                        expr.ty = *base.clone();
-                        Ok(())
-                    }
-                    _ => {
-                        let err_msg = format!("semantic error: invalid dereferencing: 
-                        try to dereference {:?}", expr.ty);
-                        return Err(self.error_expr(expr, &err_msg));
-                    }
-                }
-            }
-            AddrOf(val) => {
-                self.analyze_expr(val)?;
-                expr.ty = pointer_to(&val.ty);
-                Ok(())
-            }
-            Ident(s) => {
-                if let Some(o) = self.sbl_table.find_obj(s) {
-                    expr.ty = o.ty.clone();
-                    Ok(())
-                } else {
-                    let err_info = format!("semantic error: symbol '{}' not found", s);
-                    return Err(self.error_expr(expr, &err_info));
-                }
-            }
-            // array indexing is converted to pointer arithmatic
-            ArrayIndexing(arr_ref, indices) => {
-                self.analyze_expr(arr_ref)?;
-                             // reborrow here
-                for index in &mut *indices {
-                    self.analyze_expr(index)?;
-                }
-                let mut cur_ref = arr_ref;
-                for index in indices {
-                    // type checking
-                    if !cur_ref.is_ptr() {
-                        let err_msg = self.error_expr(index, "subscripted value is neither array nor pointer nor vector");
-                        return Err(err_msg);
-                    } else {
-                        let pointer_arithmatic = Binary(cur_ref.clone(), Box::new(index.clone()), Plus);
-                        let mut pointer_arithmatic_expr = Expr::new(
-                            pointer_arithmatic, 
-                            index.token.clone(),
-                            Location::merge(cur_ref.location, index.location),
-                        );
-                        self.analyze_expr(&mut pointer_arithmatic_expr);
-                         let location = pointer_arithmatic_expr.location;
-                        let deref = Deref(Box::new(pointer_arithmatic_expr));
-                        let mut deref_expr = Expr::new(
-                            deref,
-                            index.token.clone(),
-                            location,
-                        );
-                        self.analyze_expr(&mut deref_expr);
-                        self.analyze_expr(&mut deref_expr);
-                        *cur_ref = Box::new(deref_expr);
-                    }
-                }
-                expr.ty = cur_ref.ty.clone();
-                expr.content = cur_ref.content.clone();
-                Ok(())
-            }
-            FunCall(ident, args) => {
-                for arg in args {
-                    self.analyze_expr(arg)?;
-                }
-                // the function name may be in another elf file, we don't check its validaity
-                Ok(())
             }
         }
     }
@@ -890,21 +602,8 @@ fn can_assign(left: &Type, right: &Type) -> bool {
     }
 }
 
-fn can_be_lvalue(expr: &Expr) -> bool {
-    match expr.content {
-        FunCall(_, _) => false,
-        Ident(_) => {
-            if let ArrayOf(_, _) = expr.ty {
-                false
-            } else {
-                true
-            }
-        }
-		_ => true,
-    }
-}
 
-fn can_be_lvalue_refactor(expr: &ir::Expr) -> bool {
+fn can_be_lvalue(expr: &ir::Expr) -> bool {
     use ir::ExprType;
     match expr.content {
         ExprType::FunCall(_, _) => false,
@@ -944,22 +643,7 @@ pub fn is_array(t: &Type) -> bool {
     }
 }
 
-fn scal_expr(expr: &mut Expr, operation: TokenKind, scal: i32) {
-    // expr for scal num
-    let tok = Lexer::gen_token(Num(scal), "num_from_analyze", 0, 1);
-    let num_expr_type = Number(scal);
-    let num_expr = Expr::new(num_expr_type, tok, expr.location);
-
-    // scalled expr
-    let new_expr_type = Binary(Box::new(expr.clone()), Box::new(num_expr), operation.clone());
-    let tok = Lexer::gen_token(operation, "op_from_analyze", 0, 1);
-    let mut new_expr = Expr::new(new_expr_type, tok, expr.location);
-    // type doesn't change
-    new_expr.ty = expr.ty.clone();
-    *expr = new_expr;
-}
-
-fn scal_expr_refactor(expr: &ir::Expr, operation: TokenKind, scal: i32) -> ir::Expr {
+fn scal_expr(expr: &ir::Expr, operation: TokenKind, scal: i32) -> ir::Expr {
     use ir::OP;
     // expr for scal num
     let num_expr_type = ir::ExprType::Number(scal);

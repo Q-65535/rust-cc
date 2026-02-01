@@ -42,11 +42,11 @@ fn main() {
             // analyze
             let mut analyzer = Analyzer::new();
             // let analyzed_program = analyzer.analyze(program);
-            let analyzed_program = analyzer.analyze_refactor(program);
+            let analyzed_program = analyzer.analyze(program);
             // codegen
-            let mut gen = Generator::new_refactor(analyzed_program);
+            let mut gen = Generator::new(analyzed_program);
             // gen.gen_code();
-            gen.gen_code_refactor();
+            gen.gen_code();
         }
         Err(err) => {
             println!("{}", err);
