@@ -48,6 +48,7 @@ pub enum KeywordToken {
     For,
     While,
     Int,
+    Sizeof,
 }
 use KeywordToken::*;
 
@@ -134,6 +135,7 @@ impl Lexer {
             ("for".to_string(), Keyword(For)),
             ("while".to_string(), Keyword(While)),
             ("int".to_string(), Keyword(Int)),
+            ("sizeof".to_string(), Keyword(KeywordToken::Sizeof)),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

@@ -91,6 +91,7 @@ pub enum ExprType {
     Ident(String),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
+    Sizeof(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -112,7 +113,7 @@ impl Expr {
 
     fn cal_start_index(&self) -> usize {
         match &self.content {
-            Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.token.location.start_index,
+            ExprType::Sizeof(_) | Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.token.location.start_index,
             Binary(lhs, _, _) => lhs.cal_start_index(),
             ExprType::Assign(lhs, _) => lhs.cal_start_index(),
             ArrayIndexing(array_ref, _) => array_ref.cal_start_index(),
@@ -133,6 +134,7 @@ impl Expr {
                     None => return ident.cal_end_index() + 2,
                 }
             }
+            ExprType::Sizeof(e) => e.cal_end_index(),
         }
     }
 
@@ -396,6 +398,8 @@ impl Parser {
         let mut cur_kind: TokenKind = self.cur_token().kind.clone();
         while cur_kind != RBrace {
             let item: BlockItem;
+            // @Refactor: If cur_kind is a DeclarationSpecifier.
+            // @Refactor: kind is a not good name for a token, we can rename it to just token.
             if cur_kind == Keyword(Int) {
                 item = Decl(self.parse_decl()?);
             } else {
@@ -581,6 +585,16 @@ impl Parser {
                 let end_index = self.cur_token().location.end_index;
                 let location = Location{start_index, end_index, line_number: 123};
                 let expr = Expr::new(AddrOf(operand), cur_token_snapshot, location);
+                Ok(expr)
+            },
+            Keyword(KeywordToken::Sizeof) => {
+                self.next_token();
+                let operand = self.parse_prefix()?;
+                let operand = Box::new(operand);
+                let start_index = cur_token_snapshot.location.start_index;
+                let end_index = self.cur_token().location.end_index;
+                let location = Location{start_index, end_index, line_number: 123};
+                let expr = Expr::new(ExprType::Sizeof(operand), cur_token_snapshot, location);
                 Ok(expr)
             },
             LexIdent(_) => self.parse_ident(),

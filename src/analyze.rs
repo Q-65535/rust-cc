@@ -512,6 +512,18 @@ impl FunAnalyzer {
                     location,
                 }
             }
+            // @Temp: We only consider compile time sizeof for now
+            Sizeof(expr_content) => {
+                let content = self.analyze_expr(expr_content);
+                let size = sizeof(&content.ty);
+                let ty = content.ty.clone();
+                let content = ExprType::Number(size);
+                ir::Expr {
+                    content,
+                    ty,
+                    location,
+                }
+            }
         }
     }
 
