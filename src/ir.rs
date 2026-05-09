@@ -1,5 +1,5 @@
 use crate::analyze::{self, Type::*, *};
-use crate::lex::{Location};
+use crate::common::{self, *};
 
 #[derive(Debug, Clone)]
 pub enum StmtType {
@@ -10,40 +10,6 @@ pub enum StmtType {
     For {init: Option<Expr>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>},
 }
 use StmtType::*;
-
-// #[derive(Debug, Clone)]
-// pub enum BlockItem {
-//     Stmt(StmtType),
-//     Decl(Declaration),
-// }
-
-// #[derive(Debug, Clone)]
-// pub struct Declaration {
-//     pub decl_spec: DeclarationSpecifier,
-//     pub declarators: Vec<Declarator>,
-// }
-
-// #[derive(Debug, Clone)]
-// pub struct Declarator {
-//     pub star_count: i32,
-//     pub name: String,
-//     pub suffix: Option<DeclaratorSuffix>,
-//     pub location: Location,
-// }
-
-// #[derive(Debug, Clone)]
-// pub enum DeclaratorSuffix {
-//     ArrayLen(Vec<i32>),
-//     FunParam(Vec<Parameter>),
-// }
-// use DeclaratorSuffix::*;
-
-
-// #[derive(Debug, Clone)]
-// pub struct Parameter {
-//     pub decl_spec: DeclarationSpecifier,
-//     pub declarator: Declarator,
-// }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
@@ -62,7 +28,7 @@ pub enum ExprType {
 pub struct Expr {
     pub content: ExprType,
     pub ty: Type,
-    pub location: Location,
+    pub span: Span,
 }
 
 impl Expr {
