@@ -68,8 +68,6 @@ use DeclarationSpecifier::*;
 #[derive(Debug, Clone)]
 pub struct InitDeclarator {
     pub declarator: Declarator,
-    // Declaration may include initialization
-    // @Smell: Maybe we don't need InitDeclarator at all? This can be just in Declarator struct.
     pub init_expr: Option<Expr>,
 }
 
@@ -108,7 +106,7 @@ pub struct Expr {
 impl Expr {
     pub fn new(content: ExprType, token: Token, span: Span) -> Self {
         // @Improve: properly set initial type
-        let mut expr = Expr{content, token, ty: ty_none, span: span};
+        let mut expr = Expr{content, token, ty: ty_none, span};
         expr
     }
 
@@ -350,7 +348,7 @@ impl Parser {
             }
             let span = Span{start_index, end_index};
 
-            Ok(Declarator{star_count, name, suffix, span: span})
+            Ok(Declarator{star_count, name, suffix, span})
         } else {
             let err_msg = self.error_token(self.cur_token(), "not an identifier");
             return Err(err_msg);

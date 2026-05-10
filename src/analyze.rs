@@ -231,7 +231,7 @@ impl FunAnalyzer {
     fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {
         let content = ir::ExprType::Ident(o.name.clone());
         let span = Span{start_index: 0, end_index: 0};
-        ir::Expr{content, ty: o.ty.clone(), span: span}
+        ir::Expr{content, ty: o.ty.clone(), span}
         
     }
 
@@ -303,7 +303,7 @@ impl FunAnalyzer {
             Number(n) => {
                 let content = ExprType::Number(*n);
                 let ty = TyInt;
-                ir::Expr {content, ty, span: span}
+                ir::Expr {content, ty, span}
             }
             Binary(lhs, rhs, tokenKind) => {
                 let mut lhs = self.analyze_expr(lhs);
@@ -330,7 +330,7 @@ impl FunAnalyzer {
                         }
                         let ty = lhs.ty.clone();
                         let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Plus);
-                        ir::Expr {content, ty, span: span}
+                        ir::Expr {content, ty, span}
                     }
                     Minus => {
                         if lhs.is_integer() && rhs.is_ptr() {
@@ -356,19 +356,19 @@ impl FunAnalyzer {
 							}
                             let ty = TyInt;
                             let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
-                            let expr = ir::Expr {content, ty, span: span};
+                            let expr = ir::Expr {content, ty, span};
                             let scal = sizeof(&basic_ty);
                             return scal_expr(&expr, Div, scal);
                         }
                         let ty = lhs.ty.clone();
                         let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
-                        ir::Expr {content, ty, span: span}
+                        ir::Expr {content, ty, span}
                     }
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
                         let ty = lhs.ty.clone();
                         let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), op);
-                        ir::Expr {content, ty, span: span}
+                        ir::Expr {content, ty, span}
                     }
                 }
             }
@@ -387,13 +387,13 @@ impl FunAnalyzer {
                 }
                 let ty = lhs.ty.clone();
                 let content = ExprType::Assign(Box::new(lhs), Box::new(rhs));
-                ir::Expr{content, ty, span: span}
+                ir::Expr{content, ty, span}
             }
             Neg(val) => {
                 let val = self.analyze_expr(val);
                 let ty = val.ty.clone();
                 let content = ExprType::Neg(Box::new(val));
-                ir::Expr{content, ty, span: span}
+                ir::Expr{content, ty, span}
             }
             Deref(val) => {
                 let val = self.analyze_expr(val);
@@ -412,13 +412,13 @@ impl FunAnalyzer {
                     }
                 };
                 let content = ExprType::Deref(Box::new(val));
-                ir::Expr{content, ty: base_ty, span: span}
+                ir::Expr{content, ty: base_ty, span}
             }
             AddrOf(val) => {
                 let val = self.analyze_expr(val);
                 let ty = pointer_to(&val.ty);
                 let content = ExprType::AddrOf(Box::new(val));
-                ir::Expr{content, ty, span: span}
+                ir::Expr{content, ty, span}
             }
             Ident(s) => {
                 let ty = if let Some(o) = self.sbl_table.find_obj(s) {
@@ -429,7 +429,7 @@ impl FunAnalyzer {
                     TyInt
                 };
                 let content = ExprType::Ident(s.clone());
-                ir::Expr{content, ty, span: span}
+                ir::Expr{content, ty, span}
             }
             ArrayIndexing(arr_ref, indices) => {
                 let mut analyzed_indices = Vec::new();
@@ -457,7 +457,7 @@ impl FunAnalyzer {
                         let mut pointer_arithmatic_expr = ir::Expr {
                             content: pointer_arithmatic,
                             ty: cur_ref.ty.clone(),
-                            span: span,
+                            span,
                         };
 
                         // Dereferencing.
@@ -480,7 +480,7 @@ impl FunAnalyzer {
                         let mut deref_expr = ir::Expr {
                             content: deref,
                             ty: base_ty,
-                            span: span,
+                            span,
                         };
                         *cur_ref = deref_expr;
                     }
@@ -510,7 +510,7 @@ impl FunAnalyzer {
                 ir::Expr {
                     content,
                     ty,
-                    span: span,
+                    span,
                 }
             }
             // @Temp: We only consider compile time sizeof for now
@@ -522,7 +522,7 @@ impl FunAnalyzer {
                 ir::Expr {
                     content,
                     ty,
-                    span: span,
+                    span,
                 }
             }
         }
