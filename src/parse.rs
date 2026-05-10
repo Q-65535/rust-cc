@@ -96,23 +96,17 @@ pub enum ExprType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
     pub content: ExprType,
-    // @Smell: Do we really need a token for each expression?
-    pub token: Token,
-    // @TODO: remove type attribute for AST epxression
-    pub ty: Type,
     pub span: Span,
 }
 
 impl Expr {
-    pub fn new(content: ExprType, token: Token, span: Span) -> Self {
-        // @Improve: properly set initial type
-        let mut expr = Expr{content, token, ty: ty_none, span};
-        expr
+    pub fn new(content: ExprType, span: Span) -> Self {
+        Expr{content, span}
     }
 
     fn cal_start_index(&self) -> usize {
         match &self.content {
-            ExprType::Sizeof(_) | Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.token.span.start_index,
+            ExprType::Sizeof(_) | Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.span.start_index,
             Binary(lhs, _, _) => lhs.cal_start_index(),
             ExprType::Assign(lhs, _) => lhs.cal_start_index(),
             ArrayIndexing(array_ref, _) => array_ref.cal_start_index(),
@@ -123,7 +117,7 @@ impl Expr {
     fn cal_end_index(&self) -> usize {
         match &self.content {
             Neg(e) | Deref(e) | AddrOf(e) => e.cal_end_index(),
-            Number(_) | Ident(_) => self.token.span.end_index,
+            Number(_) | Ident(_) => self.span.end_index,
             Binary(_, rhs, _) => rhs.cal_end_index(),
             ExprType::Assign(_, rhs) => rhs.cal_end_index(),
             ArrayIndexing(array_ref, _) => array_ref.cal_end_index(),
@@ -134,20 +128,6 @@ impl Expr {
                 }
             }
             ExprType::Sizeof(e) => e.cal_end_index(),
-        }
-    }
-
-    pub fn is_integer(&self) -> bool {
-        if let TyInt = &self.ty {
-            true
-        } else {
-            false
-        }
-    }
-    pub fn is_ptr(&self) -> bool {
-        match &self.ty {
-            TyPtr(_) | ArrayOf(_, _) => true,
-            _ => false
         }
     }
 }
@@ -563,7 +543,7 @@ impl Parser {
                 let start_index = cur_token_snapshot.span.start_index;
                 let end_index = self.cur_token().span.end_index;
                 let span = Span{start_index, end_index};
-                let expr = Expr::new(Neg(operand), cur_token_snapshot, span);
+                let expr = Expr::new(Neg(operand), span);
                 Ok(expr)
             },
             Mul => {
@@ -573,7 +553,7 @@ impl Parser {
                 let start_index = cur_token_snapshot.span.start_index;
                 let end_index = self.cur_token().span.end_index;
                 let span = Span{start_index, end_index};
-                let expr = Expr::new(Deref(operand), cur_token_snapshot, span);
+                let expr = Expr::new(Deref(operand), span);
                 Ok(expr)
             },
             Ampersand => {
@@ -583,7 +563,7 @@ impl Parser {
                 let start_index = cur_token_snapshot.span.start_index;
                 let end_index = self.cur_token().span.end_index;
                 let span = Span{start_index, end_index};
-                let expr = Expr::new(AddrOf(operand), cur_token_snapshot, span);
+                let expr = Expr::new(AddrOf(operand), span);
                 Ok(expr)
             },
             Keyword(KeywordToken::Sizeof) => {
@@ -593,7 +573,7 @@ impl Parser {
                 let start_index = cur_token_snapshot.span.start_index;
                 let end_index = self.cur_token().span.end_index;
                 let span = Span{start_index, end_index};
-                let expr = Expr::new(ExprType::Sizeof(operand), cur_token_snapshot, span);
+                let expr = Expr::new(ExprType::Sizeof(operand), span);
                 Ok(expr)
             },
             LexIdent(_) => self.parse_ident(),
@@ -608,7 +588,7 @@ impl Parser {
             let start_index = tok.span.start_index;
             let end_index = tok.span.end_index;
             let span = Span{start_index, end_index};
-            let expr = Expr::new(var, tok, span);
+            let expr = Expr::new(var, span);
             Ok(expr)
         } else {
             Err(self.error_token(self.cur_token(), "expect an identifier"))
@@ -622,7 +602,7 @@ impl Parser {
                 start_index: tok.span.start_index,
                 end_index: tok.span.end_index,
                             };
-            let expr = Expr::new(Number(n), tok, span);
+            let expr = Expr::new(Number(n), span);
             return Ok(expr);
         } else {
             return Err(self.error_token(self.cur_token(), "expect a number"));
@@ -648,7 +628,7 @@ impl Parser {
             end_index: rhs.span.end_index,
                     };
         let content = Binary(Box::new(lhs), Box::new(rhs), tok.kind.clone());
-        Ok(Expr::new(content, tok, span))
+        Ok(Expr::new(content, span))
     }
 
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
@@ -662,9 +642,9 @@ impl Parser {
                     end_index: val.span.end_index,
                                     };
                 let content = ExprType::Assign(Box::new(lhs), Box::new(val));
-                Ok(Expr::new(content, tok, span))
+                Ok(Expr::new(content, span))
             },
-            _ => Err(self.error_token(&lhs.token, "not a lvalue name")),
+            _ => Err(self.error_span(lhs.span, "not a lvalue name")),
         }
     }
 
@@ -681,7 +661,7 @@ impl Parser {
             end_index,
                     };
         let content = FunCall(Box::new(lhs), args_list);
-        return Ok(Expr::new(content, cur_tok, span));
+        return Ok(Expr::new(content, span));
     }
 
     fn parse_array_indexing(&mut self, lhs: Expr) -> Result<Expr, String> {
@@ -702,7 +682,7 @@ impl Parser {
             end_index,
                     };
         let content = ArrayIndexing(Box::new(lhs), indices);
-        return Ok(Expr::new(content, prime_token, span))
+        return Ok(Expr::new(content, span))
     }
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, String> {
@@ -751,11 +731,15 @@ impl Parser {
     }
 
     fn error_token(&self, tok: &Token, info: &str) -> String {
+        self.error_span(tok.span, info)
+    }
+
+    fn error_span(&self, span: Span, info: &str) -> String {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(tok.span.start_index);
-        let arrows = "^".repeat(tok.span.end_index - tok.span.start_index + 1);
+        let spaces = " ".repeat(span.start_index);
+        let arrows = "^".repeat(span.end_index - span.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }

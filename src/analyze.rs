@@ -211,7 +211,7 @@ impl FunAnalyzer {
                 let analyzed_expr = self.analyze_expr(expr);
                 if !can_assign(&obj.ty, &analyzed_expr.ty) {
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                    obj.name, &obj.ty, &expr.ty);
+                    obj.name, &obj.ty, &analyzed_expr.ty);
                     self.print_error_at(init.declarator.span, &err_info);
                 } else {
                     let expr = self.gen_expr_from_obj(&obj);
@@ -405,8 +405,8 @@ impl FunAnalyzer {
                         *base.clone()
                     }
                     _ => {
-                        let err_msg = format!("semantic error: invalid dereferencing: 
-                        try to dereference {:?}", expr.ty);
+                        let err_msg = format!("semantic error: invalid dereferencing:
+                        try to dereference {:?}", val.ty);
                         self.print_error_at(expr.span, &err_msg);
                         val.ty.clone()
                     }
@@ -469,8 +469,8 @@ impl FunAnalyzer {
                                 *base.clone()
                             }
                             _ => {
-                                let err_msg = format!("semantic error: invalid dereferencing: 
-                                try to dereference {:?}", expr.ty);
+                                let err_msg = format!("semantic error: invalid dereferencing:
+                                try to dereference {:?}", pointer_arithmatic_expr.ty);
                                 self.print_error_at(expr.span, &err_msg);
                                 cur_ref.ty.clone()
                             }
@@ -492,13 +492,12 @@ impl FunAnalyzer {
                 // that's an error, but the function name is intentionally to be undeclared. 
                 match &ident.content {
                     Ident(s) => {
-                        let obj = self.create_obj(&ident.ty, &s);
+                        let obj = self.create_obj(&ty_none, &s);
                         self.sbl_table.add_obj(obj.clone());
                     }
                     _ => println!("currently only support function name as call reference"),
                 }
                 let ident = self.analyze_expr(ident);
-                // let ident = self.to_ir_ident(ident);
                 let mut analyzed_args = Vec::new();
                 for arg in args {
                     let analyzed_arg = self.analyze_expr(arg);
