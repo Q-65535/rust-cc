@@ -259,7 +259,7 @@ impl FunAnalyzer {
                 let stmts = self.analyze_items(items);
                 StmtType::Block(stmts)
             }
-            If{cond, then, otherwise} => {
+            If(parse::IfStmt{cond, then, otherwise}) => {
                 let cond = self.analyze_expr(cond);
                 let then = self.analyze_stmt(then);
                 let then = Box::new(then);
@@ -270,7 +270,7 @@ impl FunAnalyzer {
                 };
                 StmtType::If{cond, then, otherwise}
             }
-            For{init, cond, inc, then} => {
+            For(parse::ForStmt{init, cond, inc, then}) => {
                 let init = if let Some(init) = init {
                     let init = self.analyze_expr(init);
                     Some(init)

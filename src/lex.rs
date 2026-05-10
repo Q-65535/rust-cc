@@ -48,10 +48,16 @@ pub enum KeywordToken {
     Else,
     For,
     While,
-    Int,
     Sizeof,
+    TypeSpecifier(TypeSpecifier),
 }
 use KeywordToken::*;
+
+#[derive(PartialEq, Clone, Debug)]
+pub enum TypeSpecifier {
+    Int,
+}
+use TypeSpecifier::*;
 
 #[derive(PartialEq, PartialOrd)]
 pub enum Precedence {
@@ -118,7 +124,7 @@ impl Lexer {
             ("else".to_string(), Keyword(Else)),
             ("for".to_string(), Keyword(For)),
             ("while".to_string(), Keyword(While)),
-            ("int".to_string(), Keyword(Int)),
+            ("int".to_string(), Keyword(TypeSpecifier(Int))),
             ("sizeof".to_string(), Keyword(KeywordToken::Sizeof)),
         ].into_iter().collect();
         Lexer{

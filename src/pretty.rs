@@ -228,7 +228,7 @@ fn print_stmt(s: &StmtType, prefix: &str, is_last: bool) {
                 print_block_item(item, &cp, i + 1 == ic);
             }
         }
-        StmtType::If { cond, then, otherwise } => {
+        StmtType::If(IfStmt { cond, then, otherwise }) => {
             println!("{prefix}{conn}{YELLOW}If{RESET}");
             let cp = child_prefix(prefix, is_last);
 
@@ -248,7 +248,7 @@ fn print_stmt(s: &StmtType, prefix: &str, is_last: bool) {
                 }
             }
         }
-        StmtType::For { init, cond, inc, then } => {
+        StmtType::For(ForStmt { init, cond, inc, then }) => {
             println!("{prefix}{conn}{YELLOW}For{RESET}");
             let cp = child_prefix(prefix, is_last);
             print_opt_expr(&cp, "init", init, false);

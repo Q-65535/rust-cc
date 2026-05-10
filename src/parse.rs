@@ -1,10 +1,11 @@
 use std::{io::{self, Write}, process::exit};
 use colored::*;
 use crate::lex::{self, *};
-use Precedence::*;
-use TokenKind::*;
+use crate::lex::Precedence::{self, *};
+use crate::lex::TokenKind::{self, *};
+use crate::lex::KeywordToken::{self, *};
+use crate::lex::TypeSpecifier::{self, *};
 use ExprType::*;
-use KeywordToken::*;
 use crate::Type::{self, *};
 use crate::SRC;
 use crate::common::{self, *};
@@ -14,10 +15,25 @@ pub enum StmtType {
     Ex(Expr),
     Return(Expr),
     Block(Vec<BlockItem>),
-    If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
-    For {init: Option<Expr>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>},
+    If(IfStmt),
+    For(ForStmt),
 }
 use StmtType::*;
+
+#[derive(Debug, Clone)]
+pub struct IfStmt {
+    pub cond: Expr,
+    pub then: Box<StmtType>,
+    pub otherwise: Option<Box<StmtType>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForStmt {
+    pub init: Option<Expr>,
+    pub cond: Option<Expr>,
+    pub inc: Option<Expr>,
+    pub then: Box<StmtType>,
+}
 
 #[derive(Debug, Clone)]
 pub enum BlockItem {
@@ -178,6 +194,7 @@ impl Parser {
         return  cur.kind == expect;
     }
 
+    // Expect next token and jump to it if match expectation
     fn expect_peek(&mut self, expect: &TokenKind) -> Result<&Token, String> {
         let peek = self.peek_token();
         if  &peek.kind == expect {
@@ -270,7 +287,7 @@ impl Parser {
         let kind = &self.cur_token().kind;
         let decl_spec: DeclarationSpecifier;
         match kind {
-            Keyword(Int) => Ok(SpecInt),
+            Keyword(TypeSpecifier(Int)) => Ok(SpecInt),
             _ => {
                 let err_msg = self.error_token(self.cur_token(), "unknown declaration specifer!");
                 return Err(err_msg);
@@ -338,20 +355,17 @@ impl Parser {
     fn parse_stmt(&mut self) -> Result<StmtType, String> {
         let kind = &self.cur_token().kind;
         match kind {
-            Keyword(Ret) => Ok(self.parse_ret_stmt()?),
-            Keyword(If) => Ok(self.parse_if_stmt()?),
-            Keyword(For) => Ok(self.parse_for_stmt()?),
-            Keyword(While) => Ok(self.parse_while_stmt()?),
-            Semicolon => {
-                let empty: Vec<BlockItem> = Vec::new();
-                Ok(Block(empty))
-            },
-            LBrace => Ok(self.parse_block()?),
-            _ => Ok(self.parse_expr_stmt()?),
+            Keyword(Ret) => Ok(Return(self.parse_ret_stmt()?)),
+            Keyword(KeywordToken::If) => Ok(StmtType::If(self.parse_if_stmt()?)),
+            Keyword(KeywordToken::For) => Ok(StmtType::For(self.parse_for_stmt()?)),
+            Keyword(While) => Ok(StmtType::For(self.parse_while_stmt()?)),
+            Semicolon => Ok(Block(Vec::new())),
+            LBrace => Ok(Block(self.parse_block()?)),
+            _ => Ok(Ex(self.parse_expr_stmt()?)),
         }
     }
 
-    fn parse_if_stmt(&mut self) -> Result<StmtType, String> {
+    fn parse_if_stmt(&mut self) -> Result<IfStmt, String> {
         self.check_skip_peek(&LParen)?;
         // parse condition
         let cond = self.parse_expr(Lowest)?;
@@ -367,19 +381,18 @@ impl Parser {
             }
             _ => None
         };
-        Ok(StmtType::If{cond, then, otherwise})
+        Ok(IfStmt{cond, then, otherwise})
     }
 
-    fn parse_block(&mut self) -> Result<StmtType, String> {
+    fn parse_block(&mut self) -> Result<Vec<BlockItem>, String> {
         let mut items: Vec<BlockItem> = Vec::new();
-        // skip '{'
-        self.next_token();
+        self.next_token(); // skip '{'
         let mut cur_kind: TokenKind = self.cur_token().kind.clone();
         while cur_kind != RBrace {
             let item: BlockItem;
-            // @Refactor: If cur_kind is a DeclarationSpecifier.
-            // @Refactor: kind is a not good name for a token, we can rename it to just token.
-            if cur_kind == Keyword(Int) {
+            // @Future: if the token kind is a declaration-specifier (i.e., storage-class-specifier,
+            // type-specifier or function-specifier), we parse decl.
+            if cur_kind == Keyword(TypeSpecifier(Int)) {
                 item = Decl(self.parse_decl()?);
             } else {
                 item = Stmt(self.parse_stmt()?);
@@ -392,25 +405,21 @@ impl Parser {
             }
             cur_kind = self.cur_token().kind.clone();
         }
-        Ok(Block(items))
+        Ok(items)
     }
 
-    fn parse_ret_stmt(&mut self) -> Result<StmtType, String> {
+    fn parse_ret_stmt(&mut self) -> Result<Expr, String> {
         self.next_token();
         let expr = self.parse_expr(Lowest)?;
         self.expect_peek(&Semicolon)?;
-        Ok(Return(expr))
+        Ok(expr)
     }
 
-    fn parse_for_stmt(&mut self) -> Result<StmtType, String> {
+    fn parse_for_stmt(&mut self) -> Result<ForStmt, String> {
         self.check_skip_peek(&LParen)?;
         let init: Option<Expr>;
         let cond: Option<Expr>;
         let inc: Option<Expr>;
-        // @Duplication
-        // @Duplication
-        // @Duplication
-        // @Duplication
         init  = match self.cur_token().kind {
             Semicolon => {
                 self.check_skip_current(&Semicolon)?;
@@ -447,10 +456,10 @@ impl Parser {
 
         let then = self.parse_stmt()?;
         let then = Box::new(then);
-        Ok(StmtType::For{init, cond, inc, then})
+        Ok(ForStmt{init, cond, inc, then})
     }
 
-    fn parse_while_stmt(&mut self) -> Result<StmtType, String> {
+    fn parse_while_stmt(&mut self) -> Result<ForStmt, String> {
         self.check_skip_peek(&LParen)?;
         let cond: Option<Expr>;
         cond = match self.cur_token().kind {
@@ -466,13 +475,13 @@ impl Parser {
         };
         let then = self.parse_stmt()?;
         let then = Box::new(then);
-        Ok(StmtType::For{init: None, cond, inc: None, then})
+        Ok(ForStmt{init: None, cond, inc: None, then})
     }
 
-    fn parse_expr_stmt(&mut self) -> Result<StmtType, String> {
+    fn parse_expr_stmt(&mut self) -> Result<Expr, String> {
         let expr = self.parse_expr(Lowest)?;
         self.expect_peek(&Semicolon)?;
-        Ok(Ex(expr))
+        Ok(expr)
     }
 
     pub fn parse_expr(&mut self, precedence: Precedence) -> Result<Expr, String> {
@@ -490,7 +499,6 @@ impl Parser {
                             self.next_token();
                             expr = self.parse_infix(expr)?;
                         },
-                        // @TODO: We need to record the infomation about parenthesis positions
                         LParen => {
                             self.next_token();
                             expr = self.parse_funcall(expr)?;
@@ -521,10 +529,15 @@ impl Parser {
     }
 
     fn parse_paren(&mut self) -> Result<Expr, String> {
+        let start_index = self.cur_token().span.start_index;
         self.check_skip_current(&LParen)?;
-        let res = self.parse_expr(Precedence::Lowest);
+        let mut res = self.parse_expr(Precedence::Lowest)?;
         self.check_jumpto_peek(&RParen)?;
-        res
+        let end_index = self.cur_token().span.end_index;
+        // span attribute considers paranthesis
+        res.span.start_index = start_index;
+        res.span.end_index = end_index;
+        Ok(res)
     }
 
     fn parse_prefix(&mut self) -> Result<Expr, String> {
@@ -649,17 +662,10 @@ impl Parser {
     }
 
     fn parse_funcall(&mut self, lhs:Expr) -> Result<Expr, String> {
-        let cur_tok = self.cur_token().clone();
+        let start_index = self.cur_token().span.start_index;
         let args_list = self.parse_args()?;
-
-        let end_index = match args_list.last() {
-            None => cur_tok.span.end_index,
-            Some(expr) => expr.span.end_index,
-        };
-        let span = Span {
-            start_index: cur_tok.span.start_index,
-            end_index,
-                    };
+        let end_index = self.cur_token().span.end_index;
+        let span = Span {start_index, end_index};
         let content = FunCall(Box::new(lhs), args_list);
         return Ok(Expr::new(content, span));
     }
@@ -715,16 +721,9 @@ impl Parser {
         if let Some(FunParam(params)) = &declarator.suffix {
             self.expect_peek(&LBrace);
             // parse function body
-            let res = self.parse_block()?;
-            // @Cleanup: parse_block should definitely return a code block, we don't need to
-            // check it
-            match res {
-                Block(items) => Ok(Function{name: declarator.name, return_type,
-                    star_count: declarator.star_count, params: params.clone(), items}),
-                _ => Err(self.error_token(self.cur_token(), "(this is the end of
-                parsing result) error parsing function definition: we want to
-                parse code block of function definition, but got this result")),
-            }
+            let items = self.parse_block()?;
+            Ok(Function{name: declarator.name, return_type,
+                star_count: declarator.star_count, params: params.clone(), items})
         } else {
             Err(self.error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
