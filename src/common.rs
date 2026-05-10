@@ -13,7 +13,7 @@ impl Span {
     }
 
     // To be implemented. We can only consider the start_index.
-    pub fn cal_line_number(location: Span) -> i32 {
+    pub fn cal_line_number(span: Span) -> i32 {
         return 1;
     }
 }

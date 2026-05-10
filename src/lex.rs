@@ -166,11 +166,11 @@ impl Lexer {
         if !(start_index+len >= 1) {
             println!("fatal: this token {} has length of 0", content);
         }
-        let location = Span{start_index, end_index: start_index+len-1};
+        let span = Span{start_index, end_index: start_index+len-1};
         Token {
             kind,
             val: content.to_string(),
-            span: location,
+            span,
         }
     }
 
