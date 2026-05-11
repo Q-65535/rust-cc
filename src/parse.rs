@@ -257,13 +257,13 @@ impl Parser {
 
     pub fn parse(&mut self) -> Result<Program, String> {
         let mut translation_units: Vec<TranslationUnit> = Vec::new();
-
         loop {
             if self.cur_token().kind == Eof {break};
-            let decl_spec = self.parse_decl_spec()?;
             let find_LBrace = self.find_LBrace_before_encounter_semicolon()?;
+            // Only function definition have LBrace, so if we hit LBrace then just start parsing function def.
             let current_unit = if find_LBrace {
                 FunctionDef(self.parse_fun_def()?)
+            // Others are all declarations.
             } else {
                 GlobalDecl(self.parse_decl()?)
             };
