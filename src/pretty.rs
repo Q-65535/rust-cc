@@ -103,8 +103,11 @@ fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
 pub fn print_program(program: &Program) {
     println!("{BOLD}── AST ──────────────────────────────────────────────{RESET}");
     println!("{BOLD}{CYAN}Program{RESET}");
-    let n = program.funs.len();
-    for (i, fun) in program.funs.iter().enumerate() {
+    let funs: Vec<_> = program.translation_units.iter().filter_map(|u| {
+        if let TranslationUnit::FunctionDef(f) = u { Some(f) } else { None }
+    }).collect();
+    let n = funs.len();
+    for (i, fun) in funs.iter().enumerate() {
         print_function(fun, "", i + 1 == n);
     }
     println!();

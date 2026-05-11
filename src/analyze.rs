@@ -94,10 +94,17 @@ impl Analyzer {
     pub fn analyze(&mut self, mut program: Program) -> ir::AnalyzedProgram {
         use ir::Function;
         let mut afuns: Vec<ir::Function> = Vec::new();
-        for fun in program.funs {
-            let mut fun_analyzer = FunAnalyzer::new();
-            let afun = fun_analyzer.analyze(fun);
-            afuns.push(afun);
+        for unit in program.translation_units {
+            match unit {
+                parse::TranslationUnit::FunctionDef(fun) => {
+                    let mut fun_analyzer = FunAnalyzer::new();
+                    let afun = fun_analyzer.analyze(fun);
+                    afuns.push(afun);
+                }
+                parse::TranslationUnit::GlobalDecl(_decl) => {
+                    // TODO: handle global variable declaration
+                }
+            }
         }
         ir::AnalyzedProgram{afuns}
     }
@@ -123,6 +130,16 @@ impl FunAnalyzer {
             return_type = pointer_to(&return_type);
         }
         let name = fun.name;
+
+        // Add function name to symbol table
+        let obj = self.create_obj(&return_type, &name);
+        if self.sbl_table.find_obj(&obj.name) == None {
+            self.sbl_table.add_obj(obj);
+        } else {
+            let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
+            self.print_error_at(fun.name_span, &err_info);
+        }
+
         let mut param_names: Vec<String> = Vec::new();
         for param in &fun.params {
             self.analyze_param(param);
@@ -490,6 +507,9 @@ impl FunAnalyzer {
             FunCall(ident, args) => {
                 // @Fix: The problem is that analyze_expr(ident) will check whether ident is declared and if not declared,
                 // that's an error, but the function name is intentionally to be undeclared. 
+                // @Future: The above problem will be solved when we add function declaration. At that time every valid function call can
+                // find its declaration without adding obj at here in the following code (because the obj is added after the compiler
+                // dealt with the corresponding declaration).
                 match &ident.content {
                     Ident(s) => {
                         let obj = self.create_obj(&ty_none, &s);
@@ -503,7 +523,7 @@ impl FunAnalyzer {
                     let analyzed_arg = self.analyze_expr(arg);
                     analyzed_args.push(analyzed_arg);
                 }
-                // @Note: The function name may be in another elf file, we don't check its validaity.
+                // The function name may be in another elf file, we don't check its validaity. (@Future: Not true after we add function declaration)
                 let ty = ident.ty.clone();
                 let content = ExprType::FunCall(Box::new(ident), analyzed_args);
                 ir::Expr {

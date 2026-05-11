@@ -49,14 +49,23 @@ pub enum DeclaratorSuffix {
 }
 use DeclaratorSuffix::*;
 
+
+#[derive(Debug, Clone)]
+pub enum TranslationUnit {
+    FunctionDef(Function),
+    GlobalDecl(Declaration),
+}
+use TranslationUnit::*;
+
 #[derive(Debug)]
 pub struct Program {
-    pub funs: Vec<Function>,
+    pub translation_units: Vec<TranslationUnit>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
+    pub name_span: Span,
     pub return_type: DeclarationSpecifier,
     pub star_count: i32,
     pub params: Vec<Parameter>,
@@ -174,6 +183,19 @@ impl Parser {
         &self.tokens[self.cur_index+1]
     }
 
+        fn find_LBrace_before_encounter_semicolon(&self) -> Result<bool, String> {
+        let mut index = self.cur_index;
+        while self.tokens[index].kind != Semicolon {
+            if self.tokens[index].kind == Eof {
+                let err_msg = format!("parsing error: expect '{{' or ';', but got Eof");
+                return Err(self.error_token(self.cur_token(), err_msg.as_str()));
+            }
+            if self.tokens[index].kind == LBrace {return Ok(true)};
+            index += 1;
+        }
+        return Ok(false);
+    }
+
     fn skip_cur_token(&mut self, expect_cur: &TokenKind) -> Result<(), String> {
         if self.cur_token_is(expect_cur.clone()) {
             self.next_token();
@@ -234,19 +256,21 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Result<Program, String> {
-        let mut funs: Vec<Function> = Vec::new();
+        let mut translation_units: Vec<TranslationUnit> = Vec::new();
+
         loop {
-            let kind = &self.cur_token().kind;
-            match kind {
-                Eof => break,
-                _ => {
-                    let fun = self.parse_fun_def()?;
-                    funs.push(fun);
-                }
-            }
+            if self.cur_token().kind == Eof {break};
+            let decl_spec = self.parse_decl_spec()?;
+            let find_LBrace = self.find_LBrace_before_encounter_semicolon()?;
+            let current_unit = if find_LBrace {
+                FunctionDef(self.parse_fun_def()?)
+            } else {
+                GlobalDecl(self.parse_decl()?)
+            };
+            translation_units.push(current_unit);
             self.next_token();
         }
-        Ok(Program{funs})
+        Ok(Program{translation_units})
     }
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
@@ -720,9 +744,8 @@ impl Parser {
         let declarator = self.parse_declarator()?;
         if let Some(FunParam(params)) = &declarator.suffix {
             self.expect_peek(&LBrace);
-            // parse function body
             let items = self.parse_block()?;
-            Ok(Function{name: declarator.name, return_type,
+            Ok(Function{name: declarator.name, name_span: declarator.span, return_type,
                 star_count: declarator.star_count, params: params.clone(), items})
         } else {
             Err(self.error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
