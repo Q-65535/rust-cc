@@ -285,7 +285,7 @@ impl Lexer {
 
     fn read_int(&mut self) -> Result<i32, String> {
         let mut len: usize = 0;
-        let c = self.cur_char(); 
+        let c = self.cur_char();
         let i = self.index;
         if c <= '9' && c >= '0' {
             len += 1;

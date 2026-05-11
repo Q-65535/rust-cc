@@ -47,6 +47,7 @@ impl Generator {
             self.cur_afun_r = afun.clone();
             self.fun_gen();
         }
+        println!("  .section .note.GNU-stack,\"\",@progbits");
     }
 
     pub fn fun_gen(&self) {
