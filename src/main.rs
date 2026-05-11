@@ -4,6 +4,8 @@ pub mod lex;
 pub mod analyze;
 pub mod codegen;
 pub mod ir;
+pub mod pretty;
+pub mod common;
 use std::{io::{self, Write}, process::exit, env};
 use colored::*;
 use crate::lex::*;
@@ -35,17 +37,17 @@ fn main() {
         lexer = Lexer::new(src_str);
     }
     let mut tokens = lexer.lex();
+    // pretty::print_tokens(&tokens);
     // parse
     let mut parser = Parser::new(tokens);
     match parser.parse() {
         Ok(program) => {
+            // pretty::print_program(&program);
             // analyze
             let mut analyzer = Analyzer::new();
-            // let analyzed_program = analyzer.analyze(program);
             let analyzed_program = analyzer.analyze(program);
             // codegen
             let mut gen = Generator::new(analyzed_program);
-            // gen.gen_code();
             gen.gen_code();
         }
         Err(err) => {

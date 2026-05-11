@@ -3,13 +3,9 @@ use std::cell::Cell;
 use colored::*;
 use crate::ir::ExprType::{self, *};
 use crate::ir::StmtType::{self, *};
-// use crate::TokenKind::{self, *};
-// use crate::CompareToken::{self, *};
 use crate::ir::OP::{self, *};
-// use crate::BlockItem::{self, *};
 use ir::CompareToken::{self, *};
 use crate::Declaration;
-// use crate::Expr;
 use crate::Function;
 use crate::Obj;
 use crate::SblTable;
@@ -228,8 +224,8 @@ impl Generator {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.location.start_index);
-        let arrows = "^".repeat(expr.location.end_index - expr.location.start_index);
+        let spaces = " ".repeat(expr.span.start_index);
+        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }

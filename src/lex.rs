@@ -3,6 +3,7 @@ use std::cmp::{max, min};
 use std::collections::HashMap;
 use crate::*;
 use crate::SRC;
+use crate::common::{self, *};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
@@ -47,10 +48,16 @@ pub enum KeywordToken {
     Else,
     For,
     While,
-    Int,
     Sizeof,
+    TypeSpecifier(TypeSpecifier),
 }
 use KeywordToken::*;
+
+#[derive(PartialEq, Clone, Debug)]
+pub enum TypeSpecifier {
+    Int,
+}
+use TypeSpecifier::*;
 
 #[derive(PartialEq, PartialOrd)]
 pub enum Precedence {
@@ -67,24 +74,7 @@ pub enum Precedence {
 pub struct Token {
     pub kind: TokenKind,
     pub val: String,
-    pub location: Location,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Location {
-    pub start_index: usize,
-    pub end_index: usize,
-    // @Incomplete: What if start and end index have different line number?
-    // We need to create a new struct to location the accurate position of a charater(row and column atrribute).
-    pub line_number: usize,
-}
-
-impl Location {
-    pub fn merge(l1: Location, l2: Location) -> Location {
-        let start_index = min(l1.start_index, l2.start_index);
-        let end_index = max(l1.end_index, l2.end_index);
-        Location{start_index, end_index, line_number: l1.line_number}
-    }
+    pub span: Span,
 }
 
 impl Token {
@@ -110,11 +100,11 @@ impl Token {
 
 impl Default for Token {
     fn default() -> Token {
-        let default_location = Location{start_index: 0, end_index: 0, line_number: 123};
+        let default_location = Span{start_index: 0, end_index: 0};
         Token{
             kind: Eof,
             val: "".to_string(),
-            location: default_location,
+            span: default_location,
         }
     }
 }
@@ -134,7 +124,7 @@ impl Lexer {
             ("else".to_string(), Keyword(Else)),
             ("for".to_string(), Keyword(For)),
             ("while".to_string(), Keyword(While)),
-            ("int".to_string(), Keyword(Int)),
+            ("int".to_string(), Keyword(TypeSpecifier(Int))),
             ("sizeof".to_string(), Keyword(KeywordToken::Sizeof)),
         ].into_iter().collect();
         Lexer{
@@ -182,11 +172,11 @@ impl Lexer {
         if !(start_index+len >= 1) {
             println!("fatal: this token {} has length of 0", content);
         }
-        let location = Location{start_index, end_index: start_index+len-1, line_number: 123};
+        let span = Span{start_index, end_index: start_index+len-1};
         Token {
             kind,
             val: content.to_string(),
-            location,
+            span,
         }
     }
 

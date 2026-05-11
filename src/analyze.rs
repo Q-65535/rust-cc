@@ -10,6 +10,7 @@ use CompareToken::*;
 use BlockItem::*;
 use DeclarationSpecifier::*;
 use crate::SRC;
+use crate::common::{self, *};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -168,7 +169,7 @@ impl FunAnalyzer {
             self.sbl_table.add_obj(obj);
         } else {
             let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
-            self.print_error_at(param.declarator.location, &err_info);
+            self.print_error_at(param.declarator.span, &err_info);
         }
     }
 
@@ -184,7 +185,7 @@ impl FunAnalyzer {
         for init in &mut decl.init_declarators {
             if let Some(_) = self.sbl_table.find_obj(&init.declarator.name) {
                 let err_info = format!("variable {} already defined", init.declarator.name);
-                self.print_error_at(init.declarator.location, &err_info);
+                self.print_error_at(init.declarator.span, &err_info);
             }
             // deal with pointers
             let mut cur_type = base_type.clone();
@@ -210,12 +211,12 @@ impl FunAnalyzer {
                 let analyzed_expr = self.analyze_expr(expr);
                 if !can_assign(&obj.ty, &analyzed_expr.ty) {
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                    obj.name, &obj.ty, &expr.ty);
-                    self.print_error_at(init.declarator.location, &err_info);
+                    obj.name, &obj.ty, &analyzed_expr.ty);
+                    self.print_error_at(init.declarator.span, &err_info);
                 } else {
                     let expr = self.gen_expr_from_obj(&obj);
                     let content = ir::ExprType::Assign(Box::new(expr), Box::new(analyzed_expr));
-                    let generated_expr = ir::Expr{content, ty: obj.ty, location: init.declarator.location};
+                    let generated_expr = ir::Expr{content, ty: obj.ty, span: init.declarator.span};
                     let generated_stmt = ir::StmtType::Ex(generated_expr);
                     // if let ir::StmtType::Ex{..} = generated_stmt {
                     //     println!("aaaaaaaaaaaaaaaaaaaaaaaaaaaa");
@@ -229,8 +230,8 @@ impl FunAnalyzer {
 
     fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {
         let content = ir::ExprType::Ident(o.name.clone());
-        let location = Location{start_index: 0, end_index: 0, line_number: 0};
-        ir::Expr{content, ty: o.ty.clone(), location}
+        let span = Span{start_index: 0, end_index: 0};
+        ir::Expr{content, ty: o.ty.clone(), span}
         
     }
 
@@ -258,7 +259,7 @@ impl FunAnalyzer {
                 let stmts = self.analyze_items(items);
                 StmtType::Block(stmts)
             }
-            If{cond, then, otherwise} => {
+            If(parse::IfStmt{cond, then, otherwise}) => {
                 let cond = self.analyze_expr(cond);
                 let then = self.analyze_stmt(then);
                 let then = Box::new(then);
@@ -269,7 +270,7 @@ impl FunAnalyzer {
                 };
                 StmtType::If{cond, then, otherwise}
             }
-            For{init, cond, inc, then} => {
+            For(parse::ForStmt{init, cond, inc, then}) => {
                 let init = if let Some(init) = init {
                     let init = self.analyze_expr(init);
                     Some(init)
@@ -297,12 +298,12 @@ impl FunAnalyzer {
     fn analyze_expr(&mut self, expr: &mut Expr) -> ir::Expr {
         use ir::ExprType;
         use ir::OP;
-        let location = expr.location;
+        let span = expr.span;
         match &mut expr.content {
             Number(n) => {
                 let content = ExprType::Number(*n);
                 let ty = TyInt;
-                ir::Expr {content, ty, location}
+                ir::Expr {content, ty, span}
             }
             Binary(lhs, rhs, tokenKind) => {
                 let mut lhs = self.analyze_expr(lhs);
@@ -312,8 +313,8 @@ impl FunAnalyzer {
                     Plus => {
                         if lhs.is_ptr() && rhs.is_ptr() {
                             println!();
-                            self.print_error_at(lhs.location, "error: both lhs and rhs are of ptr type");
-                            self.print_error_at(rhs.location, "error: both lhs and rhs are of ptr type");
+                            self.print_error_at(lhs.span, "error: both lhs and rhs are of ptr type");
+                            self.print_error_at(rhs.span, "error: both lhs and rhs are of ptr type");
                         }
                         if lhs.is_integer() && rhs.is_ptr() {
                             swap(&mut lhs, &mut rhs);
@@ -329,11 +330,11 @@ impl FunAnalyzer {
                         }
                         let ty = lhs.ty.clone();
                         let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Plus);
-                        ir::Expr {content, ty, location}
+                        ir::Expr {content, ty, span}
                     }
                     Minus => {
                         if lhs.is_integer() && rhs.is_ptr() {
-                            self.print_error_at(rhs.location, "error: integer - ptr");
+                            self.print_error_at(rhs.span, "error: integer - ptr");
                         }
                         if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
                             let mut scal: i32;
@@ -351,23 +352,23 @@ impl FunAnalyzer {
 								basic_ty = *basic.clone();
                             }
 							if lhs.ty != rhs.ty {
-								self.print_error_at(rhs.location, "pointer arithmatic warning: type doesn't match");
+								self.print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
 							}
                             let ty = TyInt;
                             let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
-                            let expr = ir::Expr {content, ty, location};
+                            let expr = ir::Expr {content, ty, span};
                             let scal = sizeof(&basic_ty);
                             return scal_expr(&expr, Div, scal);
                         }
                         let ty = lhs.ty.clone();
                         let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
-                        ir::Expr {content, ty, location}
+                        ir::Expr {content, ty, span}
                     }
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
                         let ty = lhs.ty.clone();
                         let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), op);
-                        ir::Expr {content, ty, location}
+                        ir::Expr {content, ty, span}
                     }
                 }
             }
@@ -377,22 +378,22 @@ impl FunAnalyzer {
                 if !can_be_lvalue(&lhs) {
                     // @Incomplete: more precise error report: the reason why lhs cannot be lvalue
                     let err_info = format!("lhs cannot be lvalue: {:?}", &lhs.ty);
-                    self.print_error_at(lhs.location, &err_info);
+                    self.print_error_at(lhs.span, &err_info);
                 }
                 if !can_assign(&lhs.ty, &rhs.ty) {
                     let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
                     &rhs.ty, &lhs.ty);
-                    self.print_error_at(lhs.location, &err_info);
+                    self.print_error_at(lhs.span, &err_info);
                 }
                 let ty = lhs.ty.clone();
                 let content = ExprType::Assign(Box::new(lhs), Box::new(rhs));
-                ir::Expr{content, ty, location}
+                ir::Expr{content, ty, span}
             }
             Neg(val) => {
                 let val = self.analyze_expr(val);
                 let ty = val.ty.clone();
                 let content = ExprType::Neg(Box::new(val));
-                ir::Expr{content, ty, location}
+                ir::Expr{content, ty, span}
             }
             Deref(val) => {
                 let val = self.analyze_expr(val);
@@ -404,31 +405,31 @@ impl FunAnalyzer {
                         *base.clone()
                     }
                     _ => {
-                        let err_msg = format!("semantic error: invalid dereferencing: 
-                        try to dereference {:?}", expr.ty);
-                        self.print_error_at(expr.location, &err_msg);
+                        let err_msg = format!("semantic error: invalid dereferencing:
+                        try to dereference {:?}", val.ty);
+                        self.print_error_at(expr.span, &err_msg);
                         val.ty.clone()
                     }
                 };
                 let content = ExprType::Deref(Box::new(val));
-                ir::Expr{content, ty: base_ty, location}
+                ir::Expr{content, ty: base_ty, span}
             }
             AddrOf(val) => {
                 let val = self.analyze_expr(val);
                 let ty = pointer_to(&val.ty);
                 let content = ExprType::AddrOf(Box::new(val));
-                ir::Expr{content, ty, location}
+                ir::Expr{content, ty, span}
             }
             Ident(s) => {
                 let ty = if let Some(o) = self.sbl_table.find_obj(s) {
                     o.ty.clone()
                 } else {
                     let err_info = format!("semantic error: symbol '{}' not found", s);
-                    self.print_error_at(expr.location, &err_info);
+                    self.print_error_at(expr.span, &err_info);
                     TyInt
                 };
                 let content = ExprType::Ident(s.clone());
-                ir::Expr{content, ty, location}
+                ir::Expr{content, ty, span}
             }
             ArrayIndexing(arr_ref, indices) => {
                 let mut analyzed_indices = Vec::new();
@@ -442,7 +443,7 @@ impl FunAnalyzer {
                 for index in analyzed_indices {
                     // type checking
                     if !cur_ref.is_ptr() {
-                        self.print_error_at(index.location, "subscripted value is neither array nor pointer nor vector");
+                        self.print_error_at(index.span, "subscripted value is neither array nor pointer nor vector");
                     } else {
                         // Array indexing is converted to pointer arithmatic and dereferencing
                         // pointer arithmatic.
@@ -456,7 +457,7 @@ impl FunAnalyzer {
                         let mut pointer_arithmatic_expr = ir::Expr {
                             content: pointer_arithmatic,
                             ty: cur_ref.ty.clone(),
-                            location,
+                            span,
                         };
 
                         // Dereferencing.
@@ -468,9 +469,9 @@ impl FunAnalyzer {
                                 *base.clone()
                             }
                             _ => {
-                                let err_msg = format!("semantic error: invalid dereferencing: 
-                                try to dereference {:?}", expr.ty);
-                                self.print_error_at(expr.location, &err_msg);
+                                let err_msg = format!("semantic error: invalid dereferencing:
+                                try to dereference {:?}", pointer_arithmatic_expr.ty);
+                                self.print_error_at(expr.span, &err_msg);
                                 cur_ref.ty.clone()
                             }
                         };
@@ -479,7 +480,7 @@ impl FunAnalyzer {
                         let mut deref_expr = ir::Expr {
                             content: deref,
                             ty: base_ty,
-                            location,
+                            span,
                         };
                         *cur_ref = deref_expr;
                     }
@@ -491,13 +492,12 @@ impl FunAnalyzer {
                 // that's an error, but the function name is intentionally to be undeclared. 
                 match &ident.content {
                     Ident(s) => {
-                        let obj = self.create_obj(&ident.ty, &s);
+                        let obj = self.create_obj(&ty_none, &s);
                         self.sbl_table.add_obj(obj.clone());
                     }
                     _ => println!("currently only support function name as call reference"),
                 }
                 let ident = self.analyze_expr(ident);
-                // let ident = self.to_ir_ident(ident);
                 let mut analyzed_args = Vec::new();
                 for arg in args {
                     let analyzed_arg = self.analyze_expr(arg);
@@ -509,7 +509,7 @@ impl FunAnalyzer {
                 ir::Expr {
                     content,
                     ty,
-                    location,
+                    span,
                 }
             }
             // @Temp: We only consider compile time sizeof for now
@@ -521,7 +521,7 @@ impl FunAnalyzer {
                 ir::Expr {
                     content,
                     ty,
-                    location,
+                    span,
                 }
             }
         }
@@ -531,18 +531,18 @@ impl FunAnalyzer {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.location.start_index);
-        let arrows = "^".repeat(expr.location.end_index - expr.location.start_index + 1);
+        let spaces = " ".repeat(expr.span.start_index);
+        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }
 
-    fn print_error_at(&self, location: Location, info: &str) {
+    fn print_error_at(&self, span: Span, info: &str) {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(location.start_index);
-        let arrows = "^".repeat(location.end_index - location.start_index + 1);
+        let spaces = " ".repeat(span.start_index);
+        let arrows = "^".repeat(span.end_index - span.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         println!("{}", err_msg);
     }
@@ -551,8 +551,8 @@ impl FunAnalyzer {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.location.start_index);
-        let arrows = "^".repeat(expr.location.end_index - expr.location.start_index + 1);
+        let spaces = " ".repeat(expr.span.start_index);
+        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         println!("{}", err_msg);
     }
@@ -561,8 +561,8 @@ impl FunAnalyzer {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.location.start_index);
-        let arrows = "^".repeat(expr.location.end_index - expr.location.start_index + 1);
+        let spaces = " ".repeat(expr.span.start_index);
+        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         println!("{}", err_msg);
     }
@@ -571,8 +571,8 @@ impl FunAnalyzer {
         let mut err_msg = String::from("");
         let src_str: &str = &SRC.lock().unwrap().to_string();
         err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(declarator.location.start_index);
-        let arrows = "^".repeat(declarator.location.end_index - declarator.location.start_index + 1);
+        let spaces = " ".repeat(declarator.span.start_index);
+        let arrows = "^".repeat(declarator.span.end_index - declarator.span.start_index + 1);
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }
@@ -662,7 +662,7 @@ fn scal_expr(expr: &ir::Expr, operation: TokenKind, scal: i32) -> ir::Expr {
     let num_expr = ir::Expr {
         content: num_expr_type,
         ty: TyInt,
-        location: expr.location
+        span: expr.span
     };
 
     // scalled expr
@@ -671,7 +671,7 @@ fn scal_expr(expr: &ir::Expr, operation: TokenKind, scal: i32) -> ir::Expr {
     ir::Expr {
         content: new_expr_type,
         ty: expr.ty.clone(), 
-        location: expr.location,
+        span: expr.span,
     }
 }
 
@@ -694,10 +694,10 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
     }
 }
 
-fn to_ir_ident(name: &str, ty: &Type, location: &Location) -> ir::Expr {
+fn to_ir_ident(name: &str, ty: &Type, span: &Span) -> ir::Expr {
     ir::Expr {
         content: ir::ExprType::Ident(name.to_string()),
         ty: ty.clone(),
-        location: location.clone(),
+        span: span.clone(),
     }
 }
