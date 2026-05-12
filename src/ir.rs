@@ -60,6 +60,7 @@ pub struct Function {
 
 pub struct AnalyzedProgram {
     pub afuns: Vec<Function>,
+    pub global_objects: Vec<GlobalObject>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

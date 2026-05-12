@@ -28,9 +28,7 @@ fn sizeof(ty: &Type) -> i32 {
     match ty {
         TyPtr(_) => 8,
         TyInt => 8,
-        ArrayOf(element_ty, len) => {
-            sizeof(element_ty) * len
-        }
+        ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         TyFunc(_) => 8,
         ty_none => 8,
     }
@@ -44,6 +42,20 @@ pub struct Obj {
     pub offset: i32,
     // @TODO: Add position info.
     // When a variable is already defined, the compiler should tell where the variable is defined.
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalVariableInitValueInfo {
+    size: u32, // How many bytes this value occupies.
+    value: i64, // The constant value (global initialization only accepts constant values)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalObject {
+    name: String,
+    ty: Type,
+    is_static: bool,
+    init_values: Option<Vec<GlobalVariableInitValueInfo>>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +106,7 @@ impl Analyzer {
     pub fn analyze(&mut self, mut program: Program) -> ir::AnalyzedProgram {
         use ir::Function;
         let mut afuns: Vec<ir::Function> = Vec::new();
+        let mut global_objects: Vec<GlobalObject> = Vec::new();
         for unit in program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
@@ -101,12 +114,17 @@ impl Analyzer {
                     let afun = fun_analyzer.analyze(fun);
                     afuns.push(afun);
                 }
-                parse::TranslationUnit::GlobalDecl(_decl) => {
-                    // TODO: handle global variable declaration
+                parse::TranslationUnit::GlobalDecl(decl) => {
+                    let current_object = self.analyze_global_decl(decl);
+                    global_objects.push(current_object);
                 }
             }
         }
-        ir::AnalyzedProgram{afuns}
+        ir::AnalyzedProgram{afuns, global_objects}
+    }
+
+    pub fn analyze_global_decl(&self, decl: Declaration) -> GlobalObject {
+        todo!();
     }
 }
 
@@ -191,7 +209,6 @@ impl FunAnalyzer {
     }
 
 
-    // This function should return an array of statements
     // after analyze, declarations are all resolved to creating obj and assignment statement.
     fn analyze_decl(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
