@@ -47,15 +47,38 @@ pub struct Obj {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalVariableInitValueInfo {
     size: u32, // How many bytes this value occupies.
-    value: i64, // The constant value (global initialization only accepts constant values)
+    value: i32, // The constant value (global initialization only accepts constant values)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalObject {
     name: String,
     ty: Type,
-    is_static: bool,
     init_values: Option<Vec<GlobalVariableInitValueInfo>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GlobalObjectsTable {
+    pub objs: Vec<GlobalObject>,
+}
+
+impl GlobalObjectsTable {
+    fn new() -> Self {
+        GlobalObjectsTable{objs: Vec::new()}
+    }
+
+    pub fn find_obj(&self, s: &str) -> Option<&GlobalObject> {
+        for o in &self.objs {
+            if o.name == s {
+                return Some(o);
+            }
+        }
+        None
+    }
+
+    pub fn add_obj(&mut self, o: GlobalObject) {
+        self.objs.push(o);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +103,13 @@ impl SblTable {
     pub fn add_obj(&mut self, o: Obj) {
         self.objs.push(o);
     }
+
+    pub fn add_new_obj(&mut self, name: &str, ty: &Type) {
+        let mut cur_type = ty.clone();
+        let mut size: i32 = sizeof(ty);
+        let obj = Obj{name: name.to_string(), ty: cur_type, offset: 0};
+        self.add_obj(obj);
+    }
 }
 
 pub struct AnalyzedProgram {
@@ -94,12 +124,14 @@ pub struct AnalyzedFun {
 }
 
 pub struct Analyzer {
-    cur_offset: i32,
+    cur_offset: i32, // What did I do? What is this field for???????
+    pub sbl_table: SblTable, // The global symbol table, the top of the symbol table chain.
+    pub global_objects_table: GlobalObjectsTable,
 }
 
 impl Analyzer {
     pub fn new() -> Self {
-        let mut analyzer = Analyzer{cur_offset: 0};
+        let mut analyzer = Analyzer{cur_offset: 0, sbl_table: SblTable::new(), global_objects_table: GlobalObjectsTable::new()};
         analyzer
     }
 
@@ -116,15 +148,81 @@ impl Analyzer {
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
                     let current_object = self.analyze_global_decl(decl);
-                    global_objects.push(current_object);
                 }
             }
         }
         ir::AnalyzedProgram{afuns, global_objects}
     }
 
-    pub fn analyze_global_decl(&self, decl: Declaration) -> GlobalObject {
-        todo!();
+    pub fn analyze_global_decl(&mut self, mut decl: Declaration) {
+        let base_type: Type;
+        match &decl.decl_spec {
+            SpecInt => base_type = TyInt,
+        }
+        for init in &mut decl.init_declarators {
+            if let Some(_) = self.sbl_table.find_obj(&init.declarator.name) {
+                let err_info = format!("global variable {} already defined", init.declarator.name);
+                // TODO: error handling
+                print_error_at(init.declarator.span, &err_info);
+            }
+            // deal with pointers
+            let mut cur_type = base_type.clone();
+            for i in 0..init.declarator.star_count {
+                cur_type = pointer_to(&cur_type);
+            }
+            // deal with suffix
+            if let Some(suffix) = &mut init.declarator.suffix {
+                match suffix {
+                    DeclaratorSuffix::ArrayLen(lens) => {
+                        while lens.len() > 0 {
+                            let len: i32 = lens.pop().unwrap();
+                            cur_type = array_of(&cur_type, len);
+                        }
+                    }
+                    DeclaratorSuffix::FunParam(_) => todo!(),
+                }
+            }
+            self.sbl_table.add_new_obj(&init.declarator.name, &cur_type);
+
+            if let Some(expr) = &mut init.init_expr {
+                let mut init_values: Vec<GlobalVariableInitValueInfo> = Vec::new();
+                let analyzed_expr = match &mut expr.content {
+                    Number(n) => {
+                        ir::Expr{content: ir::ExprType::Number(*n), ty: TyInt, span: expr.span}
+                    }
+                    _ => {
+                        ir::Expr{content: ir::ExprType::Number(0), ty: TyInt, span: expr.span}
+                    }
+                };
+                // let analyzed_expr = self.analyze_expr(expr);
+                // @Future: Currently, we only support constant number assignment.
+                // We will add array and struct initialization expr assignment in the future.
+                if !can_assign(&cur_type, &analyzed_expr.ty) {
+                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+                    init.declarator.name, &cur_type, &analyzed_expr.ty);
+                    print_error_at(init.declarator.span, &err_info);
+                } else if let ir::ExprType::Number(n) = analyzed_expr.content {
+                    let size = 8;
+                    let current_info = GlobalVariableInitValueInfo{size, value: n};
+                    init_values.push(current_info);
+                    let obj = self.create_obj(&init.declarator.name, &cur_type, Some(init_values));
+                    self.global_objects_table.add_obj(obj.clone());
+                } else {
+                    let err_info = format!("This is not a constant number expression!");
+                    print_error_at(analyzed_expr.span, &err_info);
+                }
+            } else { // decl without initializer
+                let obj = self.create_obj(&init.declarator.name, &cur_type, None);
+                self.global_objects_table.add_obj(obj.clone());
+            }
+        }
+    }
+    // @Naming: This name conflicts to symbol table stuff. We can just call it global variable, instead of object.
+    fn create_obj(&mut self, name: &str, ty: &Type, init_values: Option<Vec<GlobalVariableInitValueInfo>>) -> GlobalObject {
+        let mut cur_type = ty.clone();
+        let mut size: i32 = sizeof(ty);
+        let obj = GlobalObject{name: name.to_string(), ty: cur_type, init_values};
+        obj
     }
 }
 
@@ -274,6 +372,7 @@ impl FunAnalyzer {
         let mut cur_type = base_type.clone();
         let mut size: i32 = sizeof(base_type);
         let obj = Obj{name: name.to_string(), ty: cur_type, offset: self.cur_offset};
+        // @Smell: This line should be executed outside of this function.
         self.cur_offset += size;
         obj
     }
@@ -737,4 +836,14 @@ fn to_ir_ident(name: &str, ty: &Type, span: &Span) -> ir::Expr {
         ty: ty.clone(),
         span: span.clone(),
     }
+}
+
+fn print_error_at(span: Span, info: &str) {
+    let mut err_msg = String::from("");
+    let src_str: &str = &SRC.lock().unwrap().to_string();
+    err_msg.push_str(&format!("{}\n", src_str));
+    let spaces = " ".repeat(span.start_index);
+    let arrows = "^".repeat(span.end_index - span.start_index + 1);
+    err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+    println!("{}", err_msg);
 }
