@@ -232,11 +232,593 @@ pub struct Scope {
     pub outer_scope: Option<Box::<Scope>>,
 }
 
+impl Scope {
+    pub fn new() -> Self {
+        Scope{objects: Vec::new(), None, None}
+    }
+
+    // @TODO: search upwards
+    pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
+        for o in &self.objects {
+            if o.name == s {
+                return Some(o);
+            }
+        }
+        None
+    }
+
+    pub fn add_obj(&mut self, o: Obj) {
+        self.objects.push(o);
+    }
+}
+
 pub struct ProgramAnalyzer {
-    global_scope: Scope,
+    // @Smell: I think we just don't need this field, We can just handle global declaration
+    // at codegen stage. At analyze stage, we just verify that the global declaration is
+    // semantically valid.
+    pub global_objects_table: GlobalObjectsTable,
+    pub global_scope: Scope,
     // At the start of each function analyzation, the folloing two fields are cleared
-    current_scope: Scope,
-    cur_offset: i32,
+    pub current_scope: Box::<Scope>,
+    pub cur_offset: i32,
+}
+
+impl ProgramAnalyzer {
+    pub fn new() -> Self {
+        let sbl_table = SblTable::new();
+        ProgramAnalyzer{global_scope: Scope::new(), current_scope: global_scope, cur_offset: 0}
+    }
+
+    pub fn analyze(&mut self, mut program: Program) -> ir::AnalyzedProgram {
+        use ir::Function;
+        let mut afuns: Vec<ir::Function> = Vec::new();
+        let mut global_objects: Vec<GlobalObject> = Vec::new();
+        for unit in program.translation_units {
+            match unit {
+                parse::TranslationUnit::FunctionDef(fun) => {
+                    let mut fun_analyzer = FunAnalyzer::new();
+                    let afun = fun_analyzer.analyze(fun);
+                    afuns.push(afun);
+                }
+                parse::TranslationUnit::GlobalDecl(decl) => {
+                    let current_object = self.analyze_global_decl(decl);
+                }
+            }
+        }
+        ir::AnalyzedProgram{afuns, global_objects}
+    }
+
+    pub fn analyze_global_decl(&mut self, mut decl: Declaration) {
+        let base_type: Type;
+        match &decl.decl_spec {
+            SpecInt => base_type = TyInt,
+        }
+        for init in &mut decl.init_declarators {
+            if let Some(_) = self.global_scope.find_obj(&init.declarator.name) {
+                let err_info = format!("global variable {} already defined", init.declarator.name);
+                // TODO: error handling
+                print_error_at(init.declarator.span, &err_info);
+            }
+            // deal with pointers
+            let mut cur_type = base_type.clone();
+            for i in 0..init.declarator.star_count {
+                cur_type = pointer_to(&cur_type);
+            }
+            // deal with suffix
+            if let Some(suffix) = &mut init.declarator.suffix {
+                match suffix {
+                    DeclaratorSuffix::ArrayLen(lens) => {
+                        while lens.len() > 0 {
+                            let len: i32 = lens.pop().unwrap();
+                            cur_type = array_of(&cur_type, len);
+                        }
+                    }
+                    DeclaratorSuffix::FunParam(_) => todo!(),
+                }
+            }
+            self.global_scope.add_new_obj(&init.declarator.name, &cur_type);
+
+            if let Some(expr) = &mut init.init_expr {
+                let mut init_values: Vec<GlobalVariableInitValueInfo> = Vec::new();
+                let analyzed_expr = self.analyze_expr(expr);
+                // @Future: Currently, we only support constant number assignment.
+                // We will add array and struct initialization expr assignment in the future.
+                if !can_assign(&cur_type, &analyzed_expr.ty) {
+                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+                    init.declarator.name, &cur_type, &analyzed_expr.ty);
+                    print_error_at(init.declarator.span, &err_info);
+                } else if let ir::ExprType::Number(n) = analyzed_expr.content {
+                    let size = 8;
+                    let current_info = GlobalVariableInitValueInfo{size, value: n};
+                    init_values.push(current_info);
+                    let obj = self.create_obj(&init.declarator.name, &cur_type, Some(init_values));
+                    self.global_objects_table.add_obj(obj.clone());
+                } else {
+                    let err_info = format!("This is not a constant number expression!");
+                    print_error_at(analyzed_expr.span, &err_info);
+                }
+            } else { // decl without initializer
+                let obj = self.create_obj(&init.declarator.name, &cur_type, None);
+                self.global_objects_table.add_obj(obj.clone());
+            }
+        }
+    }
+
+    pub fn analyze_function(&mut self, mut fun: Function) -> ir::Function {
+        let base = match &fun.return_type {
+            SpecInt => TyInt,
+        };
+        let mut return_type = base;
+        for i in 0..fun.star_count {
+            return_type = pointer_to(&return_type);
+        }
+        let name = fun.name;
+
+        // Add function name to symbol table
+        let obj = self.create_obj(&return_type, &name);
+        if self.sbl_table.find_obj(&obj.name) == None {
+            self.sbl_table.add_obj(obj);
+        } else {
+            let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
+            self.print_error_at(fun.name_span, &err_info);
+        }
+
+        let mut param_names: Vec<String> = Vec::new();
+        for param in &fun.params {
+            self.analyze_param(param);
+            param_names.push(param.declarator.name.clone());
+        }
+        let mut stmts: Vec<ir::StmtType> = Vec::new();
+        for item in &mut fun.items {
+            match item {
+                Stmt(stmt) => {
+                    let ir_stmt = self.analyze_stmt(stmt);
+                    stmts.push(ir_stmt);
+                }
+                Decl(decl) => {
+                    let mut ir_stmts = self.analyze_decl(decl);
+                    stmts.append(&mut ir_stmts);
+                }
+            }
+        }
+        let sbl_table = self.sbl_table.clone();
+        let stack_size = self.cur_offset;
+
+        ir::Function{name, return_type, param_names, stmts, sbl_table, stack_size}
+    }
+
+    fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
+        let mut stmts: Vec<ir::StmtType> = Vec::new();
+        for item in items {
+            match item {
+                Stmt(stmt) => stmts.push(self.analyze_stmt(stmt)),
+                Decl(decl) => stmts.append(&mut self.analyze_decl(decl)),
+            }
+        }
+        stmts
+    }
+
+
+    fn analyze_param(&mut self, param: &Parameter) {
+        let base_type: Type;
+        match &param.decl_spec {
+            SpecInt => base_type = TyInt,
+        }
+        let obj = self.create_obj(&base_type, &param.declarator.name);
+        if self.sbl_table.find_obj(&obj.name) == None {
+            self.sbl_table.add_obj(obj);
+        } else {
+            let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
+            self.print_error_at(param.declarator.span, &err_info);
+        }
+    }
+
+
+    // after analyze, declarations are all resolved to creating obj and assignment statement.
+    fn analyze_decl(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
+        let mut stmts: Vec<ir::StmtType> = Vec::new();
+        let base_type: Type;
+        match &decl.decl_spec {
+            SpecInt => base_type = TyInt,
+        }
+        for init in &mut decl.init_declarators {
+            if let Some(_) = self.sbl_table.find_obj(&init.declarator.name) {
+                let err_info = format!("variable {} already defined", init.declarator.name);
+                self.print_error_at(init.declarator.span, &err_info);
+            }
+            // deal with pointers
+            let mut cur_type = base_type.clone();
+            for i in 0..init.declarator.star_count {
+                cur_type = pointer_to(&cur_type);
+            }
+            // deal with suffix
+            if let Some(suffix) = &mut init.declarator.suffix {
+                match suffix {
+                    DeclaratorSuffix::ArrayLen(lens) => {
+                        while lens.len() > 0 {
+                            let len: i32 = lens.pop().unwrap();
+                            cur_type = array_of(&cur_type, len);
+                        }
+                    }
+                    DeclaratorSuffix::FunParam(_) => todo!(),
+                }
+            }
+
+            let obj = self.create_obj(&cur_type, &init.declarator.name);
+            self.sbl_table.add_obj(obj.clone());
+            if let Some(expr) = &mut init.init_expr {
+                let analyzed_expr = self.analyze_expr(expr);
+                if !can_assign(&obj.ty, &analyzed_expr.ty) {
+                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+                    obj.name, &obj.ty, &analyzed_expr.ty);
+                    self.print_error_at(init.declarator.span, &err_info);
+                } else {
+                    let expr = self.gen_expr_from_obj(&obj);
+                    let content = ir::ExprType::Assign(Box::new(expr), Box::new(analyzed_expr));
+                    let generated_expr = ir::Expr{content, ty: obj.ty, span: init.declarator.span};
+                    let generated_stmt = ir::StmtType::Ex(generated_expr);
+                    // if let ir::StmtType::Ex{..} = generated_stmt {
+                    //     println!("aaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+                    // }
+                    stmts.push(generated_stmt);
+                }
+            }
+        }
+        stmts
+    }
+
+    fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {
+        let content = ir::ExprType::Ident(o.name.clone());
+        let span = Span{start_index: 0, end_index: 0};
+        ir::Expr{content, ty: o.ty.clone(), span}
+        
+    }
+
+
+    fn create_obj(&mut self, base_type: &Type, name: &str) -> Obj {
+        let mut cur_type = base_type.clone();
+        let mut size: i32 = sizeof(base_type);
+        let obj = Obj{name: name.to_string(), ty: cur_type, offset: self.cur_offset};
+        // @Smell: This line should be executed outside of this function.
+        self.cur_offset += size;
+        obj
+    }
+
+    fn analyze_stmt(&mut self, stmt: &mut StmtType) -> ir::StmtType {
+        use ir::StmtType;
+        match stmt {
+            Ex(expr) => {
+                let expr = self.analyze_expr(expr);
+                StmtType::Ex(expr)
+            },
+            Return(expr) => {
+                let expr = self.analyze_expr(expr);
+                StmtType::Return(expr)
+            },
+            Block(items) => {
+                let stmts = self.analyze_items(items);
+                StmtType::Block(stmts)
+            }
+            If(parse::IfStmt{cond, then, otherwise}) => {
+                let cond = self.analyze_expr(cond);
+                let then = self.analyze_stmt(then);
+                let then = Box::new(then);
+                let otherwise = if let Some(otherwise) = otherwise {
+                    Some(Box::new(self.analyze_stmt(otherwise)))
+                } else {
+                    None
+                };
+                StmtType::If{cond, then, otherwise}
+            }
+            For(parse::ForStmt{init, cond, inc, then}) => {
+                let init = if let Some(init) = init {
+                    let init = self.analyze_expr(init);
+                    Some(init)
+                } else {
+                    None
+                };
+                let cond = if let Some(cond) = cond {
+                    let cond = self.analyze_expr(cond);
+                    Some(cond)
+                } else {
+                    None
+                };
+                let inc = if let Some(inc) = inc {
+                    let inc = self.analyze_expr(inc);
+                    Some(inc)
+                } else {
+                    None
+                };
+                let then = Box::new(self.analyze_stmt(then));
+                StmtType::For{init, cond, inc, then}
+            }
+        }
+    }
+
+    fn analyze_expr(&mut self, expr: &mut Expr) -> ir::Expr {
+        use ir::ExprType;
+        use ir::OP;
+        let span = expr.span;
+        match &mut expr.content {
+            Number(n) => {
+                let content = ExprType::Number(*n);
+                let ty = TyInt;
+                ir::Expr {content, ty, span}
+            }
+            Binary(lhs, rhs, tokenKind) => {
+                let mut lhs = self.analyze_expr(lhs);
+                let mut rhs = self.analyze_expr(rhs);
+                match tokenKind {
+                    // deal with pointer arithmatic
+                    Plus => {
+                        if lhs.is_ptr() && rhs.is_ptr() {
+                            println!();
+                            self.print_error_at(lhs.span, "error: both lhs and rhs are of ptr type");
+                            self.print_error_at(rhs.span, "error: both lhs and rhs are of ptr type");
+                        }
+                        if lhs.is_integer() && rhs.is_ptr() {
+                            swap(&mut lhs, &mut rhs);
+                        }
+                        if lhs.is_ptr() && rhs.is_integer() {
+                            let mut scal: i32;
+                            match &lhs.ty {
+                                TyPtr(..) => scal = sizeof(&lhs.ty),
+                                ArrayOf(element_type, _) => scal = sizeof(element_type),
+                                _ => scal = 8,
+                            }
+                            rhs = scal_expr(&mut rhs, Mul, scal);
+                        }
+                        let ty = lhs.ty.clone();
+                        let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Plus);
+                        ir::Expr {content, ty, span}
+                    }
+                    Minus => {
+                        if lhs.is_integer() && rhs.is_ptr() {
+                            self.print_error_at(rhs.span, "error: integer - ptr");
+                        }
+                        if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
+                            let mut scal: i32;
+                            match &lhs.ty {
+                                TyPtr(..) => scal = sizeof(&lhs.ty),
+                                ArrayOf(element_type, _) => scal = sizeof(element_type),
+                                _ => scal = 8,
+                            }
+                            rhs = scal_expr(&rhs, Mul, scal);
+                        } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
+                            let mut basic_ty = lhs.ty.clone();
+							if let ArrayOf(basic, _) = &lhs.ty {
+								basic_ty = *basic.clone();
+							} else if let TyPtr(basic) = &lhs.ty {
+								basic_ty = *basic.clone();
+                            }
+							if lhs.ty != rhs.ty {
+								self.print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
+							}
+                            let ty = TyInt;
+                            let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
+                            let expr = ir::Expr {content, ty, span};
+                            let scal = sizeof(&basic_ty);
+                            return scal_expr(&expr, Div, scal);
+                        }
+                        let ty = lhs.ty.clone();
+                        let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
+                        ir::Expr {content, ty, span}
+                    }
+                    _ => {
+                        let op = tokenkind_to_op(tokenKind);
+                        let ty = lhs.ty.clone();
+                        let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), op);
+                        ir::Expr {content, ty, span}
+                    }
+                }
+            }
+            Assign(lhs, rhs) => {
+                let rhs = self.analyze_expr(rhs);
+                let lhs = self.analyze_expr(lhs);
+                if !can_be_lvalue(&lhs) {
+                    // @Incomplete: more precise error report: the reason why lhs cannot be lvalue
+                    let err_info = format!("lhs cannot be lvalue: {:?}", &lhs.ty);
+                    self.print_error_at(lhs.span, &err_info);
+                }
+                if !can_assign(&lhs.ty, &rhs.ty) {
+                    let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
+                    &rhs.ty, &lhs.ty);
+                    self.print_error_at(lhs.span, &err_info);
+                }
+                let ty = lhs.ty.clone();
+                let content = ExprType::Assign(Box::new(lhs), Box::new(rhs));
+                ir::Expr{content, ty, span}
+            }
+            Neg(val) => {
+                let val = self.analyze_expr(val);
+                let ty = val.ty.clone();
+                let content = ExprType::Neg(Box::new(val));
+                ir::Expr{content, ty, span}
+            }
+            Deref(val) => {
+                let val = self.analyze_expr(val);
+                let base_ty = match &val.ty {
+                    TyPtr(base) => {
+                        *base.clone()
+                    }
+                    ArrayOf(base, _) => {
+                        *base.clone()
+                    }
+                    _ => {
+                        let err_msg = format!("semantic error: invalid dereferencing:
+                        try to dereference {:?}", val.ty);
+                        self.print_error_at(expr.span, &err_msg);
+                        val.ty.clone()
+                    }
+                };
+                let content = ExprType::Deref(Box::new(val));
+                ir::Expr{content, ty: base_ty, span}
+            }
+            AddrOf(val) => {
+                let val = self.analyze_expr(val);
+                let ty = pointer_to(&val.ty);
+                let content = ExprType::AddrOf(Box::new(val));
+                ir::Expr{content, ty, span}
+            }
+            Ident(s) => {
+                let ty = if let Some(o) = self.sbl_table.find_obj(s) {
+                    o.ty.clone()
+                } else {
+                    let err_info = format!("semantic error: symbol '{}' not found", s);
+                    self.print_error_at(expr.span, &err_info);
+                    TyInt
+                };
+                let content = ExprType::Ident(s.clone());
+                ir::Expr{content, ty, span}
+            }
+            ArrayIndexing(arr_ref, indices) => {
+                let mut analyzed_indices = Vec::new();
+                let mut arr_ref = self.analyze_expr(arr_ref);
+                             // reborrow here
+                for index in &mut *indices {
+                    let analyzed_index = self.analyze_expr(index);
+                    analyzed_indices.push(analyzed_index);
+                }
+                let cur_ref = &mut arr_ref;
+                for index in analyzed_indices {
+                    // type checking
+                    if !cur_ref.is_ptr() {
+                        self.print_error_at(index.span, "subscripted value is neither array nor pointer nor vector");
+                    } else {
+                        // Array indexing is converted to pointer arithmatic and dereferencing
+                        // pointer arithmatic.
+                        let size = match &cur_ref.ty {
+                                TyPtr(..) => sizeof(&cur_ref.ty),
+                                ArrayOf(element_type, _) => sizeof(element_type),
+                                _ => 8,
+                            };
+                        let scaled = scal_expr(&index, Mul, size);
+                        let pointer_arithmatic = ExprType::Binary(Box::new(cur_ref.clone()), Box::new(scaled), OP::Plus);
+                        let mut pointer_arithmatic_expr = ir::Expr {
+                            content: pointer_arithmatic,
+                            ty: cur_ref.ty.clone(),
+                            span,
+                        };
+
+                        // Dereferencing.
+                        let base_ty = match &pointer_arithmatic_expr.ty {
+                            TyPtr(base) => {
+                                *base.clone()
+                            }
+                            ArrayOf(base, _) => {
+                                *base.clone()
+                            }
+                            _ => {
+                                let err_msg = format!("semantic error: invalid dereferencing:
+                                try to dereference {:?}", pointer_arithmatic_expr.ty);
+                                self.print_error_at(expr.span, &err_msg);
+                                cur_ref.ty.clone()
+                            }
+                        };
+
+                        let deref = ExprType::Deref(Box::new(pointer_arithmatic_expr));
+                        let mut deref_expr = ir::Expr {
+                            content: deref,
+                            ty: base_ty,
+                            span,
+                        };
+                        *cur_ref = deref_expr;
+                    }
+                }
+                (*cur_ref).clone()
+            }
+            FunCall(ident, args) => {
+                // @Fix: The problem is that analyze_expr(ident) will check whether ident is declared and if not declared,
+                // that's an error, but the function name is intentionally to be undeclared. 
+                // @Future: The above problem will be solved when we add function declaration. At that time every valid function call can
+                // find its declaration without adding obj at here in the following code (because the obj is added after the compiler
+                // dealt with the corresponding declaration).
+                match &ident.content {
+                    Ident(s) => {
+                        let obj = self.create_obj(&ty_none, &s);
+                        self.sbl_table.add_obj(obj.clone());
+                    }
+                    _ => println!("currently only support function name as call reference"),
+                }
+                let ident = self.analyze_expr(ident);
+                let mut analyzed_args = Vec::new();
+                for arg in args {
+                    let analyzed_arg = self.analyze_expr(arg);
+                    analyzed_args.push(analyzed_arg);
+                }
+                // The function name may be in another elf file, we don't check its validaity. (@Future: Not true after we add function declaration)
+                let ty = ident.ty.clone();
+                let content = ExprType::FunCall(Box::new(ident), analyzed_args);
+                ir::Expr {
+                    content,
+                    ty,
+                    span,
+                }
+            }
+            // @Temp: We only consider compile time sizeof for now
+            Sizeof(expr_content) => {
+                let content = self.analyze_expr(expr_content);
+                let size = sizeof(&content.ty);
+                let ty = content.ty.clone();
+                let content = ExprType::Number(size);
+                ir::Expr {
+                    content,
+                    ty,
+                    span,
+                }
+            }
+        }
+    }
+
+    fn error_expr(&self, expr: &Expr, info: &str) -> String {
+        let mut err_msg = String::from("");
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
+        let spaces = " ".repeat(expr.span.start_index);
+        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+        err_msg
+    }
+
+    fn print_error_at(&self, span: Span, info: &str) {
+        let mut err_msg = String::from("");
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
+        let spaces = " ".repeat(span.start_index);
+        let arrows = "^".repeat(span.end_index - span.start_index + 1);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+        println!("{}", err_msg);
+    }
+
+    fn print_error_expr(&self, expr: &Expr, info: &str) {
+        let mut err_msg = String::from("");
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
+        let spaces = " ".repeat(expr.span.start_index);
+        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+        println!("{}", err_msg);
+    }
+
+    fn print_error_ir_expr(&self, expr: &ir::Expr, info: &str) {
+        let mut err_msg = String::from("");
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
+        let spaces = " ".repeat(expr.span.start_index);
+        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+        println!("{}", err_msg);
+    }
+
+    fn err_declarator(&self, declarator: &Declarator, info: &str) -> String {
+        let mut err_msg = String::from("");
+        let src_str: &str = &SRC.lock().unwrap().to_string();
+        err_msg.push_str(&format!("{}\n", src_str));
+        let spaces = " ".repeat(declarator.span.start_index);
+        let arrows = "^".repeat(declarator.span.end_index - declarator.span.start_index + 1);
+        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+        err_msg
+    }
 }
 
 pub struct FunAnalyzer {
