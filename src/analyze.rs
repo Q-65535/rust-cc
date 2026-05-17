@@ -226,6 +226,19 @@ impl Analyzer {
     }
 }
 
+pub struct Scope {
+    pub objects: Vec<Obj>,
+    pub inner_scope: Option<Box::<Scope>>,
+    pub outer_scope: Option<Box::<Scope>>,
+}
+
+pub struct ProgramAnalyzer {
+    global_scope: Scope,
+    // At the start of each function analyzation, the folloing two fields are cleared
+    current_scope: Scope,
+    cur_offset: i32,
+}
+
 pub struct FunAnalyzer {
     sbl_table: SblTable,
     cur_offset: i32,
