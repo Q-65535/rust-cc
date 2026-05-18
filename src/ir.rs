@@ -58,9 +58,15 @@ pub struct Function {
     pub stack_size: i32,
 }
 
+#[derive(Debug, Clone)]
+pub struct Declaration {
+    pub obj: Obj,
+    pub init_value: Option<i32>,
+}
+
 pub struct AnalyzedProgram {
     pub afuns: Vec<Function>,
-    pub global_objects: Vec<GlobalObject>,
+    pub a_global_decls: Vec<Declaration>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
