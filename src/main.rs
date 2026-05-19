@@ -44,7 +44,7 @@ fn main() {
         Ok(program) => {
             // pretty::print_program(&program);
             // analyze
-            let mut analyzer = Analyzer::new();
+            let mut analyzer = ProgramAnalyzer::new();
             let analyzed_program = analyzer.analyze(program);
             // codegen
             let mut gen = Generator::new(analyzed_program);

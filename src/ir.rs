@@ -54,7 +54,7 @@ pub struct Function {
     pub return_type: Type,
     pub param_names: Vec<String>,
     pub stmts: Vec<StmtType>,
-    pub sbl_table: SblTable,
+    pub scope_tracker: ScopeTracker,
     pub stack_size: i32,
 }
 

@@ -8,26 +8,15 @@ use ir::CompareToken::{self, *};
 use crate::Declaration;
 use crate::Function;
 use crate::Obj;
-use crate::SblTable;
-use crate::AnalyzedProgram;
-use crate::AnalyzedFun;
 use crate::Type::{self, *};
 use crate::SRC;
 use crate::ir::{self, *};
 
 pub struct Generator {
-    // aprogram: AnalyzedProgram,
     aprogram_r: ir::AnalyzedProgram,
     lable_count: Cell<i32>,
-    // cur_afun: AnalyzedFun,
     cur_afun_r: ir::Function,
     argregs: Vec<&'static str>,
-}
-
-struct FunContext {
-    cur_sbl_table: SblTable,
-    cur_stack_size: i32,
-    cur_fun_name: String,
 }
 
 impl Generator {
@@ -60,7 +49,7 @@ impl Generator {
         println!();
         let mut i = 0;
         for param in &self.cur_afun_r.param_names {
-            let obj = self.cur_afun_r.sbl_table.find_obj(&param);
+            let obj = self.cur_afun_r.scope_tracker.resolve_symbol(&param);
                                                               // @Cleanup: offset should be expressed more properly
             println!("  mov {}, {}(%rbp)\n", self.argregs[i], -self.cur_afun_r.stack_size+obj.unwrap().offset);
             i += 1;
@@ -186,7 +175,7 @@ impl Generator {
             AddrOf(expr) => self.gen_addr(expr),
             Ident(s) => {
                 let err_smg = &format!("symbol '{}' not found\n", s);
-                let obj = self.cur_afun_r.sbl_table.find_obj(s).expect(err_smg);
+                let obj = self.cur_afun_r.scope_tracker.resolve_symbol(s).expect(err_smg);
                 self.gen_addr(expr);
                 load_according_to_type(&expr.ty);
             }
@@ -231,14 +220,14 @@ impl Generator {
     }
 
     fn gen_addr_by_name(&self, name: &str) {
-        let obj = self.cur_afun_r.sbl_table.find_obj(name);
+        let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name);
         println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.unwrap().offset);
     }
 
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Ident(name) => {
-                let obj = self.cur_afun_r.sbl_table.find_obj(name);
+                let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name);
                                                  // @Cleanup: offset should be expressed more properly
                 println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.unwrap().offset);
 
