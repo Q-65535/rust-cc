@@ -11,6 +11,7 @@ use crate::Obj;
 use crate::Type::{self, *};
 use crate::SRC;
 use crate::ir::{self, *};
+use crate::analyze::{self, *};
 
 pub struct Generator {
     aprogram_r: ir::AnalyzedProgram,
@@ -27,6 +28,12 @@ impl Generator {
     }
 
     pub fn gen_code(&mut self) {
+        for global_decl in &self.aprogram_r.a_global_decls {
+            println!("  .data");
+            println!("  .globl {}", global_decl.obj.name);
+            println!("{}:", global_decl.obj.name);
+            println!("  .zero {}", sizeof(&global_decl.obj.ty));
+        }
         for afun in &self.aprogram_r.afuns {
             // @Space: clone() wastes memory
             self.cur_afun_r = afun.clone();
@@ -42,6 +49,7 @@ impl Generator {
         // prologue
         println!();
         println!("  .globl {}", fun.name);
+        println!("  .text");
         println!("{}:", fun.name);
         println!("  push %rbp");
         println!("  mov %rsp, %rbp");
@@ -227,9 +235,13 @@ impl Generator {
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Ident(name) => {
-                let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name);
+                let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name).unwrap();
+                if obj.is_global {
+                    println!("  lea {}(%rip), %rax", obj.name);
+                } else {
                                                  // @Cleanup: offset should be expressed more properly
-                println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.unwrap().offset);
+                    println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.offset);
+                }
 
             },
             Deref(expr) => {

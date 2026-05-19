@@ -24,7 +24,7 @@ pub enum Type {
 }
 use Type::*;
 
-fn sizeof(ty: &Type) -> i32 {
+pub fn sizeof(ty: &Type) -> i32 {
     match ty {
         TyPtr(_) => 8,
         TyInt => 8,
@@ -36,10 +36,11 @@ fn sizeof(ty: &Type) -> i32 {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Obj {
-    name: String,
-    ty: Type,
+    pub name: String,
+    pub ty: Type,
     // this offset should be based on %rbp
     pub offset: i32,
+    pub is_global: bool,
     // @TODO: Add position info.
     // When a variable is already defined, the compiler should tell where the variable is defined.
 }
@@ -87,10 +88,15 @@ impl ScopeTracker {
         self.current_scope_index += 1;
     }
 
-    // @TODO: search upwards
     pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
-        let current_scope = &self.scopes[self.current_scope_index];
-        return current_scope.resolve_symbol(s);
+        let index = self.current_scope_index;
+        for i in (0..=index).rev() {
+            let current_scope = &self.scopes[i];
+            if let Some(o) = current_scope.resolve_symbol(s) {
+                return Some(o)
+            }
+        }
+        return None
     }
 
     pub fn add_obj(&mut self, o: Obj) {
@@ -172,7 +178,7 @@ impl ProgramAnalyzer {
                             init.declarator.name, &cur_type, &analyzed_expr.ty);
                             print_error_at(init.declarator.span, &err_info);
                         } else {
-                            let object = create_obj(&init.declarator.name, &cur_type, 0);
+                            let object = create_global_obj(&init.declarator.name, &cur_type);
                             let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: Some(n)};
                             decls.push(analyzed_decl);
                             self.global_scope.add_obj(object);
@@ -184,7 +190,7 @@ impl ProgramAnalyzer {
                     }
                 }
             } else { // decl without initializer
-                let object = create_obj(&init.declarator.name, &cur_type, 0);
+                let object = create_global_obj(&init.declarator.name, &cur_type);
                 let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: None};
                 decls.push(analyzed_decl);
                 self.global_scope.add_obj(object);
@@ -205,6 +211,7 @@ impl ProgramAnalyzer {
         let name = fun.name;
 
         // Add function name to symbol table
+        // @Fix: We should create obj after we are sure that the variable is not defined yet.
         let obj = self.create_obj(&return_type, &name);
         if self.cur_scope_tracker.resolve_symbol(&obj.name) == None {
             self.cur_scope_tracker.add_obj(obj);
@@ -324,10 +331,11 @@ impl ProgramAnalyzer {
     }
 
 
+    // @Naming: Rename it to create_local_obj.
     fn create_obj(&mut self, base_type: &Type, name: &str) -> Obj {
         let mut cur_type = base_type.clone();
         let mut size: i32 = sizeof(base_type);
-        let obj = Obj{name: name.to_string(), ty: cur_type, offset: self.cur_offset};
+        let obj = Obj{name: name.to_string(), ty: cur_type, offset: self.cur_offset, is_global: false};
         // @Smell: This line should be executed outside of this function.
         self.cur_offset += size;
         obj
@@ -794,10 +802,10 @@ fn to_ir_ident(name: &str, ty: &Type, span: &Span) -> ir::Expr {
     }
 }
 
-fn create_obj(name: &str, base_type: &Type, offset: i32) -> Obj {
+fn create_global_obj(name: &str, base_type: &Type) -> Obj {
     let mut cur_type = base_type.clone();
     let mut size: i32 = sizeof(base_type);
-    let obj = Obj{name: name.to_string(), ty: base_type.clone(), offset};
+    let obj = Obj{name: name.to_string(), ty: base_type.clone(), offset: 0, is_global: true};
     // @Smell: This line should be executed outside of this function.
     // self.cur_offset += size;
     obj
