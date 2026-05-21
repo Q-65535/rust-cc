@@ -17,14 +17,16 @@ pub struct Generator {
     aprogram_r: ir::AnalyzedProgram,
     lable_count: Cell<i32>,
     cur_afun_r: ir::Function,
-    argregs: Vec<&'static str>,
+    argregs64: Vec<&'static str>,
+    argregs8: Vec<&'static str>,
 }
 
 impl Generator {
     pub fn new(aprogram_r: ir::AnalyzedProgram) -> Self {
-        let argregs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+        let argregs64 = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+        let argregs8  = vec!["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
         let cur_afun_r = aprogram_r.afuns[0].clone();
-        Self {aprogram_r, lable_count: 0.into(), cur_afun_r, argregs}
+        Self {aprogram_r, lable_count: 0.into(), cur_afun_r, argregs64, argregs8}
     }
 
     pub fn gen_code(&mut self) {
@@ -57,9 +59,12 @@ impl Generator {
         println!();
         let mut i = 0;
         for param in &self.cur_afun_r.param_names {
-            let obj = self.cur_afun_r.scope_tracker.resolve_symbol(&param);
+            let obj = self.cur_afun_r.scope_tracker.resolve_symbol(&param).unwrap();
                                                               // @Cleanup: offset should be expressed more properly
-            println!("  mov {}, {}(%rbp)\n", self.argregs[i], -self.cur_afun_r.stack_size+obj.unwrap().offset);
+            match sizeof(&obj.ty) {
+                1 => println!("  mov {}, {}(%rbp)\n", self.argregs8[i], -self.cur_afun_r.stack_size+obj.offset),
+                _ => println!("  mov {}, {}(%rbp)\n", self.argregs64[i], -self.cur_afun_r.stack_size+obj.offset),
+            }
             i += 1;
         }
         self.block_gen(&self.cur_afun_r.stmts);
@@ -170,7 +175,7 @@ impl Generator {
                 self.gen_addr(var);
                 println!("  push %rax");
                 self.expr_gen(val);
-                store();
+                store(&var.ty);
             }
             Neg(expr) => {
                 self.expr_gen(expr);
@@ -198,7 +203,7 @@ impl Generator {
                         }
                         // put arguments in designated registers
                         for i in (0..nargs).rev() {
-                            self.pop(self.argregs[i]);
+                            self.pop(self.argregs64[i]);
                         }
 
                         println!("  mov $0, %rax");
@@ -228,8 +233,8 @@ impl Generator {
     }
 
     fn gen_addr_by_name(&self, name: &str) {
-        let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name);
-        println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.unwrap().offset);
+        let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name).unwrap();
+        println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.offset);
     }
 
     fn gen_addr(&self, expr: &Expr) {
@@ -267,13 +272,19 @@ fn load_according_to_type(ty: &Type) {
     if let ArrayOf(_, _) = ty {
 
     } else {
-        println!("  mov (%rax), %rax");
+        match sizeof(ty) {
+            1 => println!("  movsbq (%rax), %rax"),
+            _ => println!("  mov (%rax), %rax"),
+        }
     }
 }
 
-fn store() {
+fn store(ty: &Type) {
     println!("  pop %rdi");
-    println!("  mov %rax, (%rdi)");
+    match sizeof(ty) {
+        1 => println!("  mov %al, (%rdi)"),
+        _ => println!("  mov %rax, (%rdi)"),
+    }
 }
 
 fn align_to(n: i32, align: i32) -> i32 {

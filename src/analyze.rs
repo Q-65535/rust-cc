@@ -17,6 +17,7 @@ pub enum Type {
     // pointer to ... type
     TyPtr(Box<Type>),
     TyInt,
+    TyChar,
     ArrayOf(Box<Type>, i32),
     // function return ... type
     TyFunc(Box<Type>),
@@ -28,6 +29,7 @@ pub fn sizeof(ty: &Type) -> i32 {
     match ty {
         TyPtr(_) => 8,
         TyInt => 8,
+        TyChar => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         TyFunc(_) => 8,
         ty_none => 8,
@@ -143,6 +145,7 @@ impl ProgramAnalyzer {
         let base_type: Type;
         match &decl.decl_spec {
             SpecInt => base_type = TyInt,
+            SpecChar => base_type = TyChar,
         }
         for init in &mut decl.init_declarators {
             if let Some(_) = self.global_scope.resolve_symbol(&init.declarator.name) {
@@ -203,6 +206,7 @@ impl ProgramAnalyzer {
         self.cur_scope_tracker.enter_new_scope();
         let base = match &fun.return_type {
             SpecInt => TyInt,
+            SpecChar => TyChar,
         };
         let mut return_type = base;
         for i in 0..fun.star_count {
@@ -259,6 +263,7 @@ impl ProgramAnalyzer {
         let base_type: Type;
         match &param.decl_spec {
             SpecInt => base_type = TyInt,
+            SpecChar => base_type = TyChar,
         }
         let obj = self.create_obj(&base_type, &param.declarator.name);
         if self.cur_scope_tracker.resolve_symbol(&obj.name) == None {
@@ -276,6 +281,7 @@ impl ProgramAnalyzer {
         let base_type: Type;
         match &decl.decl_spec {
             SpecInt => base_type = TyInt,
+            SpecChar => base_type = TyChar,
         }
         for init in &mut decl.init_declarators {
             if let Some(_) = self.cur_scope_tracker.resolve_symbol(&init.declarator.name) {
@@ -705,9 +711,15 @@ fn function_type(ty: &Type) -> Type {
 
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
+fn is_integer(ty: &Type) -> bool {
+    matches!(ty, TyInt | TyChar)
+}
+
 fn can_assign(left: &Type, right: &Type) -> bool {
     // array can be assigned to a pointer type, BUT not the other way around!
     if is_pointer(left) && is_pointer_or_array(right) {
+        return true
+    } else if is_integer(left) && is_integer(right) {
         return true
     } else {
         return left == right

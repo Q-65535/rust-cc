@@ -86,7 +86,8 @@ pub struct Declaration {
 
 #[derive(Debug, Clone)]
 pub enum DeclarationSpecifier {
-    SpecInt
+    SpecInt,
+    SpecChar,
 }
 use DeclarationSpecifier::*;
 
@@ -312,6 +313,7 @@ impl Parser {
         let decl_spec: DeclarationSpecifier;
         match kind {
             Keyword(TypeSpecifier(Int)) => Ok(SpecInt),
+            Keyword(TypeSpecifier(Char)) => Ok(SpecChar),
             _ => {
                 let err_msg = self.error_token(self.cur_token(), "unknown declaration specifer!");
                 return Err(err_msg);
@@ -416,7 +418,7 @@ impl Parser {
             let item: BlockItem;
             // @Future: if the token kind is a declaration-specifier (i.e., storage-class-specifier,
             // type-specifier or function-specifier), we parse decl.
-            if cur_kind == Keyword(TypeSpecifier(Int)) {
+            if matches!(cur_kind, Keyword(TypeSpecifier(_))) {
                 item = Decl(self.parse_decl()?);
             } else {
                 item = Stmt(self.parse_stmt()?);

@@ -56,6 +56,7 @@ use KeywordToken::*;
 #[derive(PartialEq, Clone, Debug)]
 pub enum TypeSpecifier {
     Int,
+    Char,
 }
 use TypeSpecifier::*;
 
@@ -126,6 +127,7 @@ impl Lexer {
             ("while".to_string(), Keyword(While)),
             ("int".to_string(), Keyword(TypeSpecifier(Int))),
             ("sizeof".to_string(), Keyword(KeywordToken::Sizeof)),
+            ("char".to_string(), Keyword(TypeSpecifier(Char))),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

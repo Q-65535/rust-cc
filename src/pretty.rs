@@ -346,6 +346,7 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
 fn decl_spec_str(ds: &DeclarationSpecifier) -> &'static str {
     match ds {
         DeclarationSpecifier::SpecInt => "int",
+        DeclarationSpecifier::SpecChar => "char",
     }
 }
 
