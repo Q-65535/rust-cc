@@ -34,7 +34,11 @@ impl Generator {
             println!("  .data");
             println!("  .globl {}", global_decl.obj.name);
             println!("{}:", global_decl.obj.name);
-            println!("  .zero {}", sizeof(&global_decl.obj.ty));
+            if let Some(n) = global_decl.init_value {
+                println!("  .long {}", n);
+            } else {
+                println!("  .zero {}", sizeof(&global_decl.obj.ty));
+            }
         }
         for afun in &self.aprogram_r.afuns {
             // @Space: clone() wastes memory
@@ -240,7 +244,8 @@ impl Generator {
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Ident(name) => {
-                let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name).unwrap();
+                let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name)
+                .expect("fatal error: can't resolve symbol {} at code gen stage");
                 if obj.is_global {
                     println!("  lea {}(%rip), %rax", obj.name);
                 } else {
