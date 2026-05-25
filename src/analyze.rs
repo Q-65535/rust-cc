@@ -650,6 +650,8 @@ impl ProgramAnalyzer {
                 let unique_name = format!(".LC{}", self.unique_string_name_index);
                 self.unique_string_name_index += 1;
                 // In C, a string ends with an extra \0 character, so the array length +1.
+                // Note: we use s.len() rather than the source span because parse_paren may
+                // overwrite the literal's span to cover surrounding parentheses (e.g. sizeof("")).
                 let len = s.len() + 1;
                 let ty: Type = ArrayOf(Box::new(TyChar), len.try_into().unwrap());
 
@@ -665,6 +667,7 @@ impl ProgramAnalyzer {
                 let unique_symbol = ExprType::Ident(unique_name);
                 ir::Expr{content: unique_symbol, ty, span}
             }
+            Paren(inner) => self.analyze_expr(inner),
         }
     }
 

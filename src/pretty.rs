@@ -325,6 +325,10 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
                 print_expr(idx, &cp, i + 1 == ic);
             }
         }
+        ExprType::Paren(inner) => {
+            println!("{prefix}{conn}{YELLOW}Paren{RESET}");
+            print_expr(inner, &child_prefix(prefix, is_last), true);
+        }
         ExprType::FunCall(callee, args) => {
             println!("{prefix}{conn}{YELLOW}FunCall{RESET}");
             let cp = child_prefix(prefix, is_last);

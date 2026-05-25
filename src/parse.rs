@@ -118,6 +118,11 @@ pub enum ExprType {
     FunCall(Box<Expr>, Vec<Expr>),
     Sizeof(Box<Expr>),
     Str(String),
+    // Parenthesized expression: a transparent wrapper that records the span of
+    // the enclosing parens for diagnostics while leaving the inner expression's
+    // own span untouched. Semantically identical to `inner` — the analyzer
+    // should unwrap it.
+    Paren(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,33 +135,6 @@ impl Expr {
     pub fn new(content: ExprType, span: Span) -> Self {
         Expr{content, span}
     }
-
-    // fn cal_start_index(&self) -> usize {
-    //     match &self.content {
-    //         ExprType::Sizeof(_) | Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.span.start_index,
-    //         Binary(lhs, _, _) => lhs.cal_start_index(),
-    //         ExprType::Assign(lhs, _) => lhs.cal_start_index(),
-    //         ArrayIndexing(array_ref, _) => array_ref.cal_start_index(),
-    //         FunCall(ident, _) => ident.cal_start_index(),
-    //     }
-    // }
-
-    // fn cal_end_index(&self) -> usize {
-    //     match &self.content {
-    //         Neg(e) | Deref(e) | AddrOf(e) => e.cal_end_index(),
-    //         Number(_) | Ident(_) => self.span.end_index,
-    //         Binary(_, rhs, _) => rhs.cal_end_index(),
-    //         ExprType::Assign(_, rhs) => rhs.cal_end_index(),
-    //         ArrayIndexing(array_ref, _) => array_ref.cal_end_index(),
-    //         FunCall(ident, args_list) => {
-    //             match args_list.last() {
-    //                 Some(last_arg) => return last_arg.cal_end_index(),
-    //                 None => return ident.cal_end_index() + 2,
-    //             }
-    //         }
-    //         ExprType::Sizeof(e) => e.cal_end_index(),
-    //     }
-    // }
 }
 
 
@@ -558,13 +536,13 @@ impl Parser {
     fn parse_paren(&mut self) -> Result<Expr, String> {
         let start_index = self.cur_token().span.start_index;
         self.check_skip_current(&LParen)?;
-        let mut res = self.parse_expr(Precedence::Lowest)?;
+        let inner = self.parse_expr(Precedence::Lowest)?;
         self.check_jumpto_peek(&RParen)?;
         let end_index = self.cur_token().span.end_index;
-        // span attribute considers paranthesis
-        res.span.start_index = start_index;
-        res.span.end_index = end_index;
-        Ok(res)
+        // Wrap, don't mutate: the inner expression keeps its own span; the Paren
+        // node carries the wider span that includes the parentheses.
+        let span = Span{start_index, end_index};
+        Ok(Expr::new(Paren(Box::new(inner)), span))
     }
 
     fn parse_prefix(&mut self) -> Result<Expr, String> {
