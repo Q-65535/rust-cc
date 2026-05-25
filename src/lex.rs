@@ -316,15 +316,36 @@ impl Lexer {
     }
 
     fn read_string(&mut self) -> Result<String, String> {
+        let mut s = String::new();
         // This len does not include " at the begining and end of a string.
-        let mut len = 0;
         self.next_char(); // skip " character
         let start_index = self.index;
         while self.cur_char() != '"' {
+            let current_char: char;
+            if self.cur_char() == '\\' {
+                current_char = self.read_escaped_char();
+            } else {
+                current_char = self.cur_char();
+            }
+            s.push(current_char);
             self.next_char();
-            len += 1;
         }
-        Ok(self.src[start_index..start_index+len].iter().collect())
+        Ok(s)
+    }
+
+    fn read_escaped_char(&mut self) -> char {
+        self.next_char(); // skip '\' character
+        match self.cur_char() {
+            'a' => '\x07',
+            'b' => '\x08',
+            't' => '\t',
+            'n' => '\n',
+            'v' => '\x0B',
+            'f' => '\x0C',
+            'r' => '\r',
+            'e' => '\x1B',
+            _ => self.cur_char(),
+        }
     }
 
     fn read_ident(&mut self) -> String {
