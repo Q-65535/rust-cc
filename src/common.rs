@@ -12,6 +12,10 @@ impl Span {
         Span{start_index, end_index}
     }
 
+    pub fn len(&self) -> i32 {
+        return (self.end_index - self.start_index + 1).try_into().unwrap();
+    }
+
     // To be implemented. We can only consider the start_index.
     pub fn cal_line_number(span: Span) -> i32 {
         return 1;

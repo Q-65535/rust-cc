@@ -105,19 +105,32 @@ impl ScopeTracker {
         let current_scope = &mut self.scopes[self.current_scope_index];
         current_scope.add_obj(o);
     }
+
+    pub fn add_private_global_obj(&mut self, o: Obj) {
+        let current_scope = &mut self.scopes[0];
+        current_scope.add_obj(o);
+    }
 }
 
 pub struct ProgramAnalyzer {
     pub global_scope: Scope,
+    pub global_decls: Vec<ir::Declaration>,
     // At the start of each function analyzation, the folloing two fields are cleared
     pub cur_scope_tracker: ScopeTracker,
     pub cur_offset: i32,
+    pub unique_string_name_index: i32,
 }
 
 impl ProgramAnalyzer {
     pub fn new() -> Self {
         let scope = Scope::new();
-        ProgramAnalyzer{global_scope: scope.clone(), cur_scope_tracker: ScopeTracker::new(&scope), cur_offset: 0}
+        ProgramAnalyzer{
+                        global_scope: scope.clone(),
+                        global_decls: Vec::new(),
+                        cur_scope_tracker: ScopeTracker::new(&scope),
+                        cur_offset: 0,
+                        unique_string_name_index: 0,
+                        }
     }
 
     pub fn analyze(&mut self, mut program: Program) -> ir::AnalyzedProgram {
@@ -133,11 +146,11 @@ impl ProgramAnalyzer {
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
                     let mut batch_global_decls = self.analyze_global_decl(decl);
-                    a_global_decls.append(&mut batch_global_decls);
+                    self.global_decls.append(&mut batch_global_decls);
                 }
             }
         }
-        ir::AnalyzedProgram{afuns, a_global_decls}
+        ir::AnalyzedProgram{afuns, global_decls: self.global_decls.clone()}
     }
 
     pub fn analyze_global_decl(&mut self, mut decl: Declaration) -> Vec::<ir::Declaration> {
@@ -182,7 +195,8 @@ impl ProgramAnalyzer {
                             print_error_at(init.declarator.span, &err_info);
                         } else {
                             let object = create_global_obj(&init.declarator.name, &cur_type);
-                            let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: Some(n)};
+                            let value_in_bytes = n.to_le_bytes();
+                            let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: Some(value_in_bytes.to_vec())};
                             decls.push(analyzed_decl);
                             self.global_scope.add_obj(object);
                         }
@@ -629,6 +643,27 @@ impl ProgramAnalyzer {
                     ty,
                     span,
                 }
+            }
+            Str(s) => {
+                // We use a unique identifier as a reference to replace the original string literal.
+                // The string literal shall be initialized in .data section.
+                let unique_name = format!(".LC{}", self.unique_string_name_index);
+                self.unique_string_name_index += 1;
+                // In C, a string ends with an extra \0 character, so the array length +1.
+                let len = s.len() + 1;
+                let ty: Type = ArrayOf(Box::new(TyChar), len.try_into().unwrap());
+
+
+                let global_obj = create_global_obj(&unique_name, &ty);
+                self.cur_scope_tracker.add_private_global_obj(global_obj.clone());
+                // self.global_scope.add_obj(object);
+                let mut value_in_bytes = s.as_bytes().to_vec();
+                value_in_bytes.push(b'\0');
+                let global_decl = ir::Declaration{obj: global_obj.clone(), init_value: Some(value_in_bytes)};
+                self.global_decls.push(global_decl);
+
+                let unique_symbol = ExprType::Ident(unique_name);
+                ir::Expr{content: unique_symbol, ty, span}
             }
         }
     }

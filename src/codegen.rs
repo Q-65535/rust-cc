@@ -30,12 +30,14 @@ impl Generator {
     }
 
     pub fn gen_code(&mut self) {
-        for global_decl in &self.aprogram_r.a_global_decls {
+        for global_decl in &self.aprogram_r.global_decls {
             println!("  .data");
             println!("  .globl {}", global_decl.obj.name);
             println!("{}:", global_decl.obj.name);
-            if let Some(n) = global_decl.init_value {
-                println!("  .long {}", n);
+            if let Some(bytes) = &global_decl.init_value {
+                for b in bytes {
+                    println!("  .byte {}", b);
+                }
             } else {
                 println!("  .zero {}", sizeof(&global_decl.obj.ty));
             }
@@ -64,7 +66,6 @@ impl Generator {
         let mut i = 0;
         for param in &self.cur_afun_r.param_names {
             let obj = self.cur_afun_r.scope_tracker.resolve_symbol(&param).unwrap();
-                                                              // @Cleanup: offset should be expressed more properly
             match sizeof(&obj.ty) {
                 1 => println!("  mov {}, {}(%rbp)\n", self.argregs8[i], -self.cur_afun_r.stack_size+obj.offset),
                 _ => println!("  mov {}, {}(%rbp)\n", self.argregs64[i], -self.cur_afun_r.stack_size+obj.offset),
@@ -249,7 +250,6 @@ impl Generator {
                 if obj.is_global {
                     println!("  lea {}(%rip), %rax", obj.name);
                 } else {
-                                                 // @Cleanup: offset should be expressed more properly
                     println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.offset);
                 }
 

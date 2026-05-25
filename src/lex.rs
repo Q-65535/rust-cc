@@ -25,6 +25,7 @@ pub enum TokenKind {
     Semicolon,
     Comma,
     LexIdent(String),
+    StringLiteral(String),
     Keyword(KeywordToken),
     Eof,
 }
@@ -186,22 +187,22 @@ impl Lexer {
         let mut tokens: Vec<Token> = Vec::new();
         loop {
             let c = self.cur_char();
-            let i = self.index;
+            let start_index = self.index;
             match c {
                 ' ' => (),
-                ';' => tokens.push(Self::gen_token(Semicolon, ";", i, 1)),
-                ',' => tokens.push(Self::gen_token(Comma, ",", i, 1)),
-                '+' => tokens.push(Self::gen_token(Plus, "+", i, 1)),
-                '-' => tokens.push(Self::gen_token(Minus, "-", i, 1)),
-                '*' => tokens.push(Self::gen_token(Mul, "*", i, 1)),
-                '/' => tokens.push(Self::gen_token(Div, "/", i, 1)),
-                '(' => tokens.push(Self::gen_token(LParen, "(", i, 1)),
-                ')' => tokens.push(Self::gen_token(RParen, ")", i, 1)),
-                '{' => tokens.push(Self::gen_token(LBrace, "{", i, 1)),
-                '}' => tokens.push(Self::gen_token(RBrace, "}", i, 1)),
-                '[' => tokens.push(Self::gen_token(LSqureBracket, "[", i, 1)),
-                ']' => tokens.push(Self::gen_token(RSqureBracket, "]", i, 1)),
-                '&' => tokens.push(Self::gen_token(Ampersand, "&", i, 1)),
+                ';' => tokens.push(Self::gen_token(Semicolon, ";", start_index, 1)),
+                ',' => tokens.push(Self::gen_token(Comma, ",", start_index, 1)),
+                '+' => tokens.push(Self::gen_token(Plus, "+", start_index, 1)),
+                '-' => tokens.push(Self::gen_token(Minus, "-", start_index, 1)),
+                '*' => tokens.push(Self::gen_token(Mul, "*", start_index, 1)),
+                '/' => tokens.push(Self::gen_token(Div, "/", start_index, 1)),
+                '(' => tokens.push(Self::gen_token(LParen, "(", start_index, 1)),
+                ')' => tokens.push(Self::gen_token(RParen, ")", start_index, 1)),
+                '{' => tokens.push(Self::gen_token(LBrace, "{", start_index, 1)),
+                '}' => tokens.push(Self::gen_token(RBrace, "}", start_index, 1)),
+                '[' => tokens.push(Self::gen_token(LSqureBracket, "[", start_index, 1)),
+                ']' => tokens.push(Self::gen_token(RSqureBracket, "]", start_index, 1)),
+                '&' => tokens.push(Self::gen_token(Ampersand, "&", start_index, 1)),
                 'a'..='z' | '_' => {
                     let name = self.read_ident();
                     let tok_kind = if self.is_keyword(&name) {
@@ -209,60 +210,71 @@ impl Lexer {
                     } else {
                         LexIdent(name.clone())
                     };
-                    let tok = Self::gen_token(tok_kind, &name, i, name.len());
+                    let tok = Self::gen_token(tok_kind, &name, start_index, name.len());
                     tokens.push(tok);
                 },
                 '=' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(Eq), "==", i, 2));
+                            tokens.push(Self::gen_token(Compare(Eq), "==", start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Assignment, "=", i, 1)),
+                        _ => tokens.push(Self::gen_token(Assignment, "=", start_index, 1)),
                     }
                 },
                 '!' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(Neq), "!=", i, 2));
+                            tokens.push(Self::gen_token(Compare(Neq), "!=", start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Not, "!", i, 1)),
+                        _ => tokens.push(Self::gen_token(Not, "!", start_index, 1)),
                     }
                 },
                 '<' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(LE), "<=", i, 2));
+                            tokens.push(Self::gen_token(Compare(LE), "<=", start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Compare(LT), "<", i, 1)),
+                        _ => tokens.push(Self::gen_token(Compare(LT), "<", start_index, 1)),
                     }
                 },
                 '>' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(GE), ">=", i, 2));
+                            tokens.push(Self::gen_token(Compare(GE), ">=", start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Compare(GT), ">", i, 1)),
+                        _ => tokens.push(Self::gen_token(Compare(GT), ">", start_index, 1)),
                     }
                 },
                 '0'..='9' => {
                     match self.read_int() {
                         Ok(num) => {
                             let num_str = &num.to_string();
-                            tokens.push(Self::gen_token(Num(num), num_str, i, num_str.len()));
+                            tokens.push(Self::gen_token(Num(num), num_str, start_index, num_str.len()));
                         },
                         Err(s) => {
-                            self.error_at(i, "unable to read integer.");
+                            self.error_at(start_index, "unable to read integer.");
+                            exit(0);
+                        },
+                    }
+                },
+                '"' => {
+                    match self.read_string() {
+                        Ok(s) => {
+                            tokens.push(Self::gen_token(StringLiteral(s.clone()), &s, start_index, s.len()+2));
+                        },
+                        Err(s) => {
+                            self.error_at(start_index, "unable to read string literal.");
                             exit(0);
                         },
                     }
                 },
                 _ => {
                     let err_msg = &format!("lexing error: unknown character: '{}'", c);
-                    self.error_at(i, err_msg);
+                    self.error_at(start_index, err_msg);
                     exit(0);
                 },
             }
@@ -301,6 +313,18 @@ impl Lexer {
         }
         let s: &String = &self.src[i..i+len].iter().collect(); 
         Ok(s.parse().unwrap())
+    }
+
+    fn read_string(&mut self) -> Result<String, String> {
+        // This len does not include " at the begining and end of a string.
+        let mut len = 0;
+        self.next_char(); // skip " character
+        let start_index = self.index;
+        while self.cur_char() != '"' {
+            self.next_char();
+            len += 1;
+        }
+        Ok(self.src[start_index..start_index+len].iter().collect())
     }
 
     fn read_ident(&mut self) -> String {

@@ -117,6 +117,7 @@ pub enum ExprType {
     ArrayIndexing(Box<Expr>, Vec<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
     Sizeof(Box<Expr>),
+    Str(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,32 +131,32 @@ impl Expr {
         Expr{content, span}
     }
 
-    fn cal_start_index(&self) -> usize {
-        match &self.content {
-            ExprType::Sizeof(_) | Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.span.start_index,
-            Binary(lhs, _, _) => lhs.cal_start_index(),
-            ExprType::Assign(lhs, _) => lhs.cal_start_index(),
-            ArrayIndexing(array_ref, _) => array_ref.cal_start_index(),
-            FunCall(ident, _) => ident.cal_start_index(),
-        }
-    }
+    // fn cal_start_index(&self) -> usize {
+    //     match &self.content {
+    //         ExprType::Sizeof(_) | Number(_) | Neg(_) | Ident(_) | Deref(_) | AddrOf(_) => self.span.start_index,
+    //         Binary(lhs, _, _) => lhs.cal_start_index(),
+    //         ExprType::Assign(lhs, _) => lhs.cal_start_index(),
+    //         ArrayIndexing(array_ref, _) => array_ref.cal_start_index(),
+    //         FunCall(ident, _) => ident.cal_start_index(),
+    //     }
+    // }
 
-    fn cal_end_index(&self) -> usize {
-        match &self.content {
-            Neg(e) | Deref(e) | AddrOf(e) => e.cal_end_index(),
-            Number(_) | Ident(_) => self.span.end_index,
-            Binary(_, rhs, _) => rhs.cal_end_index(),
-            ExprType::Assign(_, rhs) => rhs.cal_end_index(),
-            ArrayIndexing(array_ref, _) => array_ref.cal_end_index(),
-            FunCall(ident, args_list) => {
-                match args_list.last() {
-                    Some(last_arg) => return last_arg.cal_end_index(),
-                    None => return ident.cal_end_index() + 2,
-                }
-            }
-            ExprType::Sizeof(e) => e.cal_end_index(),
-        }
-    }
+    // fn cal_end_index(&self) -> usize {
+    //     match &self.content {
+    //         Neg(e) | Deref(e) | AddrOf(e) => e.cal_end_index(),
+    //         Number(_) | Ident(_) => self.span.end_index,
+    //         Binary(_, rhs, _) => rhs.cal_end_index(),
+    //         ExprType::Assign(_, rhs) => rhs.cal_end_index(),
+    //         ArrayIndexing(array_ref, _) => array_ref.cal_end_index(),
+    //         FunCall(ident, args_list) => {
+    //             match args_list.last() {
+    //                 Some(last_arg) => return last_arg.cal_end_index(),
+    //                 None => return ident.cal_end_index() + 2,
+    //             }
+    //         }
+    //         ExprType::Sizeof(e) => e.cal_end_index(),
+    //     }
+    // }
 }
 
 
@@ -606,7 +607,7 @@ impl Parser {
                 Ok(expr)
             },
             Keyword(KeywordToken::Sizeof) => {
-                self.next_token();
+                self.next_token(); // skip "sizeof"
                 let operand = self.parse_prefix()?;
                 let operand = Box::new(operand);
                 let start_index = cur_token_snapshot.span.start_index;
@@ -616,10 +617,24 @@ impl Parser {
                 Ok(expr)
             },
             LexIdent(_) => self.parse_ident(),
+            StringLiteral(s) => self.parse_string(),
             _ => Err(self.error_token(&cur_token_snapshot, "parsing error: can't parse prefix expression here"))
         }
     }
     
+    fn parse_string(&mut self) -> Result<Expr, String> {
+        let tok = self.cur_token().clone();
+        if let StringLiteral(s) = &tok.kind {
+            let mut content = Str(s.clone());
+            let len = tok.span.len();
+            format!("{}", len);
+            let expr = Expr::new(content, tok.span);
+            Ok(expr)
+        } else {
+            Err(self.error_token(self.cur_token(), "expect a string literal"))
+        }
+    }
+
     fn parse_ident(&mut self) -> Result<Expr, String> {
         let tok = self.cur_token().clone();
         if let LexIdent(name) = &tok.kind {

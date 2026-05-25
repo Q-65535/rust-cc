@@ -61,12 +61,12 @@ pub struct Function {
 #[derive(Debug, Clone)]
 pub struct Declaration {
     pub obj: Obj,
-    pub init_value: Option<i32>,
+    pub init_value: Option<Vec<u8>>,
 }
 
 pub struct AnalyzedProgram {
     pub afuns: Vec<Function>,
-    pub a_global_decls: Vec<Declaration>,
+    pub global_decls: Vec<Declaration>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

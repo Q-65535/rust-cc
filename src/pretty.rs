@@ -93,6 +93,7 @@ fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
         TokenKind::Semicolon         => ("Semicolon", DIM),
         TokenKind::Comma             => ("Comma",     DIM),
         TokenKind::Eof               => ("EOF",       RED),
+        _ => todo!(),
     }
 }
 
@@ -338,6 +339,7 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
                 }
             }
         }
+        _ => println!("print expr not yet supported"),
     }
 }
 
