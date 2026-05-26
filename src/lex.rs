@@ -335,6 +335,10 @@ impl Lexer {
 
     fn read_escaped_char(&mut self) -> char {
         self.next_char(); // skip '\' character
+        let mut c = self.cur_char();
+        if c >= '0' && c <= '7' {
+            return self.read_escaped_octal();
+        }
         match self.cur_char() {
             'a' => '\x07',
             'b' => '\x08',
@@ -346,6 +350,23 @@ impl Lexer {
             'e' => '\x1B',
             _ => self.cur_char(),
         }
+    }
+
+    fn read_escaped_octal(&mut self) -> char {
+        let mut num: u8 = 0;
+        // A char is at most 255 (8 bytes), 3-digit octal number can cover a char value range.
+        // So the for loop iterate at most 3 times.
+        for i in 0..3 {
+            let digit_number = self.cur_char() as u8 - b'0';
+            num <<= 3;
+            num += digit_number;
+            if self.peek_char() >= Some('0') && self.peek_char() <= Some('7') {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+        return num as char;
     }
 
     fn read_ident(&mut self) -> String {
