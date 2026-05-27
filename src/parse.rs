@@ -604,8 +604,6 @@ impl Parser {
         let tok = self.cur_token().clone();
         if let StringLiteral(s) = &tok.kind {
             let mut content = Str(s.clone());
-            let len = tok.span.len();
-            format!("{}", len);
             let expr = Expr::new(content, tok.span);
             Ok(expr)
         } else {

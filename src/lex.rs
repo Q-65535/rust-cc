@@ -327,6 +327,10 @@ impl Lexer {
             } else {
                 current_char = self.cur_char();
             }
+            if !current_char.is_ascii() {
+                println!("{} is not an ascii character", current_char);
+                exit(0);
+            }
             s.push(current_char);
             self.next_char();
         }
@@ -338,6 +342,8 @@ impl Lexer {
         let mut c = self.cur_char();
         if c >= '0' && c <= '7' {
             return self.read_escaped_octal();
+        } else if c == 'x' {
+            return self.read_escaped_hex();
         }
         match self.cur_char() {
             'a' => '\x07',
@@ -362,6 +368,35 @@ impl Lexer {
             num += digit_number;
             if self.peek_char() >= Some('0') && self.peek_char() <= Some('7') {
                 self.next_char();
+            } else {
+                break;
+            }
+        }
+        return num as char;
+    }
+    
+    fn read_escaped_hex(&mut self) -> char {
+        self.next_char(); // Skip 'x' character.
+        let mut num: u8 = 0;
+        let mut c = self.cur_char();
+        if !c.is_ascii_hexdigit() {
+            println!("lex hexdigit error, wrong character following \\x");
+            exit(0);
+        }
+        while c.is_ascii_hexdigit() {
+            let digit_number;
+            if c >= '0' && c <= '9' {
+                digit_number = c as u8 - b'0';
+            } else if c >= 'A' && c <= 'F' {
+                digit_number = c as u8 - b'A' + 10;
+            } else {
+                digit_number = c as u8 - b'a' + 10;
+            }
+            num <<= 4;
+            num += digit_number;
+            if self.peek_char().expect("no char left to be peeked").is_ascii_hexdigit() {
+                self.next_char();
+                c = self.cur_char();
             } else {
                 break;
             }
