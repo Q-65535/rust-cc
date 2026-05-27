@@ -117,7 +117,7 @@ pub enum ExprType {
     ArrayIndexing(Box<Expr>, Vec<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
     Sizeof(Box<Expr>),
-    Str(String),
+    Str(Vec<u8>),
     // Parenthesized expression: a transparent wrapper that records the span of
     // the enclosing parens for diagnostics while leaving the inner expression's
     // own span untouched. Semantically identical to `inner` — the analyzer

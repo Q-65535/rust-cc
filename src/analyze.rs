@@ -659,7 +659,7 @@ impl ProgramAnalyzer {
                 let global_obj = create_global_obj(&unique_name, &ty);
                 self.cur_scope_tracker.add_private_global_obj(global_obj.clone());
                 // self.global_scope.add_obj(object);
-                let mut value_in_bytes = s.as_bytes().to_vec();
+                let mut value_in_bytes = s.clone();
                 value_in_bytes.push(b'\0');
                 let global_decl = ir::Declaration{obj: global_obj.clone(), init_value: Some(value_in_bytes)};
                 self.global_decls.push(global_decl);

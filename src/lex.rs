@@ -25,7 +25,7 @@ pub enum TokenKind {
     Semicolon,
     Comma,
     LexIdent(String),
-    StringLiteral(String),
+    StringLiteral(Vec<u8>),
     Keyword(KeywordToken),
     Eof,
 }
@@ -263,8 +263,10 @@ impl Lexer {
                 },
                 '"' => {
                     match self.read_string() {
-                        Ok(s) => {
-                            tokens.push(Self::gen_token(StringLiteral(s.clone()), &s, start_index, s.len()+2));
+                        Ok(bytes) => {
+                            let display = String::from_utf8_lossy(&bytes).into_owned();
+                            let consumed = self.index - start_index + 1;
+                            tokens.push(Self::gen_token(StringLiteral(bytes), &display, start_index, consumed));
                         },
                         Err(s) => {
                             self.error_at(start_index, "unable to read string literal.");
@@ -315,67 +317,59 @@ impl Lexer {
         Ok(s.parse().unwrap())
     }
 
-    fn read_string(&mut self) -> Result<String, String> {
-        let mut s = String::new();
-        // This len does not include " at the begining and end of a string.
-        self.next_char(); // skip " character
-        let start_index = self.index;
+    fn read_string(&mut self) -> Result<Vec<u8>, String> {
+        let mut bytes: Vec<u8> = Vec::new();
+        self.next_char(); // skip opening " character
         while self.cur_char() != '"' {
-            let current_char: char;
             if self.cur_char() == '\\' {
-                current_char = self.read_escaped_char();
+                bytes.push(self.read_escaped_char());
             } else {
-                current_char = self.cur_char();
+                let mut buf = [0u8; 4];
+                let encoded = self.cur_char().encode_utf8(&mut buf);
+                bytes.extend_from_slice(encoded.as_bytes());
             }
-            if !current_char.is_ascii() {
-                println!("{} is not an ascii character", current_char);
-                exit(0);
-            }
-            s.push(current_char);
             self.next_char();
         }
-        Ok(s)
+        Ok(bytes)
     }
 
-    fn read_escaped_char(&mut self) -> char {
+    fn read_escaped_char(&mut self) -> u8 {
         self.next_char(); // skip '\' character
-        let mut c = self.cur_char();
+        let c = self.cur_char();
         if c >= '0' && c <= '7' {
             return self.read_escaped_octal();
         } else if c == 'x' {
             return self.read_escaped_hex();
         }
-        match self.cur_char() {
-            'a' => '\x07',
-            'b' => '\x08',
-            't' => '\t',
-            'n' => '\n',
-            'v' => '\x0B',
-            'f' => '\x0C',
-            'r' => '\r',
-            'e' => '\x1B',
-            _ => self.cur_char(),
+        match c {
+            'a' => 0x07,
+            'b' => 0x08,
+            't' => b'\t',
+            'n' => b'\n',
+            'v' => 0x0B,
+            'f' => 0x0C,
+            'r' => b'\r',
+            'e' => 0x1B,
+            _ => c as u8,
         }
     }
 
-    fn read_escaped_octal(&mut self) -> char {
+    fn read_escaped_octal(&mut self) -> u8 {
         let mut num: u8 = 0;
-        // A char is at most 255 (8 bytes), 3-digit octal number can cover a char value range.
-        // So the for loop iterate at most 3 times.
-        for i in 0..3 {
+        // A char is at most 255 (8 bits), so a 3-digit octal number suffices.
+        for _ in 0..3 {
             let digit_number = self.cur_char() as u8 - b'0';
-            num <<= 3;
-            num += digit_number;
+            num = num.wrapping_shl(3).wrapping_add(digit_number);
             if self.peek_char() >= Some('0') && self.peek_char() <= Some('7') {
                 self.next_char();
             } else {
                 break;
             }
         }
-        return num as char;
+        num
     }
-    
-    fn read_escaped_hex(&mut self) -> char {
+
+    fn read_escaped_hex(&mut self) -> u8 {
         self.next_char(); // Skip 'x' character.
         let mut num: u8 = 0;
         let mut c = self.cur_char();
@@ -392,8 +386,9 @@ impl Lexer {
             } else {
                 digit_number = c as u8 - b'a' + 10;
             }
-            num <<= 4;
-            num += digit_number;
+            // Per the C standard, \x consumes an unbounded run of hex digits;
+            // overflow past one byte is allowed and the low 8 bits are kept.
+            num = num.wrapping_shl(4).wrapping_add(digit_number);
             if self.peek_char().expect("no char left to be peeked").is_ascii_hexdigit() {
                 self.next_char();
                 c = self.cur_char();
@@ -401,7 +396,7 @@ impl Lexer {
                 break;
             }
         }
-        return num as char;
+        num
     }
 
     fn read_ident(&mut self) -> String {
