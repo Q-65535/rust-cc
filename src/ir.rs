@@ -1,7 +1,7 @@
 use crate::analyze::{self, Type::*, *};
 use crate::common::{self, *};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StmtType {
     Ex(Expr),
     Return(Expr),
@@ -22,6 +22,7 @@ pub enum ExprType {
     Ident(String),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
+    StmtExpr(Vec<StmtType>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -668,6 +668,18 @@ impl ProgramAnalyzer {
                 ir::Expr{content: unique_symbol, ty, span}
             }
             Paren(inner) => self.analyze_expr(inner),
+            StmtExpr(items) => {
+                let stmts = self.analyze_items(items);
+                let ty = match stmts.last() {
+                    Some(ir::StmtType::Ex(e)) => e.ty.clone(),
+                    _ => {
+                        self.print_error_at(span, "a statement expression must end with an expression statement");
+                        ty_none
+                    }
+                };
+                let content = ExprType::StmtExpr(stmts);
+                ir::Expr{content, ty, span}
+            },
         }
     }
 

@@ -218,6 +218,7 @@ impl Generator {
                     _ => println!("currently only support function name as call reference"),
                 }
             }
+            StmtExpr(stmts) => self.block_gen(stmts),
             _ => println!("gen_code error: not support {:?}", content),
         }
     }

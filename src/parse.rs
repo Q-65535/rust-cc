@@ -105,7 +105,7 @@ pub struct Declarator {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum ExprType {
     Number(i32),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
@@ -123,9 +123,10 @@ pub enum ExprType {
     // own span untouched. Semantically identical to `inner` — the analyzer
     // should unwrap it.
     Paren(Box<Expr>),
+    StmtExpr(Vec<BlockItem>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Expr {
     pub content: ExprType,
     pub span: Span,
@@ -163,7 +164,7 @@ impl Parser {
         &self.tokens[self.cur_index+1]
     }
 
-        fn find_LBrace_before_encounter_semicolon(&self) -> Result<bool, String> {
+    fn find_LBrace_before_encounter_semicolon(&self) -> Result<bool, String> {
         let mut index = self.cur_index;
         while self.tokens[index].kind != Semicolon {
             if self.tokens[index].kind == Eof {
@@ -548,7 +549,13 @@ impl Parser {
     fn parse_prefix(&mut self) -> Result<Expr, String> {
         let cur_token_snapshot = self.cur_token().clone();
         match cur_token_snapshot.kind {
-            LParen => self.parse_paren(),
+            LParen => {
+                if self.peek_token().kind == LBrace {
+                    return self.parse_stmt_expr();
+                } else {
+                    return self.parse_paren();
+                }
+            },
             Num(_) => self.parse_integer(),
             Plus => {
                 self.next_token();
@@ -598,6 +605,18 @@ impl Parser {
             StringLiteral(s) => self.parse_string(),
             _ => Err(self.error_token(&cur_token_snapshot, "parsing error: can't parse prefix expression here"))
         }
+    }
+
+    fn parse_stmt_expr(&mut self) -> Result<Expr, String> {
+        let start_index = self.cur_token().span.start_index;
+        self.skip_cur_token(&LParen);
+        let items = self.parse_block()?;
+        self.expect_peek(&RParen);
+        let end_index = self.cur_token().span.end_index;
+        let expr_span = Span{start_index, end_index};
+        let content = StmtExpr(items);
+        let expr = Expr::new(content, expr_span);
+        Ok(expr)
     }
     
     fn parse_string(&mut self) -> Result<Expr, String> {
