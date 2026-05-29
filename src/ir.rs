@@ -19,7 +19,7 @@ pub enum ExprType {
     Neg(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
-    Ident(String),
+    Ident(Obj),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
     StmtExpr(Vec<StmtType>),

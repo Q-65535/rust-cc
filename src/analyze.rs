@@ -57,7 +57,6 @@ impl Scope {
         Scope{objects: Vec::new()}
     }
 
-    // @TODO: search upwards
     pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
         for o in &self.objects {
             if o.name == s {
@@ -90,6 +89,11 @@ impl ScopeTracker {
         self.current_scope_index += 1;
     }
 
+    pub fn exit_current_scope(&mut self) {
+        self.scopes.pop();
+        self.current_scope_index -= 1;
+    }
+
     pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
         let index = self.current_scope_index;
         for i in (0..=index).rev() {
@@ -101,14 +105,19 @@ impl ScopeTracker {
         return None
     }
 
+    pub fn resolve_symbol_at_current_scope(&self, s: &str) -> Option<&Obj> {
+        let current_scope = &self.scopes[self.current_scope_index];
+        return current_scope.resolve_symbol(s);
+    }
+
     pub fn add_obj(&mut self, o: Obj) {
         let current_scope = &mut self.scopes[self.current_scope_index];
         current_scope.add_obj(o);
     }
 
     pub fn add_private_global_obj(&mut self, o: Obj) {
-        let current_scope = &mut self.scopes[0];
-        current_scope.add_obj(o);
+        let global_scope_in_current_function = &mut self.scopes[0];
+        global_scope_in_current_function.add_obj(o);
     }
 }
 
@@ -140,7 +149,9 @@ impl ProgramAnalyzer {
         for unit in program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
+                    self.cur_offset = 0;
                     self.cur_scope_tracker = ScopeTracker::new(&self.global_scope);
+                    self.cur_scope_tracker.enter_new_scope();
                     let afun = self.analyze_function(fun);
                     afuns.push(afun);
                 }
@@ -217,7 +228,6 @@ impl ProgramAnalyzer {
     }
 
     pub fn analyze_function(&mut self, mut fun: Function) -> ir::Function {
-        self.cur_scope_tracker.enter_new_scope();
         let base = match &fun.return_type {
             SpecInt => TyInt,
             SpecChar => TyChar,
@@ -298,7 +308,7 @@ impl ProgramAnalyzer {
             SpecChar => base_type = TyChar,
         }
         for init in &mut decl.init_declarators {
-            if let Some(_) = self.cur_scope_tracker.resolve_symbol(&init.declarator.name) {
+            if let Some(_) = self.cur_scope_tracker.resolve_symbol_at_current_scope(&init.declarator.name) {
                 let err_info = format!("variable {} already defined", init.declarator.name);
                 self.print_error_at(init.declarator.span, &err_info);
             }
@@ -344,10 +354,9 @@ impl ProgramAnalyzer {
     }
 
     fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {
-        let content = ir::ExprType::Ident(o.name.clone());
+        let content = ir::ExprType::Ident(o.clone());
         let span = Span{start_index: 0, end_index: 0};
         ir::Expr{content, ty: o.ty.clone(), span}
-        
     }
 
 
@@ -373,7 +382,9 @@ impl ProgramAnalyzer {
                 StmtType::Return(expr)
             },
             Block(items) => {
+                self.cur_scope_tracker.enter_new_scope();
                 let stmts = self.analyze_items(items);
+                self.cur_scope_tracker.exit_current_scope();
                 StmtType::Block(stmts)
             }
             If(parse::IfStmt{cond, then, otherwise}) => {
@@ -538,14 +549,15 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             }
             Ident(s) => {
-                let ty = if let Some(o) = self.cur_scope_tracker.resolve_symbol(s) {
-                    o.ty.clone()
+                let obj = if let Some(o) = self.cur_scope_tracker.resolve_symbol(s) {
+                    o.clone()
                 } else {
                     let err_info = format!("semantic error: symbol '{}' not found", s);
                     self.print_error_at(expr.span, &err_info);
-                    TyInt
+                    self.create_obj(&ty_none, &s)
                 };
-                let content = ExprType::Ident(s.clone());
+                let ty = obj.ty.clone();
+                let content = ExprType::Ident(obj);
                 ir::Expr{content, ty, span}
             }
             ArrayIndexing(arr_ref, indices) => {
@@ -650,21 +662,17 @@ impl ProgramAnalyzer {
                 let unique_name = format!(".LC{}", self.unique_string_name_index);
                 self.unique_string_name_index += 1;
                 // In C, a string ends with an extra \0 character, so the array length +1.
-                // Note: we use s.len() rather than the source span because parse_paren may
-                // overwrite the literal's span to cover surrounding parentheses (e.g. sizeof("")).
                 let len = s.len() + 1;
                 let ty: Type = ArrayOf(Box::new(TyChar), len.try_into().unwrap());
 
-
                 let global_obj = create_global_obj(&unique_name, &ty);
                 self.cur_scope_tracker.add_private_global_obj(global_obj.clone());
-                // self.global_scope.add_obj(object);
                 let mut value_in_bytes = s.clone();
                 value_in_bytes.push(b'\0');
                 let global_decl = ir::Declaration{obj: global_obj.clone(), init_value: Some(value_in_bytes)};
                 self.global_decls.push(global_decl);
 
-                let unique_symbol = ExprType::Ident(unique_name);
+                let unique_symbol = ExprType::Ident(global_obj);
                 ir::Expr{content: unique_symbol, ty, span}
             }
             Paren(inner) => self.analyze_expr(inner),
@@ -853,14 +861,6 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
         // @Cleanup: Binary operation should be defined at parsing phase.
         // Currently the operation is just tokenkind in parsing.
         _ => OP::Compare(ir::CompareToken::Eq),
-    }
-}
-
-fn to_ir_ident(name: &str, ty: &Type, span: &Span) -> ir::Expr {
-    ir::Expr {
-        content: ir::ExprType::Ident(name.to_string()),
-        ty: ty.clone(),
-        span: span.clone(),
     }
 }
 

@@ -26,6 +26,10 @@ assert() {
     exit 1
   fi
 }
+assert 2 'int main() { int x=2; { int x=3; } return x; }'
+assert 2 'int main() { int x=2; { int x=3; } { int y=4; return x; }}'
+assert 3 'int main() { int x=2; { x=3; } return x; }'
+
 assert 0 'int main() { return ({ 0; }); }'
 assert 2 'int main() { return ({ 0; 1; 2; }); }'
 assert 1 'int main() { ({ 0; return 1; 2; }); return 3; }'

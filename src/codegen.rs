@@ -191,15 +191,13 @@ impl Generator {
                 load_according_to_type(&expr.ty);
             }
             AddrOf(expr) => self.gen_addr(expr),
-            Ident(s) => {
-                let err_smg = &format!("symbol '{}' not found\n", s);
-                let obj = self.cur_afun_r.scope_tracker.resolve_symbol(s).expect(err_smg);
+            Ident(obj) => {
                 self.gen_addr(expr);
                 load_according_to_type(&expr.ty);
             }
             FunCall(func_ref, args) => {
                 match &func_ref.content {
-                    Ident(func_name) => {
+                    Ident(obj) => {
                         let mut nargs = 0;
                         for arg in args {
                             self.expr_gen(arg);
@@ -212,7 +210,7 @@ impl Generator {
                         }
 
                         println!("  mov $0, %rax");
-                        println!("  call {}", func_name);
+                        println!("  call {}", obj.name);
                     }
                     // @Robustness: improve error message
                     _ => println!("currently only support function name as call reference"),
@@ -245,9 +243,7 @@ impl Generator {
 
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
-            Ident(name) => {
-                let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name)
-                .expect("fatal error: can't resolve symbol {} at code gen stage");
+            Ident(obj) => {
                 if obj.is_global {
                     println!("  lea {}(%rip), %rax", obj.name);
                 } else {
