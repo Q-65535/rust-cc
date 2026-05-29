@@ -1,4 +1,4 @@
-use std::{io::{self, Write}, collections::VecDeque, process::exit};
+use std::{io::{self, Write}, collections::VecDeque, process::exit, fs::File, sync::Mutex};
 use std::cell::Cell;
 use colored::*;
 use crate::ir::ExprType::{self, *};
@@ -13,10 +13,54 @@ use crate::SRC;
 use crate::ir::{self, *};
 use crate::analyze::{self, *};
 
+// Where generated assembly is written.
+enum Output {
+    Stdout,
+    File(File),
+}
+
+static OUTPUT: Mutex<Output> = Mutex::new(Output::Stdout);
+
+// `-o <path>` selects the file; a missing path or "-" means stdout.
+pub fn set_output(opt_o: &Option<String>) {
+    let mut out = OUTPUT.lock().unwrap();
+    *out = match opt_o {
+        Some(path) if path != "-" => Output::File(File::create(path).unwrap_or_else(|err| {
+            eprintln!("cannot open output file: {}: {}", path, err);
+            exit(1);
+        })),
+        _ => Output::Stdout,
+    };
+}
+
+macro_rules! emit {
+    () => {{
+        match &mut *OUTPUT.lock().unwrap() {
+            Output::Stdout => { let _ = writeln!(io::stdout()); }
+            Output::File(f) => { let _ = writeln!(f); }
+        }
+    }};
+    ($($arg:tt)*) => {{
+        match &mut *OUTPUT.lock().unwrap() {
+            Output::Stdout => { let _ = writeln!(io::stdout(), $($arg)*); }
+            Output::File(f) => { let _ = writeln!(f, $($arg)*); }
+        }
+    }};
+}
+
+macro_rules! emit_raw {
+    ($($arg:tt)*) => {{
+        match &mut *OUTPUT.lock().unwrap() {
+            Output::Stdout => { let _ = write!(io::stdout(), $($arg)*); }
+            Output::File(f) => { let _ = write!(f, $($arg)*); }
+        }
+    }};
+}
+
 pub struct Generator {
     aprogram_r: ir::AnalyzedProgram,
     lable_count: Cell<i32>,
-    cur_afun_r: ir::Function,
+    cur_afun_r: Option<ir::Function>,
     argregs64: Vec<&'static str>,
     argregs8: Vec<&'static str>,
 }
@@ -25,69 +69,74 @@ impl Generator {
     pub fn new(aprogram_r: ir::AnalyzedProgram) -> Self {
         let argregs64 = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
         let argregs8  = vec!["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
-        let cur_afun_r = aprogram_r.afuns[0].clone();
-        Self {aprogram_r, lable_count: 0.into(), cur_afun_r, argregs64, argregs8}
+        Self {aprogram_r, lable_count: 0.into(), cur_afun_r: None, argregs64, argregs8}
+    }
+
+    // The function currently being emitted. Only set while `gen_code`
+    // iterates `afuns`, which is the only context these reads happen in.
+    fn cur_afun(&self) -> &ir::Function {
+        self.cur_afun_r.as_ref().unwrap()
     }
 
     pub fn gen_code(&mut self) {
         for global_decl in &self.aprogram_r.global_decls {
-            println!("  .data");
-            println!("  .globl {}", global_decl.obj.name);
-            println!("{}:", global_decl.obj.name);
+            emit!("  .data");
+            emit!("  .globl {}", global_decl.obj.name);
+            emit!("{}:", global_decl.obj.name);
             if let Some(bytes) = &global_decl.init_value {
                 for b in bytes {
-                    println!("  .byte {}", b);
+                    emit!("  .byte {}", b);
                 }
             } else {
-                println!("  .zero {}", sizeof(&global_decl.obj.ty));
+                emit!("  .zero {}", sizeof(&global_decl.obj.ty));
             }
         }
         for afun in &self.aprogram_r.afuns {
             // @Space: clone() wastes memory
-            self.cur_afun_r = afun.clone();
+            self.cur_afun_r = Some(afun.clone());
             self.fun_gen();
         }
-        println!("  .section .note.GNU-stack,\"\",@progbits");
+        emit!("  .section .note.GNU-stack,\"\",@progbits");
     }
 
     pub fn fun_gen(&self) {
-        let stack_size = self.cur_afun_r.stack_size;
-        let fun = &self.cur_afun_r;
+        let stack_size = self.cur_afun().stack_size;
+        let fun = self.cur_afun();
         let aligned_stack_size = align_to(stack_size, 16);
         // prologue
-        println!();
-        println!("  .globl {}", fun.name);
-        println!("  .text");
-        println!("{}:", fun.name);
-        println!("  push %rbp");
-        println!("  mov %rsp, %rbp");
-        println!("  sub ${}, %rsp", aligned_stack_size);
-        println!();
+        emit!();
+        emit!("  .globl {}", fun.name);
+        emit!("  .text");
+        emit!("{}:", fun.name);
+        emit!("  push %rbp");
+        emit!("  mov %rsp, %rbp");
+        emit!("  sub ${}, %rsp", aligned_stack_size);
+        emit!();
         let mut i = 0;
-        for param in &self.cur_afun_r.param_names {
-            let obj = self.cur_afun_r.scope_tracker.resolve_symbol(&param).unwrap();
+        for param in &self.cur_afun().param_names {
+            let obj = self.cur_afun().scope_tracker.resolve_symbol(&param).unwrap();
             match sizeof(&obj.ty) {
-                1 => println!("  mov {}, {}(%rbp)\n", self.argregs8[i], -self.cur_afun_r.stack_size+obj.offset),
-                _ => println!("  mov {}, {}(%rbp)\n", self.argregs64[i], -self.cur_afun_r.stack_size+obj.offset),
+                1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[i], -self.cur_afun().stack_size+obj.offset),
+                _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[i], -self.cur_afun().stack_size+obj.offset),
             }
             i += 1;
         }
-        self.block_gen(&self.cur_afun_r.stmts);
+        self.block_gen(&self.cur_afun().stmts);
 
         // end
-        println!(".L.return.{}:",fun.name);
-        println!("  mov %rbp, %rsp");
-        println!("  pop %rbp");
-        println!("  ret");
+        emit!(".L.return.{}:",fun.name);
+        emit!("  mov %rbp, %rsp");
+        emit!("  pop %rbp");
+        emit!("  ret");
     }
 
     fn block_gen(&self, stmts: &Vec<ir::StmtType>) {
         for stmt in stmts {
-            println!(";;;;;;;;;;;;;;;;;;;;;;;;");
+            emit!(";;;;;;;;;;;;;;;;;;;;;;;;");
             self.stmt_gen(stmt);
-            print!(";;;;;;;;;;;;;;;;;;;;;;;;");
+            emit_raw!(";;;;;;;;;;;;;;;;;;;;;;;;");
         }
-        println!();
+        emit!();
     }
 
     fn stmt_gen(&self, stmt: &ir::StmtType) {
@@ -102,21 +151,21 @@ impl Generator {
 
     fn ret_gen(&self, expr: &ir::Expr) {
         self.expr_gen(expr);
-        println!("  jmp .L.return.{}\n", self.cur_afun_r.name);
+        emit!("  jmp .L.return.{}\n", self.cur_afun().name);
     }
 
     fn if_gen(&self, cond: &ir::Expr, then: &ir::StmtType, otherwise: &Option<Box<ir::StmtType>>) {
         let c = self.count();
         self.expr_gen(&cond);
-        println!("  cmp $0, %rax");
-        println!("  je  .L.else.{}", c);
+        emit!("  cmp $0, %rax");
+        emit!("  je  .L.else.{}", c);
         self.stmt_gen(&then);
-        println!("  jmp .L.end.{}", c);
-        println!(".L.else.{}:", c);
+        emit!("  jmp .L.end.{}", c);
+        emit!(".L.else.{}:", c);
         if let Some(els) = otherwise {
             self.stmt_gen(&els);
         }
-        println!(".L.end.{}:", c);
+        emit!(".L.end.{}:", c);
     }
 
     fn for_gen(&self, init: &Option<ir::Expr>, cond: &Option<ir::Expr>, inc: &Option<ir::Expr>, then: &Box<ir::StmtType>) {
@@ -124,67 +173,67 @@ impl Generator {
         if let Some(expr) = init {
             self.expr_gen(expr);
         }
-        println!(".L.begin.{}:", c);
+        emit!(".L.begin.{}:", c);
         if let Some(expr) = cond {
             self.expr_gen(expr);
-            println!("  cmp $0, %rax");
-            println!("  je  .L.end.{}", c);
+            emit!("  cmp $0, %rax");
+            emit!("  je  .L.end.{}", c);
         }
         self.stmt_gen(&then);
         if let Some(expr) = inc {
             self.expr_gen(expr);
         }
-        println!("  jmp .L.begin.{}", c);
-        println!(".L.end.{}:", c);
+        emit!("  jmp .L.begin.{}", c);
+        emit!(".L.end.{}:", c);
     }
 
     fn expr_gen(&self, expr: &ir::Expr) {
         let content = &expr.content;
         match content {
-            Number(n) => println!("  mov ${}, %rax", n),
+            Number(n) => emit!("  mov ${}, %rax", n),
             Binary(lhs, rhs, kind) => {
                 self.expr_gen(rhs);
-                println!("  push %rax");
+                emit!("  push %rax");
                 self.expr_gen(lhs);
-                println!("  pop %rdi");
+                emit!("  pop %rdi");
                 match kind {
-                    Plus => println!("  add %rdi, %rax"),
-                    Minus => println!("  sub %rdi, %rax"),
-                    Mul => println!("  imul %rdi, %rax"),
+                    Plus => emit!("  add %rdi, %rax"),
+                    Minus => emit!("  sub %rdi, %rax"),
+                    Mul => emit!("  imul %rdi, %rax"),
                     Div => {
-                        println!("  cqo");
-                        println!("  idiv %rdi");
+                        emit!("  cqo");
+                        emit!("  idiv %rdi");
                     },
                     Compare(c) => {
-                        println!("  cmp %rdi, %rax");
+                        emit!("  cmp %rdi, %rax");
                         match c {
-                            Eq => println!("  sete %al"),
-                            Neq => println!("  setne %al"),
-                            LT => println!("  setl %al"),
-                            LE => println!("  setle %al"),
+                            Eq => emit!("  sete %al"),
+                            Neq => emit!("  setne %al"),
+                            LT => emit!("  setl %al"),
+                            LE => emit!("  setle %al"),
                             GT => {
-                                println!("  cmp %rax, %rdi");
-                                println!("  setl %al");
+                                emit!("  cmp %rax, %rdi");
+                                emit!("  setl %al");
                             },
                             GE => {
-                                println!("  cmp %rax, %rdi");
-                                println!("  setle %al");
+                                emit!("  cmp %rax, %rdi");
+                                emit!("  setle %al");
                             },
                         }
-                        println!("  movzb %al, %rax");
+                        emit!("  movzb %al, %rax");
                     },
-                    _ => println!("gen_code error: not support {:?}", content),
+                    _ => eprintln!("gen_code error: not support {:?}", content),
                 }
             }
             Assign(var, val) => {
                 self.gen_addr(var);
-                println!("  push %rax");
+                emit!("  push %rax");
                 self.expr_gen(val);
                 store(&var.ty);
             }
             Neg(expr) => {
                 self.expr_gen(expr);
-                println!("  neg %rax");
+                emit!("  neg %rax");
             }
             Deref(inner_expr) => {
                 self.expr_gen(inner_expr);
@@ -201,7 +250,7 @@ impl Generator {
                         let mut nargs = 0;
                         for arg in args {
                             self.expr_gen(arg);
-                            println!("  push %rax");
+                            emit!("  push %rax");
                             nargs += 1;
                         }
                         // put arguments in designated registers
@@ -209,15 +258,15 @@ impl Generator {
                             self.pop(self.argregs64[i]);
                         }
 
-                        println!("  mov $0, %rax");
-                        println!("  call {}", obj.name);
+                        emit!("  mov $0, %rax");
+                        emit!("  call {}", obj.name);
                     }
                     // @Robustness: improve error message
-                    _ => println!("currently only support function name as call reference"),
+                    _ => eprintln!("currently only support function name as call reference"),
                 }
             }
             StmtExpr(stmts) => self.block_gen(stmts),
-            _ => println!("gen_code error: not support {:?}", content),
+            _ => eprintln!("gen_code error: not support {:?}", content),
         }
     }
 
@@ -237,17 +286,17 @@ impl Generator {
     }
 
     fn gen_addr_by_name(&self, name: &str) {
-        let obj = self.cur_afun_r.scope_tracker.resolve_symbol(name).unwrap();
-        println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.offset);
+        let obj = self.cur_afun().scope_tracker.resolve_symbol(name).unwrap();
+        emit!("  lea {}(%rbp), %rax", -self.cur_afun().stack_size+obj.offset);
     }
 
     fn gen_addr(&self, expr: &Expr) {
         match &expr.content {
             Ident(obj) => {
                 if obj.is_global {
-                    println!("  lea {}(%rip), %rax", obj.name);
+                    emit!("  lea {}(%rip), %rax", obj.name);
                 } else {
-                    println!("  lea {}(%rbp), %rax", -self.cur_afun_r.stack_size+obj.offset);
+                    emit!("  lea {}(%rbp), %rax", -self.cur_afun().stack_size+obj.offset);
                 }
 
             },
@@ -256,17 +305,17 @@ impl Generator {
             },
             _ => {
                 let err_msg = self.error_expr(expr, "can't get addr of this expr");
-                println!("{}", err_msg);
+                eprintln!("{}", err_msg);
             },
         }
     }
 
     fn push(&self, reg: &str) {
-        println!("  push {}", reg);
+        emit!("  push {}", reg);
     }
 
     fn pop(&self, reg: &str) {
-        println!("  pop {}", reg);
+        emit!("  pop {}", reg);
     }
 }
 
@@ -275,17 +324,17 @@ fn load_according_to_type(ty: &Type) {
 
     } else {
         match sizeof(ty) {
-            1 => println!("  movsbq (%rax), %rax"),
-            _ => println!("  mov (%rax), %rax"),
+            1 => emit!("  movsbq (%rax), %rax"),
+            _ => emit!("  mov (%rax), %rax"),
         }
     }
 }
 
 fn store(ty: &Type) {
-    println!("  pop %rdi");
+    emit!("  pop %rdi");
     match sizeof(ty) {
-        1 => println!("  mov %al, (%rdi)"),
-        _ => println!("  mov %rax, (%rdi)"),
+        1 => emit!("  mov %al, (%rdi)"),
+        _ => emit!("  mov %rax, (%rdi)"),
     }
 }
 

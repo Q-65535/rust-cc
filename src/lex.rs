@@ -185,6 +185,10 @@ impl Lexer {
 
     pub fn lex(&mut self) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
+        if self.src.is_empty() {
+            tokens.push(Self::gen_token(Eof, "", self.src.len(), 1));
+            return tokens;
+        }
         loop {
             let c = self.cur_char();
             let start_index = self.index;

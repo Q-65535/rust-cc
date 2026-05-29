@@ -5,9 +5,10 @@ rebuild:
 	cargo clean
 	cargo build
 
-test: 
+test:
 	cargo build
 	./test.sh
+	./test-driver.sh
 
 clean:
 	cargo clean
