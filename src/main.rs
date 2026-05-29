@@ -6,7 +6,7 @@ pub mod codegen;
 pub mod ir;
 pub mod pretty;
 pub mod common;
-use std::{io::{self, Write}, process::exit, env};
+use std::{io::{self, Read, Write}, process::exit, env, fs};
 use colored::*;
 use crate::lex::*;
 use crate::parse::*;
@@ -21,13 +21,25 @@ static SRC: Mutex<String> = Mutex::new(String::new());
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let input: String;
-    if args.len() > 1 {
-        input = args[1].clone();
+    if args.len() <= 1 {
+        eprintln!("{}: no input file", args[0]);
+        exit(1);
+    }
+
+    let path = &args[1];
+    let input = if path == "-" {
+        let mut buf = String::new();
+        io::stdin().read_to_string(&mut buf).expect("failed to read from stdin");
+        buf
+    } else {
+        fs::read_to_string(path).unwrap_or_else(|err| {
+            eprintln!("cannot open {}: {}", path, err);
+            exit(1);
+        })
+    };
+    {
         let mut src = SRC.lock().unwrap();
         *src = input.clone();
-    } else {
-        println!("No arguments provided.");
     }
 
     // lex

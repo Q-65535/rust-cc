@@ -189,7 +189,7 @@ impl Lexer {
             let c = self.cur_char();
             let start_index = self.index;
             match c {
-                ' ' => (),
+                ' ' | '\t' | '\n' | '\r' => (),
                 ';' => tokens.push(Self::gen_token(Semicolon, ";", start_index, 1)),
                 ',' => tokens.push(Self::gen_token(Comma, ",", start_index, 1)),
                 '+' => tokens.push(Self::gen_token(Plus, "+", start_index, 1)),

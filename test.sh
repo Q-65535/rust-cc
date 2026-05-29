@@ -14,7 +14,7 @@ assert() {
   expected="$1"
   input="$2"
 
-  ./target/debug/rust-cc "$input" > tmp.s || exit
+  echo "$input" | ./target/debug/rust-cc - > tmp.s || exit
   gcc -static -o tmp tmp.s tmp2.o
   ./tmp
   actual="$?"
