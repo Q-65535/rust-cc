@@ -289,7 +289,11 @@ impl ProgramAnalyzer {
             SpecInt => base_type = TyInt,
             SpecChar => base_type = TyChar,
         }
-        let obj = self.create_obj(&base_type, &param.declarator.name);
+        let mut cur_type = base_type.clone();
+        for _ in 0..param.declarator.star_count {
+            cur_type = pointer_to(&cur_type);
+        }
+        let obj = self.create_obj(&cur_type, &param.declarator.name);
         if self.cur_scope_tracker.resolve_symbol(&obj.name) == None {
             self.cur_scope_tracker.add_obj(obj);
         } else {
@@ -570,22 +574,28 @@ impl ProgramAnalyzer {
                 }
                 let cur_ref = &mut arr_ref;
                 for index in analyzed_indices {
+                    // a[b] is *(a+b); pointer addition is commutative, so b[a] is valid too.
+                    let (base, idx) = if !cur_ref.is_ptr() && index.is_ptr() {
+                        (index, cur_ref.clone())
+                    } else {
+                        (cur_ref.clone(), index)
+                    };
                     // type checking
-                    if !cur_ref.is_ptr() {
-                        self.print_error_at(index.span, "subscripted value is neither array nor pointer nor vector");
+                    if !base.is_ptr() {
+                        self.print_error_at(idx.span, "subscripted value is neither array nor pointer nor vector");
                     } else {
                         // Array indexing is converted to pointer arithmatic and dereferencing
                         // pointer arithmatic.
-                        let size = match &cur_ref.ty {
-                                TyPtr(..) => sizeof(&cur_ref.ty),
+                        let size = match &base.ty {
+                                TyPtr(..) => sizeof(&base.ty),
                                 ArrayOf(element_type, _) => sizeof(element_type),
                                 _ => 8,
                             };
-                        let scaled = scal_expr(&index, Mul, size);
-                        let pointer_arithmatic = ExprType::Binary(Box::new(cur_ref.clone()), Box::new(scaled), OP::Plus);
-                        let mut pointer_arithmatic_expr = ir::Expr {
+                        let scaled = scal_expr(&idx, Mul, size);
+                        let pointer_arithmatic = ExprType::Binary(Box::new(base.clone()), Box::new(scaled), OP::Plus);
+                        let pointer_arithmatic_expr = ir::Expr {
                             content: pointer_arithmatic,
-                            ty: cur_ref.ty.clone(),
+                            ty: base.ty.clone(),
                             span,
                         };
 
@@ -601,12 +611,12 @@ impl ProgramAnalyzer {
                                 let err_msg = format!("semantic error: invalid dereferencing:
                                 try to dereference {:?}", pointer_arithmatic_expr.ty);
                                 self.print_error_at(expr.span, &err_msg);
-                                cur_ref.ty.clone()
+                                base.ty.clone()
                             }
                         };
 
                         let deref = ExprType::Deref(Box::new(pointer_arithmatic_expr));
-                        let mut deref_expr = ir::Expr {
+                        let deref_expr = ir::Expr {
                             content: deref,
                             ty: base_ty,
                             span,
@@ -677,7 +687,9 @@ impl ProgramAnalyzer {
             }
             Paren(inner) => self.analyze_expr(inner),
             StmtExpr(items) => {
+                self.cur_scope_tracker.enter_new_scope();
                 let stmts = self.analyze_items(items);
+                self.cur_scope_tracker.exit_current_scope();
                 let ty = match stmts.last() {
                     Some(ir::StmtType::Ex(e)) => e.ty.clone(),
                     _ => {

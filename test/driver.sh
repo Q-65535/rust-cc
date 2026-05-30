@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 rust_cc=./target/debug/rust-cc
 tmp=`mktemp -d /tmp/rust-cc-test-XXXXXX`
 trap 'rm -rf $tmp' INT TERM HUP EXIT

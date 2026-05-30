@@ -199,7 +199,39 @@ impl Lexer {
                 '+' => tokens.push(Self::gen_token(Plus, "+", start_index, 1)),
                 '-' => tokens.push(Self::gen_token(Minus, "-", start_index, 1)),
                 '*' => tokens.push(Self::gen_token(Mul, "*", start_index, 1)),
-                '/' => tokens.push(Self::gen_token(Div, "/", start_index, 1)),
+                '/' => {
+                    match self.peek_char() {
+                        Some('/') => {
+                            // Line comment: skip until end of line.
+                            self.next_char();
+                            while let Some(nc) = self.peek_char() {
+                                if nc == '\n' { break; }
+                                self.next_char();
+                            }
+                        },
+                        Some('*') => {
+                            // Block comment: skip until closing "*/".
+                            self.next_char();
+                            loop {
+                                match self.peek_char() {
+                                    Some('*') => {
+                                        self.next_char();
+                                        if let Some('/') = self.peek_char() {
+                                            self.next_char();
+                                            break;
+                                        }
+                                    },
+                                    Some(_) => self.next_char(),
+                                    None => {
+                                        self.error_at(start_index, "unclosed block comment");
+                                        exit(0);
+                                    },
+                                }
+                            }
+                        },
+                        _ => tokens.push(Self::gen_token(Div, "/", start_index, 1)),
+                    }
+                },
                 '(' => tokens.push(Self::gen_token(LParen, "(", start_index, 1)),
                 ')' => tokens.push(Self::gen_token(RParen, ")", start_index, 1)),
                 '{' => tokens.push(Self::gen_token(LBrace, "{", start_index, 1)),
