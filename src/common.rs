@@ -16,8 +16,15 @@ impl Span {
         return (self.end_index - self.start_index + 1).try_into().unwrap();
     }
 
-    // To be implemented. We can only consider the start_index.
-    pub fn cal_line_number(span: Span) -> i32 {
-        return 1;
+    pub fn get_start_line(&self) -> usize {
+        let starts = crate::LINE_STARTS.lock().unwrap();
+        let line = starts.partition_point(|&s| s <= self.start_index) - 1;
+        (line + 1)
+    }
+
+    pub fn get_end_line(&self) -> usize {
+        let starts = crate::LINE_STARTS.lock().unwrap();
+        let line = starts.partition_point(|&s| s <= self.end_index) - 1;
+        (line + 1)
     }
 }

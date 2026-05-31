@@ -58,7 +58,7 @@ pub fn print_tokens(tokens: &[Token]) {
     for tok in tokens {
         let (kind_str, colour) = token_kind_label(&tok.kind);
         let lexeme = &tok.val;
-        let line   = Span::cal_line_number(tok.span);
+        let line   = tok.span.get_start_line();
         let col    = tok.span.start_index;
 
         println!(

@@ -18,6 +18,7 @@ use crate::codegen::*;
 use std::sync::Mutex;
 
 static SRC: Mutex<String> = Mutex::new(String::new());
+static LINE_STARTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 fn usage(status: i32) -> ! {
     eprintln!("rust-cc [ -o <path> ] <file>");
@@ -70,6 +71,16 @@ fn parse_args(args: &[String]) -> (Option<String>, String) {
     }
 }
 
+fn build_line_starts(src: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    for (i, c) in src.chars().enumerate() {
+        if c == '\n' {
+            starts.push(i + 1);
+        }
+    }
+    starts
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let (opt_o, path) = parse_args(&args);
@@ -87,6 +98,10 @@ fn main() {
     {
         let mut src = SRC.lock().unwrap();
         *src = input.clone();
+    }
+    {
+        let mut line_starts = LINE_STARTS.lock().unwrap();
+        *line_starts = build_line_starts(&input);
     }
 
     // lex
