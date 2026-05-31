@@ -28,3 +28,19 @@ impl Span {
         (line + 1)
     }
 }
+
+pub fn get_line_content(line_no: usize) -> String {
+    let (start, end) = {
+        let starts = crate::LINE_STARTS.lock().unwrap();
+        let idx = line_no - 1;                       // 1-based -> table index
+        let start = starts[idx];
+        let end = starts.get(idx + 1).map(|&s| s - 1); // next start minus '\n'
+        (start, end)
+    }; // lock released here
+
+    let src = crate::SRC.lock().unwrap();
+    match end {
+        Some(end) => src.chars().skip(start).take(end - start).collect(),
+        None      => src.chars().skip(start).collect(),   // last line: to EOF
+    }
+}
