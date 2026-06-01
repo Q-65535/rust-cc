@@ -127,7 +127,7 @@ fn main() {
         }
         Err(err) => {
             println!("{}", err);
-            exit(0);
+            exit(1);
         }
     }
 }

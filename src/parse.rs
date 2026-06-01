@@ -769,11 +769,17 @@ impl Parser {
     }
 
     fn error_span(&self, span: Span, info: &str) -> String {
-        let mut err_msg = String::from("");
-        let src_str: &str = &SRC.lock().unwrap().to_string();
-        err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(span.start_index);
-        let arrows = "^".repeat(span.end_index - span.start_index + 1);
+        let (start_line, satart_column, end_line, end_column) = span.locate();
+        let start_line_content = get_src_content_at_line(start_line);
+        let mut err_msg = String::new();
+        err_msg.push_str(&start_line_content);
+        err_msg.push_str("\n");
+        let spaces = " ".repeat(satart_column - 1);
+        let arrows = if start_line == end_line {
+            "^".repeat(span.end_index - span.start_index + 1)
+        } else {
+            "^".to_string()
+        };
         err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
         err_msg
     }

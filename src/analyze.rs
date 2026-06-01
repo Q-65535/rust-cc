@@ -245,7 +245,7 @@ impl ProgramAnalyzer {
             self.cur_scope_tracker.add_obj(obj);
         } else {
             let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
-            self.print_error_at(fun.name_span, &err_info);
+            print_error_at(fun.name_span, &err_info);
         }
 
         let mut param_names: Vec<String> = Vec::new();
@@ -298,7 +298,7 @@ impl ProgramAnalyzer {
             self.cur_scope_tracker.add_obj(obj);
         } else {
             let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
-            self.print_error_at(param.declarator.span, &err_info);
+            print_error_at(param.declarator.span, &err_info);
         }
     }
 
@@ -314,7 +314,7 @@ impl ProgramAnalyzer {
         for init in &mut decl.init_declarators {
             if let Some(_) = self.cur_scope_tracker.resolve_symbol_at_current_scope(&init.declarator.name) {
                 let err_info = format!("variable {} already defined", init.declarator.name);
-                self.print_error_at(init.declarator.span, &err_info);
+                print_error_at(init.declarator.span, &err_info);
             }
             // deal with pointers
             let mut cur_type = base_type.clone();
@@ -341,7 +341,7 @@ impl ProgramAnalyzer {
                 if !can_assign(&obj.ty, &analyzed_expr.ty) {
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                     obj.name, &obj.ty, &analyzed_expr.ty);
-                    self.print_error_at(init.declarator.span, &err_info);
+                    print_error_at(init.declarator.span, &err_info);
                 } else {
                     let expr = self.gen_expr_from_obj(&obj);
                     let content = ir::ExprType::Assign(Box::new(expr), Box::new(analyzed_expr));
@@ -445,8 +445,8 @@ impl ProgramAnalyzer {
                     Plus => {
                         if lhs.is_ptr() && rhs.is_ptr() {
                             println!();
-                            self.print_error_at(lhs.span, "error: both lhs and rhs are of ptr type");
-                            self.print_error_at(rhs.span, "error: both lhs and rhs are of ptr type");
+                            print_error_at(lhs.span, "error: both lhs and rhs are of ptr type");
+                            print_error_at(rhs.span, "error: both lhs and rhs are of ptr type");
                         }
                         if lhs.is_integer() && rhs.is_ptr() {
                             swap(&mut lhs, &mut rhs);
@@ -466,7 +466,7 @@ impl ProgramAnalyzer {
                     }
                     Minus => {
                         if lhs.is_integer() && rhs.is_ptr() {
-                            self.print_error_at(rhs.span, "error: integer - ptr");
+                            print_error_at(rhs.span, "error: integer - ptr");
                         }
                         if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
                             let mut scal: i32;
@@ -484,7 +484,7 @@ impl ProgramAnalyzer {
 								basic_ty = *basic.clone();
                             }
 							if lhs.ty != rhs.ty {
-								self.print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
+								print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
 							}
                             let ty = TyInt;
                             let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
@@ -510,12 +510,12 @@ impl ProgramAnalyzer {
                 if !can_be_lvalue(&lhs) {
                     // @Incomplete: more precise error report: the reason why lhs cannot be lvalue
                     let err_info = format!("lhs cannot be lvalue: {:?}", &lhs.ty);
-                    self.print_error_at(lhs.span, &err_info);
+                    print_error_at(lhs.span, &err_info);
                 }
                 if !can_assign(&lhs.ty, &rhs.ty) {
                     let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
                     &rhs.ty, &lhs.ty);
-                    self.print_error_at(lhs.span, &err_info);
+                    print_error_at(lhs.span, &err_info);
                 }
                 let ty = lhs.ty.clone();
                 let content = ExprType::Assign(Box::new(lhs), Box::new(rhs));
@@ -537,9 +537,8 @@ impl ProgramAnalyzer {
                         *base.clone()
                     }
                     _ => {
-                        let err_msg = format!("semantic error: invalid dereferencing:
-                        try to dereference {:?}", val.ty);
-                        self.print_error_at(expr.span, &err_msg);
+                        let err_msg = format!("semantic error: invalid dereferencing: try to dereference {:?}", val.ty);
+                        print_error_at(expr.span, &err_msg);
                         val.ty.clone()
                     }
                 };
@@ -557,7 +556,7 @@ impl ProgramAnalyzer {
                     o.clone()
                 } else {
                     let err_info = format!("semantic error: symbol '{}' not found", s);
-                    self.print_error_at(expr.span, &err_info);
+                    print_error_at(expr.span, &err_info);
                     self.create_obj(&ty_none, &s)
                 };
                 let ty = obj.ty.clone();
@@ -582,7 +581,7 @@ impl ProgramAnalyzer {
                     };
                     // type checking
                     if !base.is_ptr() {
-                        self.print_error_at(idx.span, "subscripted value is neither array nor pointer nor vector");
+                        print_error_at(idx.span, "subscripted value is neither array nor pointer nor vector");
                     } else {
                         // Array indexing is converted to pointer arithmatic and dereferencing
                         // pointer arithmatic.
@@ -610,7 +609,7 @@ impl ProgramAnalyzer {
                             _ => {
                                 let err_msg = format!("semantic error: invalid dereferencing:
                                 try to dereference {:?}", pointer_arithmatic_expr.ty);
-                                self.print_error_at(expr.span, &err_msg);
+                                print_error_at(expr.span, &err_msg);
                                 base.ty.clone()
                             }
                         };
@@ -693,7 +692,7 @@ impl ProgramAnalyzer {
                 let ty = match stmts.last() {
                     Some(ir::StmtType::Ex(e)) => e.ty.clone(),
                     _ => {
-                        self.print_error_at(span, "a statement expression must end with an expression statement");
+                        print_error_at(span, "a statement expression must end with an expression statement");
                         ty_none
                     }
                 };
@@ -701,56 +700,6 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             },
         }
-    }
-
-    fn error_expr(&self, expr: &Expr, info: &str) -> String {
-        let mut err_msg = String::from("");
-        let src_str: &str = &SRC.lock().unwrap().to_string();
-        err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.span.start_index);
-        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
-        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
-        err_msg
-    }
-
-    fn print_error_at(&self, span: Span, info: &str) {
-        let mut err_msg = String::from("");
-        let src_str: &str = &SRC.lock().unwrap().to_string();
-        err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(span.start_index);
-        let arrows = "^".repeat(span.end_index - span.start_index + 1);
-        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
-        println!("{}", err_msg);
-    }
-
-    fn print_error_expr(&self, expr: &Expr, info: &str) {
-        let mut err_msg = String::from("");
-        let src_str: &str = &SRC.lock().unwrap().to_string();
-        err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.span.start_index);
-        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
-        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
-        println!("{}", err_msg);
-    }
-
-    fn print_error_ir_expr(&self, expr: &ir::Expr, info: &str) {
-        let mut err_msg = String::from("");
-        let src_str: &str = &SRC.lock().unwrap().to_string();
-        err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.span.start_index);
-        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index + 1);
-        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
-        println!("{}", err_msg);
-    }
-
-    fn err_declarator(&self, declarator: &Declarator, info: &str) -> String {
-        let mut err_msg = String::from("");
-        let src_str: &str = &SRC.lock().unwrap().to_string();
-        err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(declarator.span.start_index);
-        let arrows = "^".repeat(declarator.span.end_index - declarator.span.start_index + 1);
-        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
-        err_msg
     }
 }
 
@@ -885,12 +834,22 @@ fn create_global_obj(name: &str, base_type: &Type) -> Obj {
     obj
 }
 
+// @Duplication: Duplicate with error reporter in parse.rs.
 fn print_error_at(span: Span, info: &str) {
-    let mut err_msg = String::from("");
-    let src_str: &str = &SRC.lock().unwrap().to_string();
-    err_msg.push_str(&format!("{}\n", src_str));
-    let spaces = " ".repeat(span.start_index);
-    let arrows = "^".repeat(span.end_index - span.start_index + 1);
-    err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+    let mut err_msg = String::new();
+    let (start_line, start_column, end_line, end_column) = span.locate();
+    let extended_error_info = format!(":{}:{}: {}\n", start_line, start_column, info.red());
+    err_msg.push_str(&extended_error_info);
+    let start_line_content = get_src_content_at_line(start_line);
+    err_msg.push_str(&start_line_content);
+    err_msg.push_str("\n");
+    let spaces = " ".repeat(start_column - 1);
+    let arrows = if start_line == end_line {
+        "^".repeat(span.end_index - span.start_index + 1)
+    } else {
+        "^".to_string()
+    };
+    err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
     println!("{}", err_msg);
+    exit(1);
 }

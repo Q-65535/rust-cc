@@ -455,10 +455,25 @@ impl Lexer {
     }
 
     fn error_at(&self, index: usize, err_msg: &str) {
-        let src_str: &str = &SRC.lock().unwrap().to_string();
-        println!("{}", src_str);
-        let spaces = " ".repeat(index);
-        println!("{}^ {}", spaces, err_msg.red());
-        exit(0);
+        let span = Span{start_index: index, end_index: index};
+        print_error_at(span, err_msg);
     }
+}
+
+// @Duplication: Duplicate with error reporter in parse.rs.
+fn print_error_at(span: Span, info: &str) {
+    let (start_line, satart_column, end_line, end_column) = span.locate();
+    let start_line_content = get_src_content_at_line(start_line);
+    let mut err_msg = String::new();
+    err_msg.push_str(&start_line_content);
+    err_msg.push_str("\n");
+    let spaces = " ".repeat(satart_column - 1);
+    let arrows = if start_line == end_line {
+        "^".repeat(span.end_index - span.start_index + 1)
+    } else {
+        "^".to_string()
+    };
+    err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+    println!("{}", err_msg);
+    exit(1);
 }
