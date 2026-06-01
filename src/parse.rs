@@ -169,7 +169,7 @@ impl Parser {
         while self.tokens[index].kind != Semicolon {
             if self.tokens[index].kind == Eof {
                 let err_msg = format!("parsing error: expect '{{' or ';', but got Eof");
-                return Err(self.error_token(self.cur_token(), err_msg.as_str()));
+                return Err(error_token(self.cur_token(), err_msg.as_str()));
             }
             if self.tokens[index].kind == LBrace {return Ok(true)};
             index += 1;
@@ -183,7 +183,7 @@ impl Parser {
             Ok(())
         } else {
             let err_msg = format!("parsing error: expect {:?} kind token, but got {:?} kind token\n", expect_cur, self.cur_token().kind);
-            return Err(self.error_token(self.cur_token(), err_msg.as_str()));
+            return Err(error_token(self.cur_token(), err_msg.as_str()));
         }
     }
 
@@ -205,7 +205,7 @@ impl Parser {
             return Ok(self.cur_token());
         } else {
             let err_msg = format!("parsing error: expect {:?} kind token, but got {:?} kind token\n", expect, peek.kind);
-            return Err(self.error_token(peek, err_msg.as_str()));
+            return Err(error_token(peek, err_msg.as_str()));
         }
     }
 
@@ -231,7 +231,7 @@ impl Parser {
             self.next_token();
             return Ok(())
         } else {
-            let err_msg = self.error_token(self.cur_token(), format!("want '{:?}', but got '{:?}'", target, actual).as_str());
+            let err_msg = error_token(self.cur_token(), format!("want '{:?}', but got '{:?}'", target, actual).as_str());
             return Err(err_msg)
         }
     }
@@ -279,7 +279,7 @@ impl Parser {
                 }
                 Semicolon => break,
                 _ => {
-                    let err_msg = self.error_token(self.cur_token(), "invalid token");
+                    let err_msg = error_token(self.cur_token(), "invalid token");
                     return Err(err_msg);
                 },
             }
@@ -295,7 +295,7 @@ impl Parser {
             Keyword(TypeSpecifier(Int)) => Ok(SpecInt),
             Keyword(TypeSpecifier(Char)) => Ok(SpecChar),
             _ => {
-                let err_msg = self.error_token(self.cur_token(), "unknown declaration specifer!");
+                let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
                 return Err(err_msg);
             }
         }
@@ -353,7 +353,7 @@ impl Parser {
 
             Ok(Declarator{star_count, name, suffix, span})
         } else {
-            let err_msg = self.error_token(self.cur_token(), "not an identifier");
+            let err_msg = error_token(self.cur_token(), "not an identifier");
             return Err(err_msg);
         }
     }
@@ -520,11 +520,11 @@ impl Parser {
                             break;
                         },
                         Num(_) => {
-                            let err_msg = self.error_token(self.cur_token(), "expect an operator");
+                            let err_msg = error_token(self.cur_token(), "expect an operator");
                             return Err(err_msg);
                         },
                         _ => {
-                            let err_msg = self.error_token(self.peek_token(), "not support parsing this token");
+                            let err_msg = error_token(self.peek_token(), "not support parsing this token");
                             return Err(err_msg);
                         },
                     }
@@ -603,7 +603,7 @@ impl Parser {
             },
             LexIdent(_) => self.parse_ident(),
             StringLiteral(s) => self.parse_string(),
-            _ => Err(self.error_token(&cur_token_snapshot, "parsing error: can't parse prefix expression here"))
+            _ => Err(error_token(&cur_token_snapshot, "parsing error: can't parse prefix expression here"))
         }
     }
 
@@ -626,7 +626,7 @@ impl Parser {
             let expr = Expr::new(content, tok.span);
             Ok(expr)
         } else {
-            Err(self.error_token(self.cur_token(), "expect a string literal"))
+            Err(error_token(self.cur_token(), "expect a string literal"))
         }
     }
 
@@ -640,7 +640,7 @@ impl Parser {
             let expr = Expr::new(var, span);
             Ok(expr)
         } else {
-            Err(self.error_token(self.cur_token(), "expect an identifier"))
+            Err(error_token(self.cur_token(), "expect an identifier"))
         }
     }
 
@@ -654,7 +654,7 @@ impl Parser {
             let expr = Expr::new(Number(n), span);
             return Ok(expr);
         } else {
-            return Err(self.error_token(self.cur_token(), "expect a number"));
+            return Err(error_token(self.cur_token(), "expect a number"));
         }
     }
 
@@ -663,7 +663,7 @@ impl Parser {
         if let Num(n) = cur_token.kind {
             return Ok(n);
         } else {
-            return Err(self.error_token(self.cur_token(), "expect a number"));
+            return Err(error_token(self.cur_token(), "expect a number"));
         }
     }
 
@@ -693,7 +693,7 @@ impl Parser {
                 let content = ExprType::Assign(Box::new(lhs), Box::new(val));
                 Ok(Expr::new(content, span))
             },
-            _ => Err(self.error_span(lhs.span, "not a lvalue name")),
+            _ => Err(error_span(lhs.span, "not a lvalue name")),
         }
     }
 
@@ -743,7 +743,7 @@ impl Parser {
                 _ => {
                     let err_msg = format!("parsing function call error: expect comma as arguments separator or RParen
                     as enclosing of args list, but got {:?} kind token\n", cur_tok.kind);
-                    return Err(self.error_token(cur_tok, err_msg.as_str()));
+                    return Err(error_token(cur_tok, err_msg.as_str()));
                 }
             }
         }
@@ -760,27 +760,30 @@ impl Parser {
             Ok(Function{name: declarator.name, name_span: declarator.span, return_type,
                 star_count: declarator.star_count, params: params.clone(), items})
         } else {
-            Err(self.error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
+            Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
     }
 
-    fn error_token(&self, tok: &Token, info: &str) -> String {
-        self.error_span(tok.span, info)
-    }
+}
 
-    fn error_span(&self, span: Span, info: &str) -> String {
-        let (start_line, satart_column, end_line, end_column) = span.locate();
-        let start_line_content = get_src_content_at_line(start_line);
-        let mut err_msg = String::new();
-        err_msg.push_str(&start_line_content);
-        err_msg.push_str("\n");
-        let spaces = " ".repeat(satart_column - 1);
-        let arrows = if start_line == end_line {
-            "^".repeat(span.end_index - span.start_index + 1)
-        } else {
-            "^".to_string()
-        };
-        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
-        err_msg
-    }
+fn error_span(span: Span, info: &str) -> String {
+    let mut err_msg = String::new();
+    let (start_line, start_column, end_line, end_column) = span.locate();
+    let extended_error_info = format!(":{}:{}: {}\n", start_line, start_column, info.red());
+    err_msg.push_str(&extended_error_info);
+    let start_line_content = get_src_content_at_line(start_line);
+    err_msg.push_str(&start_line_content);
+    err_msg.push_str("\n");
+    let spaces = " ".repeat(start_column - 1);
+    let arrows = if start_line == end_line {
+        "^".repeat(span.end_index - span.start_index + 1)
+    } else {
+        "^".to_string()
+    };
+    err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
+    err_msg
+}
+
+fn error_token(tok: &Token, info: &str) -> String {
+    error_span(tok.span, info)
 }
