@@ -18,6 +18,7 @@ use crate::codegen::*;
 use std::sync::Mutex;
 
 static SRC: Mutex<String> = Mutex::new(String::new());
+static INPUT_PATH: Mutex<String> = Mutex::new(String::new());
 static LINE_STARTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 fn usage(status: i32) -> ! {
@@ -57,7 +58,6 @@ fn parse_args(args: &[String]) -> (Option<String>, String) {
             eprintln!("unknown argument: {}", arg);
             exit(1);
         }
-
         input_path = Some(arg.clone());
         i += 1;
     }
@@ -84,6 +84,7 @@ fn build_line_starts(src: &str) -> Vec<usize> {
 fn main() {
     let args: Vec<String> = env::args().collect();
     let (opt_o, path) = parse_args(&args);
+    *INPUT_PATH.lock().unwrap() = path.clone();
 
     let input = if path == "-" {
         let mut buf = String::new();

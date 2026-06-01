@@ -10,6 +10,7 @@ use crate::Function;
 use crate::Obj;
 use crate::Type::{self, *};
 use crate::SRC;
+use crate::INPUT_PATH;
 use crate::ir::{self, *};
 use crate::analyze::{self, *};
 
@@ -79,6 +80,7 @@ impl Generator {
     }
 
     pub fn gen_code(&mut self) {
+        emit!(".file 1 \"{}\"", INPUT_PATH.lock().unwrap());
         for global_decl in &self.aprogram_r.global_decls {
             emit!("  .data");
             emit!("  .globl {}", global_decl.obj.name);
@@ -188,6 +190,7 @@ impl Generator {
     }
 
     fn expr_gen(&self, expr: &ir::Expr) {
+        emit!("  .loc 1 {}", expr.span.get_start_line());
         let content = &expr.content;
         match content {
             Number(n) => emit!("  mov ${}, %rax", n),
