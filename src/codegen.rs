@@ -194,6 +194,10 @@ impl Generator {
         let content = &expr.content;
         match content {
             Number(n) => emit!("  mov ${}, %rax", n),
+            CommaExpression(lhs, rhs) => {
+                self.expr_gen(lhs);
+                self.expr_gen(rhs);
+            }
             Binary(lhs, rhs, kind) => {
                 self.expr_gen(rhs);
                 emit!("  push %rax");
@@ -305,6 +309,10 @@ impl Generator {
             },
             Deref(expr) => {
                 self.expr_gen(expr);
+            },
+            CommaExpression(lhs, rhs) => {
+                self.expr_gen(lhs);
+                self.gen_addr(rhs);
             },
             _ => {
                 let err_msg = self.error_expr(expr, "can't get addr of this expr");

@@ -2,3 +2,6 @@
 1. Common structs or utility function should be stored in a common file.
 2. Location struct change: only keep start and end index, the line number is calculated by the index.
 3. Add global variable.
+
+
+don't parse comma expression while parsing declarations!!!!!

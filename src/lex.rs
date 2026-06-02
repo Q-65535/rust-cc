@@ -64,6 +64,7 @@ use TypeSpecifier::*;
 #[derive(PartialEq, PartialOrd)]
 pub enum Precedence {
     Lowest,
+    LV1,
     Assign,
     Comparison,
     PlusMinus,
@@ -82,6 +83,9 @@ pub struct Token {
 impl Token {
     pub fn precedence(&self) -> Precedence {
         match self.kind {
+            Comma => {
+                return Precedence::LV1;
+            }
             Plus | Minus => {
                 return Precedence::PlusMinus;
             }

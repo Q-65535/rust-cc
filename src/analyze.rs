@@ -504,6 +504,13 @@ impl ProgramAnalyzer {
                     }
                 }
             }
+            CommaExpression(lhs, rhs) => {
+                let rhs = self.analyze_expr(rhs);
+                let lhs = self.analyze_expr(lhs);
+                let ty = rhs.ty.clone();
+                let content = ExprType::CommaExpression(Box::new(lhs), Box::new(rhs));
+                ir::Expr{content, ty, span}
+            },
             Assign(lhs, rhs) => {
                 let rhs = self.analyze_expr(rhs);
                 let lhs = self.analyze_expr(lhs);
@@ -748,7 +755,7 @@ fn can_assign(left: &Type, right: &Type) -> bool {
 
 fn can_be_lvalue(expr: &ir::Expr) -> bool {
     use ir::ExprType;
-    match expr.content {
+    match &expr.content {
         ExprType::FunCall(_, _) => false,
         ExprType::Ident(_) => {
             if let ArrayOf(_, _) = expr.ty {
@@ -757,6 +764,9 @@ fn can_be_lvalue(expr: &ir::Expr) -> bool {
                 true
             }
         }
+        ExprType::CommaExpression(_, rhs) => {
+            return can_be_lvalue(rhs);
+        },
 		_ => true,
     }
 }

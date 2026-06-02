@@ -115,6 +115,7 @@ pub enum ExprType {
     AddrOf(Box<Expr>),
     Ident(String),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
+    CommaExpression(Box<Expr>, Box<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
     Sizeof(Box<Expr>),
     Str(Vec<u8>),
@@ -505,6 +506,10 @@ impl Parser {
                             self.next_token();
                             expr = self.parse_infix(expr)?;
                         },
+                        Comma => {
+                            self.next_token();
+                            expr = self.parse_comma_expression(expr)?;
+                        },
                         LParen => {
                             self.next_token();
                             expr = self.parse_funcall(expr)?;
@@ -683,7 +688,7 @@ impl Parser {
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
         let tok = self.cur_token().clone();
         match lhs.content {
-            Ident(_) | Deref(_) | ArrayIndexing(_, _) => {
+            Ident(_) | Deref(_) | ArrayIndexing(_, _) | Paren(_) => {
                 self.next_token();
                 let val = self.parse_expr(Lowest)?;
                 let span = Span {
@@ -693,12 +698,22 @@ impl Parser {
                 let content = ExprType::Assign(Box::new(lhs), Box::new(val));
                 Ok(Expr::new(content, span))
             },
-            _ => Err(error_span(lhs.span, "not a lvalue name")),
+            _ => Err(error_span(lhs.span, "definitely not a lvalue name")),
         }
     }
 
+    fn parse_comma_expression(&mut self, lhs:Expr) -> Result<Expr, String> {
+        let start_index = lhs.span.start_index;
+        self.next_token(); // skip ','
+        let rhs = self.parse_expr(Lowest)?;
+        let end_index = rhs.span.end_index;
+        let span = Span {start_index, end_index};
+        let content = ExprType::CommaExpression(Box::new(lhs), Box::new(rhs));
+        return Ok(Expr::new(content, span));
+    }
+
     fn parse_funcall(&mut self, lhs:Expr) -> Result<Expr, String> {
-        let start_index = self.cur_token().span.start_index;
+        let start_index = lhs.span.start_index;
         let args_list = self.parse_args()?;
         let end_index = self.cur_token().span.end_index;
         let span = Span {start_index, end_index};

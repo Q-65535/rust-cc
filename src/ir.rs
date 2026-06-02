@@ -21,6 +21,7 @@ pub enum ExprType {
     AddrOf(Box<Expr>),
     Ident(Obj),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
+    CommaExpression(Box<Expr>, Box<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
     StmtExpr(Vec<StmtType>),
 }
