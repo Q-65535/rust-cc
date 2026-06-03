@@ -61,16 +61,33 @@ pub enum TypeSpecifier {
 }
 use TypeSpecifier::*;
 
-#[derive(PartialEq, PartialOrd)]
+#[repr(u8)]
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub enum Precedence {
     Lowest,
     LV1,
-    Assign,
-    Comparison,
-    PlusMinus,
-    MulDiv,
-    Funcall,
-    Prefix,
+    LV2,
+    LV3,
+    LV4,
+    LV5,
+    LV6,
+    LV7,
+}
+
+impl std::ops::Sub<u8> for Precedence {
+    type Output = Precedence;
+    fn sub(self, rhs: u8) -> Precedence {
+        match (self as u8).saturating_sub(rhs) {
+            0 => Precedence::Lowest,
+            1 => Precedence::LV1,
+            2 => Precedence::LV2,
+            3 => Precedence::LV3,
+            4 => Precedence::LV4,
+            5 => Precedence::LV5,
+            6 => Precedence::LV6,
+            _ => Precedence::LV7,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,25 +99,19 @@ pub struct Token {
 
 impl Token {
     pub fn precedence(&self) -> Precedence {
-        match self.kind {
-            Comma => {
-                return Precedence::LV1;
-            }
-            Plus | Minus => {
-                return Precedence::PlusMinus;
-            }
-            Mul | Div => {
-                return Precedence::MulDiv;
-            }
-            Compare(_) => {
-                return Precedence::Comparison;
-            },
-            Assignment => Precedence::Assign,
-            LParen | LSqureBracket => Precedence::Funcall,
-            _ => {
-                return Precedence::Lowest;
-            }
-        }
+        return precedence(&self.kind);
+    }
+}
+
+pub fn precedence(kind: &TokenKind) -> Precedence {
+    return match kind {
+        Comma => Precedence::LV1,
+        Assignment => Precedence::LV2,
+        Compare(_) => Precedence::LV3,
+        Plus | Minus => Precedence::LV4,
+        Mul | Div => Precedence::LV5,
+        LParen | LSqureBracket => Precedence::LV6,
+        _ => Precedence::Lowest,
     }
 }
 

@@ -266,8 +266,9 @@ impl Parser {
             self.next_token();
             let mut init_expr = None;
             if let Assignment = self.cur_token().kind {
+                let assignment_token = self.cur_token().clone();
                 self.next_token();
-                let expr = self.parse_expr(Lowest)?;
+                let expr = self.parse_expr(assignment_token.precedence())?;
                 self.next_token();
                 init_expr = Some(expr);
             }
@@ -690,7 +691,8 @@ impl Parser {
         match lhs.content {
             Ident(_) | Deref(_) | ArrayIndexing(_, _) | Paren(_) => {
                 self.next_token();
-                let val = self.parse_expr(Lowest)?;
+                // Here we use right associatve rule when parsing assignment.
+                let val = self.parse_expr(tok.precedence() - 1)?;
                 let span = Span {
                     start_index: lhs.span.start_index,
                     end_index: val.span.end_index,
@@ -747,7 +749,10 @@ impl Parser {
         // skip LParen
         self.next_token();
         while(self.cur_token().kind != RParen) {
-            let expr = self.parse_expr(Lowest)?;
+            // The comma here is an argument separator, not a comma operator.
+            // parse_expr returns when peek's precedence is <= the passed precedence,
+            // so passing Comma precedence makes it stop right at the next separator.
+            let expr = self.parse_expr(precedence(&Comma))?;
             args.push(expr);
             self.next_token();
             let cur_tok = self.cur_token();

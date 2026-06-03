@@ -40,6 +40,11 @@ test/%.exe: build test/%.c
 	$(CC) -o- -E -P -C test/$*.c | $(RUST_CC) -o test/$*.s -
 	$(CC) -o $@ test/$*.s -xc test/common
 
+# For testing a single file:
+# test/arith.exe: build test/arith.c
+# 	$(CC) -o- -E -P -C test/arith.c | $(RUST_CC) -o test/arith.s -
+# 	$(CC) -o test/arith.exe test/arith.s -xc test/common
+
 # `make test`: build every .exe (via the $(TESTS) prerequisites), run each,
 # then run the CLI-level driver.
 # $^ = all prerequisites (the .exe list). `|| exit 1` stops at the first

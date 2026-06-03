@@ -13,6 +13,7 @@ use crate::SRC;
 use crate::INPUT_PATH;
 use crate::ir::{self, *};
 use crate::analyze::{self, *};
+use crate::common::{self, *};
 
 // Where generated assembly is written.
 enum Output {
@@ -282,16 +283,6 @@ impl Generator {
         self.lable_count.get()
     }
 
-    fn error_expr(&self, expr: &Expr, info: &str) -> String {
-        let mut err_msg = String::from("");
-        let src_str: &str = &SRC.lock().unwrap().to_string();
-        err_msg.push_str(&format!("{}\n", src_str));
-        let spaces = " ".repeat(expr.span.start_index);
-        let arrows = "^".repeat(expr.span.end_index - expr.span.start_index);
-        err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
-        err_msg
-    }
-
     fn gen_addr_by_name(&self, name: &str) {
         let obj = self.cur_afun().scope_tracker.resolve_symbol(name).unwrap();
         emit!("  lea {}(%rbp), %rax", -self.cur_afun().stack_size+obj.offset);
@@ -315,8 +306,9 @@ impl Generator {
                 self.gen_addr(rhs);
             },
             _ => {
-                let err_msg = self.error_expr(expr, "can't get addr of this expr");
+                let err_msg = error_expr(expr, "can't get addr of this expr");
                 eprintln!("{}", err_msg);
+                exit(1);
             },
         }
     }
@@ -356,4 +348,23 @@ fn align_to(n: i32, align: i32) -> i32 {
         0 => base,
         _ => base + align,
     }
+}
+
+fn error_expr(expr: &Expr, info: &str) -> String {
+    let span = expr.span;
+    let mut err_msg = String::new();
+    let (start_line, start_column, end_line, end_column) = span.locate();
+    let extended_error_info = format!(":{}:{}: {}\n", start_line, start_column, info.red());
+    err_msg.push_str(&extended_error_info);
+    let start_line_content = get_src_content_at_line(start_line);
+    err_msg.push_str(&start_line_content);
+    err_msg.push_str("\n");
+    let spaces = " ".repeat(start_column - 1);
+    let arrows = if start_line == end_line {
+        "^".repeat(span.end_index - span.start_index + 1)
+    } else {
+        "^".to_string()
+    };
+    err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
+    err_msg
 }

@@ -57,13 +57,14 @@ pub fn print_tokens(tokens: &[Token]) {
 
     for tok in tokens {
         let (kind_str, colour) = token_kind_label(&tok.kind);
-        let lexeme = &tok.val;
+        let lexeme = tok.val.escape_debug().to_string();
         let line   = tok.span.get_start_line();
         let col    = tok.span.start_index;
 
+        let lex_disp: String = lexeme.chars().take(LEXEME_W).collect();
         println!(
             "│ {colour}{:<tw$}{RESET} │ {DIM}{:<lw$}{RESET} │ {line:>6} │ {col:>6} │",
-            kind_str, lexeme,
+            kind_str, lex_disp,
             tw = TYPE_W, lw = LEXEME_W
         );
     }
@@ -76,6 +77,7 @@ fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
         TokenKind::Keyword(_)        => ("Keyword",   BLUE),
         TokenKind::LexIdent(_)       => ("Ident",     CYAN),
         TokenKind::Num(_)            => ("Number",    GREEN),
+        TokenKind::StringLiteral(_)  => ("String",    GREEN),
         TokenKind::Plus              => ("Plus",      YELLOW),
         TokenKind::Minus             => ("Minus",     YELLOW),
         TokenKind::Mul               => ("Mul",       YELLOW),
@@ -93,7 +95,6 @@ fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
         TokenKind::Semicolon         => ("Semicolon", DIM),
         TokenKind::Comma             => ("Comma",     DIM),
         TokenKind::Eof               => ("EOF",       RED),
-        _ => todo!(),
     }
 }
 
@@ -329,6 +330,24 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
             println!("{prefix}{conn}{YELLOW}Paren{RESET}");
             print_expr(inner, &child_prefix(prefix, is_last), true);
         }
+        ExprType::CommaExpression(lhs, rhs) => {
+            println!("{prefix}{conn}{YELLOW}Comma{RESET}");
+            let cp = child_prefix(prefix, is_last);
+            print_expr(lhs, &cp, false);
+            print_expr(rhs, &cp, true);
+        }
+        ExprType::Str(bytes) => {
+            let s = String::from_utf8_lossy(bytes);
+            println!("{prefix}{conn}{GREEN}Str{RESET}({DIM}\"{}\"{RESET})", s.escape_debug());
+        }
+        ExprType::StmtExpr(items) => {
+            println!("{prefix}{conn}{YELLOW}StmtExpr{RESET}");
+            let cp = child_prefix(prefix, is_last);
+            let ic = items.len();
+            for (i, item) in items.iter().enumerate() {
+                print_block_item(item, &cp, i + 1 == ic);
+            }
+        }
         ExprType::FunCall(callee, args) => {
             println!("{prefix}{conn}{YELLOW}FunCall{RESET}");
             let cp = child_prefix(prefix, is_last);
@@ -343,7 +362,6 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
                 }
             }
         }
-        _ => println!("print expr not yet supported"),
     }
 }
 
