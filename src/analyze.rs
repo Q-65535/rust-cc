@@ -21,6 +21,7 @@ pub enum Type {
     ArrayOf(Box<Type>, i32),
     // function return ... type
     TyFunc(Box<Type>),
+    TyStruct(ir::Struct),
     ty_none,
 }
 use Type::*;
@@ -32,6 +33,13 @@ pub fn sizeof(ty: &Type) -> i32 {
         TyChar => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         TyFunc(_) => 8,
+        TyStruct(st) => {
+            let mut len = 0;
+            for m in &st.members {
+                len += sizeof(&m.ty);
+            }
+            len
+        },
         ty_none => 8,
     }
 }
@@ -166,11 +174,7 @@ impl ProgramAnalyzer {
 
     pub fn analyze_global_decl(&mut self, mut decl: Declaration) -> Vec::<ir::Declaration> {
         let mut decls: Vec<ir::Declaration> = Vec::new();
-        let base_type: Type;
-        match &decl.decl_spec {
-            SpecInt => base_type = TyInt,
-            SpecChar => base_type = TyChar,
-        }
+        let base_type = self.analyze_decl_spec(&decl.decl_spec);
         for init in &mut decl.init_declarators {
             if let Some(_) = self.global_scope.resolve_symbol(&init.declarator.name) {
                 let err_info = format!("global variable {} already defined", init.declarator.name);
@@ -228,11 +232,8 @@ impl ProgramAnalyzer {
     }
 
     pub fn analyze_function(&mut self, mut fun: Function) -> ir::Function {
-        let base = match &fun.return_type {
-            SpecInt => TyInt,
-            SpecChar => TyChar,
-        };
-        let mut return_type = base;
+        let base_type = self.analyze_decl_spec(&fun.return_type);
+        let mut return_type = base_type;
         for i in 0..fun.star_count {
             return_type = pointer_to(&return_type);
         }
@@ -284,11 +285,7 @@ impl ProgramAnalyzer {
 
 
     fn analyze_param(&mut self, param: &Parameter) {
-        let base_type: Type;
-        match &param.decl_spec {
-            SpecInt => base_type = TyInt,
-            SpecChar => base_type = TyChar,
-        }
+        let base_type = self.analyze_decl_spec(&param.decl_spec);
         let mut cur_type = base_type.clone();
         for _ in 0..param.declarator.star_count {
             cur_type = pointer_to(&cur_type);
@@ -306,11 +303,7 @@ impl ProgramAnalyzer {
     // after analyze, declarations are all resolved to creating obj and assignment statement.
     fn analyze_decl(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
-        let base_type: Type;
-        match &decl.decl_spec {
-            SpecInt => base_type = TyInt,
-            SpecChar => base_type = TyChar,
-        }
+        let base_type = self.analyze_decl_spec(&decl.decl_spec);
         for init in &mut decl.init_declarators {
             if let Some(_) = self.cur_scope_tracker.resolve_symbol_at_current_scope(&init.declarator.name) {
                 let err_info = format!("variable {} already defined", init.declarator.name);
@@ -347,14 +340,37 @@ impl ProgramAnalyzer {
                     let content = ir::ExprType::Assign(Box::new(expr), Box::new(analyzed_expr));
                     let generated_expr = ir::Expr{content, ty: obj.ty, span: init.declarator.span};
                     let generated_stmt = ir::StmtType::Ex(generated_expr);
-                    // if let ir::StmtType::Ex{..} = generated_stmt {
-                    //     println!("aaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-                    // }
                     stmts.push(generated_stmt);
                 }
             }
         }
         stmts
+    }
+
+    fn analyze_decl_spec(&mut self, decl_spec: &DeclarationSpecifier) -> Type {
+        match decl_spec {
+            SpecInt => TyInt,
+            SpecChar => TyChar,
+            SpecStruct(st) => {
+                let analyzed_struct = self.analyze_struct(st);
+                TyStruct(analyzed_struct)
+            },
+        }
+    }
+
+    fn analyze_struct(&mut self, st: &Struct) -> ir::Struct {
+        let mut analyzed_members = Vec::new();
+        for m in &st.members {
+            let am = self.analyze_struct_member(m);
+            analyzed_members.push(am);
+        }
+        ir::Struct{members: analyzed_members}
+    }
+
+    fn analyze_struct_member(&mut self, st: &Member) -> ir::Member {
+        let base_ty = self.analyze_decl_spec(&st.decl_spec);
+        todo!();
+
     }
 
     fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {

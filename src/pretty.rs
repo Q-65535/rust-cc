@@ -94,6 +94,7 @@ fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
         TokenKind::RSqureBracket     => ("RBracket",  DIM),
         TokenKind::Semicolon         => ("Semicolon", DIM),
         TokenKind::Comma             => ("Comma",     DIM),
+        TokenKind::Period            => ("Period",    DIM),
         TokenKind::Eof               => ("EOF",       RED),
     }
 }
@@ -371,6 +372,7 @@ fn decl_spec_str(ds: &DeclarationSpecifier) -> &'static str {
     match ds {
         DeclarationSpecifier::SpecInt => "int",
         DeclarationSpecifier::SpecChar => "char",
+        DeclarationSpecifier::SpecStruct(_) => "struct",
     }
 }
 

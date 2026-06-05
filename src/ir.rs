@@ -50,7 +50,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
     pub return_type: Type,
@@ -60,10 +60,21 @@ pub struct Function {
     pub stack_size: i32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub obj: Obj,
     pub init_value: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Struct {
+    pub members: Vec<Member>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Member {
+    pub ty: Type,
+    pub name: String,
 }
 
 pub struct AnalyzedProgram {

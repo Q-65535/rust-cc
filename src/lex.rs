@@ -7,6 +7,7 @@ use crate::common::{self, *};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
+    Period,
     Plus,
     Minus,
     Mul,
@@ -50,6 +51,7 @@ pub enum KeywordToken {
     For,
     While,
     Sizeof,
+    Struct,
     TypeSpecifier(TypeSpecifier),
 }
 use KeywordToken::*;
@@ -143,6 +145,7 @@ impl Lexer {
             ("while".to_string(), Keyword(While)),
             ("int".to_string(), Keyword(TypeSpecifier(Int))),
             ("sizeof".to_string(), Keyword(KeywordToken::Sizeof)),
+            ("struct".to_string(), Keyword(KeywordToken::Struct)),
             ("char".to_string(), Keyword(TypeSpecifier(Char))),
         ].into_iter().collect();
         Lexer{
@@ -209,6 +212,7 @@ impl Lexer {
             let start_index = self.index;
             match c {
                 ' ' | '\t' | '\n' | '\r' => (),
+                '.' => tokens.push(Self::gen_token(Period, ".", start_index, 1)),
                 ';' => tokens.push(Self::gen_token(Semicolon, ";", start_index, 1)),
                 ',' => tokens.push(Self::gen_token(Comma, ",", start_index, 1)),
                 '+' => tokens.push(Self::gen_token(Plus, "+", start_index, 1)),

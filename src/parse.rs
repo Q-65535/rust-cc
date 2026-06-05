@@ -10,7 +10,7 @@ use crate::Type::{self, *};
 use crate::SRC;
 use crate::common::{self, *};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StmtType {
     Ex(Expr),
     Return(Expr),
@@ -20,14 +20,14 @@ pub enum StmtType {
 }
 use StmtType::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     pub cond: Expr,
     pub then: Box<StmtType>,
     pub otherwise: Option<Box<StmtType>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
     pub init: Option<Expr>,
     pub cond: Option<Expr>,
@@ -35,14 +35,14 @@ pub struct ForStmt {
     pub then: Box<StmtType>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockItem {
     Stmt(StmtType),
     Decl(Declaration),
 }
 use BlockItem::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorSuffix {
     ArrayLen(Vec<i32>),
     FunParam(Vec<Parameter>),
@@ -50,7 +50,7 @@ pub enum DeclaratorSuffix {
 use DeclaratorSuffix::*;
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TranslationUnit {
     FunctionDef(Function),
     GlobalDecl(Declaration),
@@ -62,7 +62,7 @@ pub struct Program {
     pub translation_units: Vec<TranslationUnit>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
     pub name_span: Span,
@@ -72,32 +72,46 @@ pub struct Function {
     pub items: Vec<BlockItem>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
     pub decl_spec: DeclarationSpecifier,
     pub declarator: Declarator,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub decl_spec: DeclarationSpecifier,
     pub init_declarators: Vec<InitDeclarator>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Struct {
+    pub members: Vec<Member>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Member {
+    pub decl_spec: DeclarationSpecifier,
+    pub declarator: Declarator,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+// @Rename: Actually, this should be renamed to TypeSpecifier.
+// DeclarationSpecifier includes TypeSpecifier.
 pub enum DeclarationSpecifier {
     SpecInt,
     SpecChar,
+    SpecStruct(Struct),
 }
 use DeclarationSpecifier::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InitDeclarator {
     pub declarator: Declarator,
     pub init_expr: Option<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
     pub star_count: i32,
     pub name: String,
@@ -105,7 +119,7 @@ pub struct Declarator {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
     Number(i32),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
@@ -127,7 +141,7 @@ pub enum ExprType {
     StmtExpr(Vec<BlockItem>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
     pub content: ExprType,
     pub span: Span,
@@ -217,7 +231,7 @@ impl Parser {
         }
     }
 
-    fn check_skip_peek(&mut self, target: &TokenKind) -> Result<(), String> {
+    fn jump_over_next(&mut self, target: &TokenKind) -> Result<(), String> {
         if let Err(err) = self.check_jumpto_peek(target) {
             return Err(err)
         } else {
@@ -296,11 +310,30 @@ impl Parser {
         match kind {
             Keyword(TypeSpecifier(Int)) => Ok(SpecInt),
             Keyword(TypeSpecifier(Char)) => Ok(SpecChar),
+            Keyword(Struct) => {
+                let struct_spec = self.parse_struct_specifier()?;
+                Ok(SpecStruct(struct_spec))
+            },
             _ => {
                 let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
                 return Err(err_msg);
             }
         }
+    }
+
+    fn parse_struct_specifier(&mut self) -> Result<Struct, String> {
+        self.check_skip_current(&Keyword(Struct));
+        self.check_skip_current(&LBrace);
+        let mut members = Vec::new();
+        loop {
+            let decl_spec = self.parse_decl_spec()?;
+            self.next_token();
+            let declarator = self.parse_declarator()?;
+            self.jump_over_next(&Semicolon)?;
+            let m = Member{decl_spec, declarator};
+            members.push(m);
+        }
+        Ok(Struct{members})
     }
 
     fn parse_declarator(&mut self) -> Result<Declarator, String> {
@@ -323,7 +356,7 @@ impl Parser {
                 LSqureBracket => {
                     let mut lens: Vec<i32> = Vec::new();
                     while &self.peek_token().kind == &LSqureBracket {
-                        self.check_skip_peek(&LSqureBracket);
+                        self.jump_over_next(&LSqureBracket);
                         let cur_array_len: i32 = self.parse_raw_integer()?;
                         lens.push(cur_array_len);
                         self.expect_peek(&RSqureBracket);
@@ -334,7 +367,7 @@ impl Parser {
                 // function parameters
                 LParen => {
                     let mut params: Vec<Parameter> = Vec::new();
-                    self.check_skip_peek(&LParen);
+                    self.jump_over_next(&LParen);
                     while self.cur_token().kind != RParen {
                         if &self.cur_token().kind == &Comma {
                             self.next_token();
@@ -374,10 +407,10 @@ impl Parser {
     }
 
     fn parse_if_stmt(&mut self) -> Result<IfStmt, String> {
-        self.check_skip_peek(&LParen)?;
+        self.jump_over_next(&LParen)?;
         // parse condition
         let cond = self.parse_expr(Lowest)?;
-        self.check_skip_peek(&RParen)?;
+        self.jump_over_next(&RParen)?;
         // parse then
         let then = Box::new(self.parse_stmt()?);
         self.next_token();
@@ -400,7 +433,7 @@ impl Parser {
             let item: BlockItem;
             // @Future: if the token kind is a declaration-specifier (i.e., storage-class-specifier,
             // type-specifier or function-specifier), we parse decl.
-            if matches!(cur_kind, Keyword(TypeSpecifier(_))) {
+            if matches!(cur_kind, Keyword(Struct | TypeSpecifier(_))) {
                 item = Decl(self.parse_decl()?);
             } else {
                 item = Stmt(self.parse_stmt()?);
@@ -424,7 +457,7 @@ impl Parser {
     }
 
     fn parse_for_stmt(&mut self) -> Result<ForStmt, String> {
-        self.check_skip_peek(&LParen)?;
+        self.jump_over_next(&LParen)?;
         let init: Option<Expr>;
         let cond: Option<Expr>;
         let inc: Option<Expr>;
@@ -435,7 +468,7 @@ impl Parser {
             },
             _ => {
                 let expr = self.parse_expr(Lowest)?;
-                self.check_skip_peek(&Semicolon)?;
+                self.jump_over_next(&Semicolon)?;
                 Some(expr)
             },
         };
@@ -446,7 +479,7 @@ impl Parser {
             },
             _ => {
                 let expr = self.parse_expr(Lowest)?;
-                self.check_skip_peek(&Semicolon)?;
+                self.jump_over_next(&Semicolon)?;
                 Some(expr)
             },
         };
@@ -457,7 +490,7 @@ impl Parser {
             },
             _ => {
                 let expr = self.parse_expr(Lowest)?;
-                self.check_skip_peek(&RParen)?;
+                self.jump_over_next(&RParen)?;
                 Some(expr)
             },
         };
@@ -468,7 +501,7 @@ impl Parser {
     }
 
     fn parse_while_stmt(&mut self) -> Result<ForStmt, String> {
-        self.check_skip_peek(&LParen)?;
+        self.jump_over_next(&LParen)?;
         let cond: Option<Expr>;
         cond = match self.cur_token().kind {
             RParen => {
@@ -477,7 +510,7 @@ impl Parser {
             },
             _ => {
                 let expr = self.parse_expr(Lowest)?;
-                self.check_skip_peek(&RParen)?;
+                self.jump_over_next(&RParen)?;
                 Some(expr)
             },
         };
@@ -727,7 +760,7 @@ impl Parser {
         let prime_token = self.cur_token().clone();
         let mut indices: Vec<Expr> = Vec::new();
         while self.peek_token().kind == LSqureBracket {
-            self.check_skip_peek(&LSqureBracket);
+            self.jump_over_next(&LSqureBracket);
             let cur_index = self.parse_expr(Lowest)?;
             indices.push(cur_index);
             self.expect_peek(&RSqureBracket);
