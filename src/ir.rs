@@ -19,6 +19,8 @@ pub enum ExprType {
     Neg(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
+    RequestStructMember(Box<Expr>, i32),
+    // SymbolRef(Obj),
     Ident(Obj),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
     CommaExpression(Box<Expr>, Box<Expr>),
@@ -71,10 +73,38 @@ pub struct Struct {
     pub members: Vec<Member>,
 }
 
+impl Struct {
+    pub fn has_member(&self, name: &String) -> bool {
+        for m in &self.members {
+            if m.name == *name {
+                return true;
+            }
+        }
+        return false;
+    }
+    pub fn get_member(&self, name: &String) -> Result<Member, String> {
+        for m in &self.members {
+            if m.name == *name {
+                return Ok(m.clone());
+            }
+        }
+        let err_msg = format!("semantic error: cannot find struct member {:?}", name);
+        return Err(err_msg);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
     pub ty: Type,
     pub name: String,
+    pub offset: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestStructMember {
+    pub ty: Type,
+    pub name: String,
+    pub offset: i32,
 }
 
 pub struct AnalyzedProgram {

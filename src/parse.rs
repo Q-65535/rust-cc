@@ -128,7 +128,9 @@ pub enum ExprType {
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
     Ident(String),
+    // ArrayIndexing(ref: Box<Expr>, index: Box<Expr>),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
+    RequestStructMember(Box<Expr>, String),
     CommaExpression(Box<Expr>, Box<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
     Sizeof(Box<Expr>),
@@ -183,7 +185,7 @@ impl Parser {
         let mut index = self.cur_index;
         while self.tokens[index].kind != Semicolon {
             if self.tokens[index].kind == Eof {
-                let err_msg = format!("parsing error: expect '{{' or ';', but got Eof");
+                let err_msg = format!("parsing error: find_LBrace_before_encounter_semicolon: expect '{{' or ';', but got Eof");
                 return Err(error_token(self.cur_token(), err_msg.as_str()));
             }
             if self.tokens[index].kind == LBrace {return Ok(true)};
@@ -197,7 +199,7 @@ impl Parser {
             self.next_token();
             Ok(())
         } else {
-            let err_msg = format!("parsing error: expect {:?} kind token, but got {:?} kind token\n", expect_cur, self.cur_token().kind);
+            let err_msg = format!("parsing error: skip_cur_token: expect {:?} kind token, but got {:?} kind token\n", expect_cur, self.cur_token().kind);
             return Err(error_token(self.cur_token(), err_msg.as_str()));
         }
     }
@@ -219,14 +221,14 @@ impl Parser {
             self.next_token();
             return Ok(self.cur_token());
         } else {
-            let err_msg = format!("parsing error: expect {:?} kind token, but got {:?} kind token\n", expect, peek.kind);
+            let err_msg = format!("parsing error: expect_peek: expect {:?} kind token, but got {:?} kind token\n", expect, peek.kind);
             return Err(error_token(peek, err_msg.as_str()));
         }
     }
 
     fn check_jumpto_peek(&mut self, target: &TokenKind) -> Result<(), String> {
         match self.expect_peek(target) {
-            Err(err_msg) => return Err(err_msg),
+            Err(err_msg) => return Err("check_jumpto_peek ".to_string() + &err_msg),
             _ => Ok(()),
         }
     }
@@ -326,12 +328,23 @@ impl Parser {
         self.check_skip_current(&LBrace);
         let mut members = Vec::new();
         loop {
+            if self.cur_token().kind == RBrace {
+                break;
+            }
             let decl_spec = self.parse_decl_spec()?;
             self.next_token();
-            let declarator = self.parse_declarator()?;
+            // parse declarators separated by ','
+            loop {
+                let declarator = self.parse_declarator()?;
+                let m = Member{decl_spec: decl_spec.clone(), declarator};
+                members.push(m);
+                if self.peek_token().kind == Comma {
+                    self.jump_over_next(&Comma)?;
+                } else {
+                    break;
+                }
+            }
             self.jump_over_next(&Semicolon)?;
-            let m = Member{decl_spec, declarator};
-            members.push(m);
         }
         Ok(Struct{members})
     }
@@ -555,6 +568,10 @@ impl Parser {
                             self.next_token();
                             expr = self.parse_assign(expr)?;
                         }
+                        Period => {
+                            self.next_token();
+                            expr = self.parse_request_struct_member(expr)?;
+                        }
                         Eof | RParen => {
                             break;
                         },
@@ -722,7 +739,8 @@ impl Parser {
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
         let tok = self.cur_token().clone();
         match lhs.content {
-            Ident(_) | Deref(_) | ArrayIndexing(_, _) | Paren(_) => {
+            Ident(_) | Deref(_) | ArrayIndexing(_, _) |
+            Paren(_) | RequestStructMember(_, _) => {
                 self.next_token();
                 // Here we use right associatve rule when parsing assignment.
                 let val = self.parse_expr(tok.precedence() - 1)?;
@@ -734,6 +752,33 @@ impl Parser {
                 Ok(Expr::new(content, span))
             },
             _ => Err(error_span(lhs.span, "definitely not a lvalue name")),
+        }
+    }
+
+    fn parse_request_struct_member(&mut self, lhs: Expr) -> Result<Expr, String> {
+        let start_index = lhs.span.start_index;
+        self.skip_cur_token(&Period);
+        let content: ExprType;
+        match &self.cur_token().kind {
+            LexIdent(name) => {
+                content = ExprType::RequestStructMember(Box::new(lhs), name.clone());
+            },
+            _ => {
+                let err_msg = format!("parsing error: parse_request_struct_member: expect a struct field name, but got {:?} token\n", self.cur_token().kind);
+                return Err(error_token(self.cur_token(), err_msg.as_str()));
+            },
+        }
+        let span = Span{
+            start_index,
+            end_index: self.cur_token().span.end_index,
+        };
+        let expr = Expr::new(content, span);
+
+        if self.peek_token().kind == Period {
+            self.next_token();
+            return self.parse_request_struct_member(expr);
+        } else {
+            return Ok(expr);
         }
     }
 

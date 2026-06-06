@@ -87,7 +87,8 @@ impl std::ops::Sub<u8> for Precedence {
             4 => Precedence::LV4,
             5 => Precedence::LV5,
             6 => Precedence::LV6,
-            _ => Precedence::LV7,
+            7 => Precedence::LV7,
+            _ => todo!(),
         }
     }
 }
@@ -113,6 +114,7 @@ pub fn precedence(kind: &TokenKind) -> Precedence {
         Plus | Minus => Precedence::LV4,
         Mul | Div => Precedence::LV5,
         LParen | LSqureBracket => Precedence::LV6,
+        Period => Precedence::LV7,
         _ => Precedence::Lowest,
     }
 }

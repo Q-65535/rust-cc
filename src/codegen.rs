@@ -252,6 +252,10 @@ impl Generator {
                 self.gen_addr(expr);
                 load_according_to_type(&expr.ty);
             }
+            RequestStructMember(st, offset) => {
+                self.gen_addr(expr);
+                load_according_to_type(&expr.ty);
+            }
             FunCall(func_ref, args) => {
                 match &func_ref.content {
                     Ident(obj) => {
@@ -305,8 +309,12 @@ impl Generator {
                 self.expr_gen(lhs);
                 self.gen_addr(rhs);
             },
+            RequestStructMember(st, offset) => {
+                self.gen_addr(st);
+                emit!("  add ${}, %rax", offset);
+            },
             _ => {
-                let err_msg = error_expr(expr, "can't get addr of this expr");
+                let err_msg = error_expr(expr, "codegen error: can't get addr of this expr");
                 eprintln!("{}", err_msg);
                 exit(1);
             },

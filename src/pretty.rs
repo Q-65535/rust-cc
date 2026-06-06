@@ -349,6 +349,10 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
                 print_block_item(item, &cp, i + 1 == ic);
             }
         }
+        ExprType::RequestStructMember(base, member) => {
+            println!("{prefix}{conn}{YELLOW}Member{RESET}  {DIM}.{member}{RESET}");
+            print_expr(base, &child_prefix(prefix, is_last), true);
+        }
         ExprType::FunCall(callee, args) => {
             println!("{prefix}{conn}{YELLOW}FunCall{RESET}");
             let cp = child_prefix(prefix, is_last);

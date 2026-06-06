@@ -41,9 +41,15 @@ test/%.exe: build test/%.c
 	$(CC) -o $@ test/$*.s -xc test/common
 
 # For testing a single file:
-# test/arith.exe: build test/arith.c
-# 	$(CC) -o- -E -P -C test/arith.c | $(RUST_CC) -o test/arith.s -
-# 	$(CC) -o test/arith.exe test/arith.s -xc test/common
+# test/struct.exe: build test/struct.c
+# 	$(CC) -o- -E -P -C test/struct.c | $(RUST_CC) -o test/struct.s -
+# 	$(CC) -o test/struct.exe test/struct.s -xc test/common
+
+# `make struct`: build and run just the struct.c test.
+test_struct:
+	$(CC) -o- -E -P -C test/struct.c | $(RUST_CC) -o test/struct.s -
+	$(CC) -o struct.exe test/struct.s -xc test/common
+	echo struct.exe; ./struct.exe || exit 1; echo;
 
 # `make test`: build every .exe (via the $(TESTS) prerequisites), run each,
 # then run the CLI-level driver.

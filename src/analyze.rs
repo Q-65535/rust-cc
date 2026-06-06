@@ -40,6 +40,7 @@ pub fn sizeof(ty: &Type) -> i32 {
             }
             len
         },
+        // @TODO This should return 0.
         ty_none => 8,
     }
 }
@@ -300,7 +301,7 @@ impl ProgramAnalyzer {
     }
 
 
-    // after analyze, declarations are all resolved to creating obj and assignment statement.
+    // After analyzation, declarations are all resolved to creating obj and assignment statement.
     fn analyze_decl(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         let base_type = self.analyze_decl_spec(&decl.decl_spec);
@@ -315,12 +316,11 @@ impl ProgramAnalyzer {
                 cur_type = pointer_to(&cur_type);
             }
             // deal with suffix
-            if let Some(suffix) = &mut init.declarator.suffix {
+            if let Some(suffix) = &init.declarator.suffix {
                 match suffix {
                     DeclaratorSuffix::ArrayLen(lens) => {
-                        while lens.len() > 0 {
-                            let len: i32 = lens.pop().unwrap();
-                            cur_type = array_of(&cur_type, len);
+                        for len in lens.iter().rev() {
+                            cur_type = array_of(&cur_type, *len);
                         }
                     }
                     DeclaratorSuffix::FunParam(_) => todo!(),
@@ -360,17 +360,39 @@ impl ProgramAnalyzer {
 
     fn analyze_struct(&mut self, st: &Struct) -> ir::Struct {
         let mut analyzed_members = Vec::new();
+        let mut offset: i32 = 0;
         for m in &st.members {
-            let am = self.analyze_struct_member(m);
+            let am = self.analyze_struct_member(m, offset);
+            // @TODO: struct member alignment
+            offset += sizeof(&am.ty);
             analyzed_members.push(am);
         }
         ir::Struct{members: analyzed_members}
     }
 
-    fn analyze_struct_member(&mut self, st: &Member) -> ir::Member {
-        let base_ty = self.analyze_decl_spec(&st.decl_spec);
-        todo!();
-
+    fn analyze_struct_member(&mut self, member: &Member, offset: i32) -> ir::Member {
+        let base_ty = self.analyze_decl_spec(&member.decl_spec);
+        // deal with pointers
+        let mut cur_type = base_ty.clone();
+        for i in 0..member.declarator.star_count {
+            cur_type = pointer_to(&cur_type);
+        }
+        // deal with suffix
+        if let Some(suffix) = &member.declarator.suffix {
+            match suffix {
+                DeclaratorSuffix::ArrayLen(lens) => {
+                    for len in lens.iter().rev() {
+                        cur_type = array_of(&cur_type, *len);
+                    }
+                }
+                DeclaratorSuffix::FunParam(_) => todo!(),
+            }
+        }
+        ir::Member{
+            ty: cur_type,
+            name: member.declarator.name.clone(),
+            offset,
+        }
     }
 
     fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {
@@ -381,10 +403,9 @@ impl ProgramAnalyzer {
 
 
     // @Naming: Rename it to create_local_obj.
-    fn create_obj(&mut self, base_type: &Type, name: &str) -> Obj {
-        let mut cur_type = base_type.clone();
-        let mut size: i32 = sizeof(base_type);
-        let obj = Obj{name: name.to_string(), ty: cur_type, offset: self.cur_offset, is_global: false};
+    fn create_obj(&mut self, ty: &Type, name: &str) -> Obj {
+        let mut size: i32 = sizeof(ty);
+        let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.cur_offset, is_global: false};
         // @Smell: This line should be executed outside of this function.
         self.cur_offset += size;
         obj
@@ -580,10 +601,33 @@ impl ProgramAnalyzer {
                 } else {
                     let err_info = format!("semantic error: symbol '{}' not found", s);
                     print_error_at(expr.span, &err_info);
+                    // @Watchout: create_obj() changes the offset, which it should not.
                     self.create_obj(&ty_none, &s)
                 };
                 let ty = obj.ty.clone();
                 let content = ExprType::Ident(obj);
+                ir::Expr{content, ty, span}
+            }
+            RequestStructMember(struct_ref, member_name) => {
+                let struct_ref = self.analyze_expr(struct_ref);
+                let mut offset: i32 = 0;
+                let mut ty = ty_none;
+                match &struct_ref.ty {
+                    TyStruct(st) => {
+                        match st.get_member(&member_name) {
+                            Ok(m) => {
+                                offset = m.offset;
+                                ty = m.ty;
+                            },
+                            Err(err) => print_error_at(expr.span, &err),
+                        }
+                    },
+                    _ => {
+                        let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
+                        print_error_at(struct_ref.span, &err_info);
+                    }
+                }
+                let content = ir::ExprType::RequestStructMember(Box::new(struct_ref), offset);
                 ir::Expr{content, ty, span}
             }
             ArrayIndexing(arr_ref, indices) => {
@@ -608,12 +652,12 @@ impl ProgramAnalyzer {
                     } else {
                         // Array indexing is converted to pointer arithmatic and dereferencing
                         // pointer arithmatic.
-                        let size = match &base.ty {
-                                TyPtr(..) => sizeof(&base.ty),
+                        let element_size = match &base.ty {
+                                TyPtr(pointee) => sizeof(pointee),
                                 ArrayOf(element_type, _) => sizeof(element_type),
                                 _ => 8,
                             };
-                        let scaled = scal_expr(&idx, Mul, size);
+                        let scaled = scal_expr(&idx, Mul, element_size);
                         let pointer_arithmatic = ExprType::Binary(Box::new(base.clone()), Box::new(scaled), OP::Plus);
                         let pointer_arithmatic_expr = ir::Expr {
                             content: pointer_arithmatic,
