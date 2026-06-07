@@ -44,7 +44,7 @@ impl Expr {
         }
     }
     // @Naming: is_ptr_or_array
-    pub fn is_ptr(&self) -> bool {
+    pub fn is_pointer_or_array(&self) -> bool {
         match &self.ty {
             TyPtr(_) | ArrayOf(_, _) => true,
             _ => false
@@ -71,6 +71,8 @@ pub struct Declaration {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub members: Vec<Member>,
+    pub size: i32,
+    pub align: i32,
 }
 
 impl Struct {

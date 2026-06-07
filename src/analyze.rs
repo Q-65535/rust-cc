@@ -26,6 +26,22 @@ pub enum Type {
 }
 use Type::*;
 
+impl Type {
+    fn align(&self) -> i32 {
+        match self {
+            TyPtr(_) => 8,
+            TyInt => 8,
+            TyChar => 1,
+            ArrayOf(element_ty, len) => element_ty.align(),
+            TyFunc(_) => 8,
+            TyStruct(st) => {
+                st.align
+            },
+            ty_none => 0,
+        }
+    }
+}
+
 pub fn sizeof(ty: &Type) -> i32 {
     match ty {
         TyPtr(_) => 8,
@@ -34,11 +50,7 @@ pub fn sizeof(ty: &Type) -> i32 {
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         TyFunc(_) => 8,
         TyStruct(st) => {
-            let mut len = 0;
-            for m in &st.members {
-                len += sizeof(&m.ty);
-            }
-            len
+            st.size
         },
         // @TODO This should return 0.
         ty_none => 8,
@@ -158,6 +170,14 @@ impl ProgramAnalyzer {
         for unit in program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
+                    if self.global_scope.resolve_symbol(&fun.name) == None {
+                        let ty = self.analyze_decl_spec(&fun.return_type);
+                        let o = create_global_obj(&fun.name, &ty);
+                        self.global_scope.add_obj(o);
+                    } else {
+                        let err_info = format!("fatal error: parameter variable {} already defined", fun.name);
+                        print_error_at(fun.name_span, &err_info);
+                    }
                     self.cur_offset = 0;
                     self.cur_scope_tracker = ScopeTracker::new(&self.global_scope);
                     self.cur_scope_tracker.enter_new_scope();
@@ -239,17 +259,6 @@ impl ProgramAnalyzer {
             return_type = pointer_to(&return_type);
         }
         let name = fun.name;
-
-        // Add function name to symbol table
-        // @Fix: We should create obj after we are sure that the variable is not defined yet.
-        let obj = self.create_obj(&return_type, &name);
-        if self.cur_scope_tracker.resolve_symbol(&obj.name) == None {
-            self.cur_scope_tracker.add_obj(obj);
-        } else {
-            let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
-            print_error_at(fun.name_span, &err_info);
-        }
-
         let mut param_names: Vec<String> = Vec::new();
         for param in &fun.params {
             self.analyze_param(param);
@@ -361,13 +370,24 @@ impl ProgramAnalyzer {
     fn analyze_struct(&mut self, st: &Struct) -> ir::Struct {
         let mut analyzed_members = Vec::new();
         let mut offset: i32 = 0;
+        let mut struct_align: i32 = 1;
         for m in &st.members {
-            let am = self.analyze_struct_member(m, offset);
-            // @TODO: struct member alignment
+            let mut am = self.analyze_struct_member(m, offset);
+            let member_align = am.ty.align();
+            offset = align_to(offset, member_align);
+            am.offset = offset;
             offset += sizeof(&am.ty);
+            if struct_align < member_align {
+                struct_align = member_align;
+            }
             analyzed_members.push(am);
         }
-        ir::Struct{members: analyzed_members}
+        let struct_size = align_to(offset, struct_align);
+        return ir::Struct{
+            members: analyzed_members,
+            size: struct_size,
+            align: struct_align,
+        };
     }
 
     fn analyze_struct_member(&mut self, member: &Member, offset: i32) -> ir::Member {
@@ -480,15 +500,15 @@ impl ProgramAnalyzer {
                 match tokenKind {
                     // deal with pointer arithmatic
                     Plus => {
-                        if lhs.is_ptr() && rhs.is_ptr() {
+                        if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
                             println!();
                             print_error_at(lhs.span, "error: both lhs and rhs are of ptr type");
                             print_error_at(rhs.span, "error: both lhs and rhs are of ptr type");
                         }
-                        if lhs.is_integer() && rhs.is_ptr() {
+                        if lhs.is_integer() && rhs.is_pointer_or_array() {
                             swap(&mut lhs, &mut rhs);
                         }
-                        if lhs.is_ptr() && rhs.is_integer() {
+                        if lhs.is_pointer_or_array() && rhs.is_integer() {
                             let mut scal: i32;
                             match &lhs.ty {
                                 TyPtr(..) => scal = sizeof(&lhs.ty),
@@ -502,7 +522,7 @@ impl ProgramAnalyzer {
                         ir::Expr {content, ty, span}
                     }
                     Minus => {
-                        if lhs.is_integer() && rhs.is_ptr() {
+                        if lhs.is_integer() && rhs.is_pointer_or_array() {
                             print_error_at(rhs.span, "error: integer - ptr");
                         }
                         if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
@@ -641,14 +661,15 @@ impl ProgramAnalyzer {
                 let cur_ref = &mut arr_ref;
                 for index in analyzed_indices {
                     // a[b] is *(a+b); pointer addition is commutative, so b[a] is valid too.
-                    let (base, idx) = if !cur_ref.is_ptr() && index.is_ptr() {
+                    let (base, idx) = if !cur_ref.is_pointer_or_array() && index.is_pointer_or_array() {
                         (index, cur_ref.clone())
                     } else {
                         (cur_ref.clone(), index)
                     };
+                    // @TODO: Check whether the data type of idx is integer.
                     // type checking
-                    if !base.is_ptr() {
-                        print_error_at(idx.span, "subscripted value is neither array nor pointer nor vector");
+                    if !base.is_pointer_or_array() {
+                        print_error_at(base.span, "subscripted value is neither array nor pointer nor vector");
                     } else {
                         // Array indexing is converted to pointer arithmatic and dereferencing
                         // pointer arithmatic.
@@ -694,14 +715,18 @@ impl ProgramAnalyzer {
             }
             FunCall(ident, args) => {
                 // @Fix: The problem is that analyze_expr(ident) will check whether ident is declared and if not declared,
-                // that's an error, but the function name is intentionally to be undeclared. 
+                // that's an error, but the function name is intentionally left undeclared (currently). 
                 // @Future: The above problem will be solved when we add function declaration. At that time every valid function call can
                 // find its declaration without adding obj at here in the following code (because the obj is added after the compiler
                 // dealt with the corresponding declaration).
                 match &ident.content {
                     Ident(s) => {
-                        let obj = self.create_obj(&ty_none, &s);
-                        self.cur_scope_tracker.add_obj(obj.clone());
+                        if let Some(_) = self.cur_scope_tracker.resolve_symbol(s) {
+
+                        } else {
+                            let obj = self.create_obj(&ty_none, &s);
+                            self.cur_scope_tracker.add_obj(obj.clone());
+                        }
                     }
                     _ => println!("currently only support function name as call reference"),
                 }
@@ -922,4 +947,13 @@ fn print_error_at(span: Span, info: &str) {
     err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
     println!("{}", err_msg);
     exit(1);
+}
+
+pub fn align_to(n: i32, align: i32) -> i32 {
+    let extra = n % align;
+    let base = n - extra;
+    match extra {
+        0 => base,
+        _ => base + align,
+    }
 }

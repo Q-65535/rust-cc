@@ -65,13 +65,16 @@ pub struct Generator {
     cur_afun_r: Option<ir::Function>,
     argregs64: Vec<&'static str>,
     argregs8: Vec<&'static str>,
+    // Number of 8-byte values currently pushed on the stack within the
+    // function being emitted. Used to keep RSP 16-byte aligned at `call`.
+    depth: Cell<i32>,
 }
 
 impl Generator {
     pub fn new(aprogram_r: ir::AnalyzedProgram) -> Self {
         let argregs64 = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
         let argregs8  = vec!["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
-        Self {aprogram_r, lable_count: 0.into(), cur_afun_r: None, argregs64, argregs8}
+        Self {aprogram_r, lable_count: 0.into(), cur_afun_r: None, argregs64, argregs8, depth: 0.into()}
     }
 
     // The function currently being emitted. Only set while `gen_code`
@@ -103,6 +106,7 @@ impl Generator {
     }
 
     pub fn fun_gen(&self) {
+        self.depth.set(0);
         let stack_size = self.cur_afun().stack_size;
         let fun = self.cur_afun();
         let aligned_stack_size = align_to(stack_size, 16);
@@ -201,9 +205,9 @@ impl Generator {
             }
             Binary(lhs, rhs, kind) => {
                 self.expr_gen(rhs);
-                emit!("  push %rax");
+                self.push("%rax");
                 self.expr_gen(lhs);
-                emit!("  pop %rdi");
+                self.pop("%rdi");
                 match kind {
                     Plus => emit!("  add %rdi, %rax"),
                     Minus => emit!("  sub %rdi, %rax"),
@@ -235,8 +239,9 @@ impl Generator {
             }
             Assign(var, val) => {
                 self.gen_addr(var);
-                emit!("  push %rax");
+                self.push("%rax");
                 self.expr_gen(val);
+                self.pop("%rdi");
                 store(&var.ty);
             }
             Neg(expr) => {
@@ -262,7 +267,7 @@ impl Generator {
                         let mut nargs = 0;
                         for arg in args {
                             self.expr_gen(arg);
-                            emit!("  push %rax");
+                            self.push("%rax");
                             nargs += 1;
                         }
                         // put arguments in designated registers
@@ -270,8 +275,18 @@ impl Generator {
                             self.pop(self.argregs64[i]);
                         }
 
+                        // The x86-64 ABI requires RSP to be 16-byte aligned
+                        // at the point of a `call`. If an odd number of
+                        // 8-byte values are live on the stack, realign first.
+                        let needs_align = self.depth.get() % 2 == 1;
+                        if needs_align {
+                            emit!("  sub $8, %rsp");
+                        }
                         emit!("  mov $0, %rax");
                         emit!("  call {}", obj.name);
+                        if needs_align {
+                            emit!("  add $8, %rsp");
+                        }
                     }
                     // @Robustness: improve error message
                     _ => eprintln!("currently only support function name as call reference"),
@@ -323,10 +338,12 @@ impl Generator {
 
     fn push(&self, reg: &str) {
         emit!("  push {}", reg);
+        self.depth.set(self.depth.get() + 1);
     }
 
     fn pop(&self, reg: &str) {
         emit!("  pop {}", reg);
+        self.depth.set(self.depth.get() - 1);
     }
 }
 
@@ -342,19 +359,9 @@ fn load_according_to_type(ty: &Type) {
 }
 
 fn store(ty: &Type) {
-    emit!("  pop %rdi");
     match sizeof(ty) {
         1 => emit!("  mov %al, (%rdi)"),
         _ => emit!("  mov %rax, (%rdi)"),
-    }
-}
-
-fn align_to(n: i32, align: i32) -> i32 {
-    let extra = n % align;
-    let base = n - extra;
-    match extra {
-        0 => base,
-        _ => base + align,
     }
 }
 

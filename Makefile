@@ -46,10 +46,16 @@ test/%.exe: build test/%.c
 # 	$(CC) -o test/struct.exe test/struct.s -xc test/common
 
 # `make struct`: build and run just the struct.c test.
-test_struct:
+struct_test:
 	$(CC) -o- -E -P -C test/struct.c | $(RUST_CC) -o test/struct.s -
 	$(CC) -o struct.exe test/struct.s -xc test/common
 	echo struct.exe; ./struct.exe || exit 1; echo;
+
+local_test:
+	cargo build
+	$(RUST_CC) -o test.s test.c
+	gcc -o test.exe test.s
+	./test.exe
 
 # `make test`: build every .exe (via the $(TESTS) prerequisites), run each,
 # then run the CLI-level driver.
