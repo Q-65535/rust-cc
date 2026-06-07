@@ -47,6 +47,9 @@ int main() {
   ASSERT(2, ({ int x=2; { int x=3; } int y=4; x; }));
   ASSERT(3, ({ int x=2; { x=3; } x; }));
 
+  ASSERT(8, ({ int x; int y; char z; char *a=&y; char *b=&z; b-a; }));
+  ASSERT(6, ({ int x; char q1; char q2; char y; int z; char *a=&y; char *b=&z; b-a; }));
+
   printf("OK\n");
   return 0;
 }

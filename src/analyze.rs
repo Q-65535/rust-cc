@@ -37,7 +37,7 @@ impl Type {
             TyStruct(st) => {
                 st.align
             },
-            ty_none => 0,
+            ty_none => 1,
         }
     }
 }
@@ -425,6 +425,8 @@ impl ProgramAnalyzer {
     // @Naming: Rename it to create_local_obj.
     fn create_obj(&mut self, ty: &Type, name: &str) -> Obj {
         let mut size: i32 = sizeof(ty);
+        let aligned_offset = align_to(self.cur_offset, ty.align());
+        self.cur_offset = aligned_offset;
         let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.cur_offset, is_global: false};
         // @Smell: This line should be executed outside of this function.
         self.cur_offset += size;
