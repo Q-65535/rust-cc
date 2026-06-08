@@ -98,12 +98,21 @@ pub struct Member {
 #[derive(Debug, Clone, PartialEq)]
 // @Rename: Actually, this should be renamed to TypeSpecifier.
 // DeclarationSpecifier includes TypeSpecifier.
+// @Refactor: We need a struct to contain this enum and store span info just like Expr.
 pub enum DeclarationSpecifier {
     SpecInt,
     SpecChar,
-    SpecStruct(Struct),
+    SpecStruct(StructSpecifer),
+    // SpecStruct(Struct),
 }
 use DeclarationSpecifier::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StructSpecifer {
+    List(Option<String>, Vec<Member>),
+    Identifier(String),
+}
+use StructSpecifer::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitDeclarator {
@@ -278,6 +287,9 @@ impl Parser {
         // parse init declarators
         let mut init_declarators: Vec<InitDeclarator> = Vec::new();
         loop {
+            if self.cur_token().kind == Semicolon {
+                return Ok(Declaration{decl_spec, init_declarators});
+            }
             let declarator = self.parse_declarator()?;
             self.next_token();
             let mut init_expr = None;
@@ -323,14 +335,33 @@ impl Parser {
         }
     }
 
-    fn parse_struct_specifier(&mut self) -> Result<Struct, String> {
+    fn parse_struct_specifier(&mut self) -> Result<StructSpecifer, String> {
         self.check_skip_current(&Keyword(Struct));
+        match &self.cur_token().clone().kind {
+            LexIdent(name) => {
+                if self.peek_token().kind == LBrace {
+                    self.next_token();
+                    let struct_decl_list = self.parse_struct_decl_list()?;
+                    return Ok(StructSpecifer::List(Some(name.clone()), struct_decl_list));
+                } else {
+                    return Ok(StructSpecifer::Identifier(name.clone()));
+                }
+            },
+            LBrace => {
+                let struct_decl_list = self.parse_struct_decl_list()?;
+                return Ok(StructSpecifer::List(None, struct_decl_list));
+            },
+            _ => {
+                let err_msg = error_token(self.cur_token(), "syntatic error: parsing struct specifier error: unknown token after 'struct'");
+                return Err(err_msg);
+            }
+        }
+    }
+
+    fn parse_struct_decl_list(&mut self) -> Result<Vec<Member>, String> {
         self.check_skip_current(&LBrace);
         let mut members = Vec::new();
-        loop {
-            if self.cur_token().kind == RBrace {
-                break;
-            }
+        while self.cur_token().kind != RBrace {
             let decl_spec = self.parse_decl_spec()?;
             self.next_token();
             // parse declarators separated by ','
@@ -346,7 +377,7 @@ impl Parser {
             }
             self.jump_over_next(&Semicolon)?;
         }
-        Ok(Struct{members})
+        Ok(members)
     }
 
     fn parse_declarator(&mut self) -> Result<Declarator, String> {

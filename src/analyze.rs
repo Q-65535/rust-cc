@@ -71,11 +71,15 @@ pub struct Obj {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
     pub objects: Vec<Obj>,
+    pub named_structs: Vec<ir::Struct>,
 }
 
 impl Scope {
     pub fn new() -> Self {
-        Scope{objects: Vec::new()}
+        Scope{
+            objects: Vec::new(),
+            named_structs: Vec::new(),
+        }
     }
 
     pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
@@ -87,8 +91,23 @@ impl Scope {
         None
     }
 
+    pub fn resolve_struct_tag(&self, s: &str) -> Option<&ir::Struct> {
+        for st in &self.named_structs {
+            if let Some(name) = &st.tag_name {
+                if name == s{
+                    return Some(st);
+                }
+            }
+        }
+        None
+    }
+
     pub fn add_obj(&mut self, o: Obj) {
         self.objects.push(o);
+    }
+
+    pub fn add_named_struct(&mut self, st: ir::Struct) {
+        self.named_structs.push(st);
     }
 }
 
@@ -115,6 +134,22 @@ impl ScopeTracker {
         self.current_scope_index -= 1;
     }
 
+    pub fn resolve_struct_tag(&self, s: &str) -> Option<&ir::Struct> {
+        let index = self.current_scope_index;
+        for i in (0..=index).rev() {
+            let current_scope = &self.scopes[i];
+            if let Some(st) = current_scope.resolve_struct_tag(s) {
+                return Some(st)
+            }
+        }
+        return None
+    }
+
+    pub fn resolve_struct_tag_at_current_scope(&self, s: &str) -> Option<&ir::Struct> {
+        let current_scope = &self.scopes[self.current_scope_index];
+        return current_scope.resolve_struct_tag(s);
+    }
+
     pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
         let index = self.current_scope_index;
         for i in (0..=index).rev() {
@@ -134,6 +169,11 @@ impl ScopeTracker {
     pub fn add_obj(&mut self, o: Obj) {
         let current_scope = &mut self.scopes[self.current_scope_index];
         current_scope.add_obj(o);
+    }
+
+    pub fn add_named_struct(&mut self, st: ir::Struct) {
+        let current_scope = &mut self.scopes[self.current_scope_index];
+        current_scope.add_named_struct(st);
     }
 
     pub fn add_private_global_obj(&mut self, o: Obj) {
@@ -367,11 +407,49 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn analyze_struct(&mut self, st: &Struct) -> ir::Struct {
+    fn analyze_struct(&mut self, st: &StructSpecifer) -> ir::Struct {
+        match st {
+            StructSpecifer::List(name_or_none, members) => {
+                let mut analyzed_struct = self.analyze_struct_members(members);
+                if let Some(name) = name_or_none {
+                    if let None = self.cur_scope_tracker.resolve_struct_tag_at_current_scope(name) {
+                        analyzed_struct.tag_name = Some(name.clone());
+                        self.cur_scope_tracker.add_named_struct(analyzed_struct.clone());
+                    } else {
+                        let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
+                        // @TODO add span info to declaration specifier
+                        print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
+                    }
+                    return analyzed_struct;
+                } else {
+                    return analyzed_struct;
+                }
+            },
+            StructSpecifer::Identifier(name) => {
+                if let Some(analyzed_struct) = self.cur_scope_tracker.resolve_struct_tag(name) {
+                    return analyzed_struct.clone();
+                } else {
+                    let err_info = format!("semantic error: unknown struct tag name: '{}'", name);
+                    // @TODO add span info to declaration specifier
+                    print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
+                    // @Fix: This is becoming rediculous, we definitely shold not return a random struct to
+                    // satisfy the requirements of this function.
+                    return ir::Struct{
+                        tag_name: None,
+                        members: Vec::new(),
+                        size: 0,
+                        align: 0,
+                    };
+                }
+            },
+        }
+    }
+
+    fn analyze_struct_members(&mut self, members: &Vec<Member>) -> ir::Struct {
         let mut analyzed_members = Vec::new();
         let mut offset: i32 = 0;
         let mut struct_align: i32 = 1;
-        for m in &st.members {
+        for m in members {
             let mut am = self.analyze_struct_member(m, offset);
             let member_align = am.ty.align();
             offset = align_to(offset, member_align);
@@ -384,6 +462,7 @@ impl ProgramAnalyzer {
         }
         let struct_size = align_to(offset, struct_align);
         return ir::Struct{
+            tag_name: None,
             members: analyzed_members,
             size: struct_size,
             align: struct_align,
@@ -631,10 +710,11 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             }
             RequestStructMember(struct_ref, member_name) => {
-                let struct_ref = self.analyze_expr(struct_ref);
+                let mut struct_ref = self.analyze_expr(struct_ref);
                 let mut offset: i32 = 0;
                 let mut ty = ty_none;
-                match &struct_ref.ty {
+                let cur_ty = struct_ref.ty.clone();
+                match cur_ty {
                     TyStruct(st) => {
                         match st.get_member(&member_name) {
                             Ok(m) => {
@@ -642,6 +722,23 @@ impl ProgramAnalyzer {
                                 ty = m.ty;
                             },
                             Err(err) => print_error_at(expr.span, &err),
+                        }
+                    },
+                    TyPtr(inner) => {
+                        if let TyStruct(st) = *inner {
+                            let deref_ty = TyStruct(st.clone());
+                            let content = ExprType::Deref(Box::new(struct_ref));
+                            struct_ref = ir::Expr{content, ty: deref_ty, span};
+                            match st.get_member(&member_name) {
+                                Ok(m) => {
+                                    offset = m.offset;
+                                    ty = m.ty;
+                                },
+                                Err(err) => print_error_at(expr.span, &err),
+                            }
+                        } else {
+                            let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
+                            print_error_at(struct_ref.span, &err_info);
                         }
                     },
                     _ => {
@@ -769,6 +866,7 @@ impl ProgramAnalyzer {
                 let ty: Type = ArrayOf(Box::new(TyChar), len.try_into().unwrap());
 
                 let global_obj = create_global_obj(&unique_name, &ty);
+                // @Cleanup: We don't need to add the obj to global scope
                 self.cur_scope_tracker.add_private_global_obj(global_obj.clone());
                 let mut value_in_bytes = s.clone();
                 value_in_bytes.push(b'\0');

@@ -70,6 +70,7 @@ pub struct Declaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
+    pub tag_name: Option<String>,
     pub members: Vec<Member>,
     pub size: i32,
     pub align: i32,
