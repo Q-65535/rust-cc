@@ -805,7 +805,7 @@ impl Parser {
         };
         let expr = Expr::new(content, span);
 
-        if self.peek_token().kind == Period {
+        if matches!(self.peek_token().kind, Arrow | Period) {
             self.next_token();
             return self.parse_request_struct_member(expr);
         } else {
