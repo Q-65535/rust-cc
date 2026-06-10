@@ -752,8 +752,7 @@ impl ProgramAnalyzer {
             ArrayIndexing(arr_ref, indices) => {
                 let mut analyzed_indices = Vec::new();
                 let mut arr_ref = self.analyze_expr(arr_ref);
-                             // reborrow here
-                for index in &mut *indices {
+                for index in indices {
                     let analyzed_index = self.analyze_expr(index);
                     analyzed_indices.push(analyzed_index);
                 }

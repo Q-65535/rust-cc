@@ -95,6 +95,7 @@ fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
         TokenKind::Semicolon         => ("Semicolon", DIM),
         TokenKind::Comma             => ("Comma",     DIM),
         TokenKind::Period            => ("Period",    DIM),
+        TokenKind::Arrow             => ("Arrow",     DIM),
         TokenKind::Eof               => ("EOF",       RED),
     }
 }

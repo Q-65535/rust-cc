@@ -599,7 +599,7 @@ impl Parser {
                             self.next_token();
                             expr = self.parse_assign(expr)?;
                         }
-                        Period => {
+                        Period | Arrow => {
                             self.next_token();
                             expr = self.parse_request_struct_member(expr)?;
                         }
@@ -788,7 +788,7 @@ impl Parser {
 
     fn parse_request_struct_member(&mut self, lhs: Expr) -> Result<Expr, String> {
         let start_index = lhs.span.start_index;
-        self.skip_cur_token(&Period);
+        self.next_token(); // skip '.' or '->'
         let content: ExprType;
         match &self.cur_token().kind {
             LexIdent(name) => {
