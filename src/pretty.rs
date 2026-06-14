@@ -8,6 +8,7 @@
 use crate::lex::{Token, TokenKind, CompareToken};
 use crate::parse::*;
 use crate::common::Span;
+use crate::SRC;
 
 // ─────────────────────────────────────────────
 //  ANSI colours
@@ -57,7 +58,8 @@ pub fn print_tokens(tokens: &[Token]) {
 
     for tok in tokens {
         let (kind_str, colour) = token_kind_label(&tok.kind);
-        let lexeme = tok.val.escape_debug().to_string();
+        let src = crate::SRC.lock().unwrap();
+        let lexeme = &src[tok.span.start_index.. tok.span.end_index+1];
         let line   = tok.span.get_start_line();
         let col    = tok.span.start_index;
 

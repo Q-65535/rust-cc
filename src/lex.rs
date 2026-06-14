@@ -96,7 +96,7 @@ impl std::ops::Sub<u8> for Precedence {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub val: String,
+    // pub raw_content: String,
     pub span: Span,
 }
 
@@ -188,19 +188,15 @@ impl Lexer {
         }
     }
 
-    pub fn gen_token(kind: TokenKind, content: &str, start_index: usize, len: usize) -> Token {
+    pub fn gen_token(kind: TokenKind, start_index: usize, len: usize) -> Token {
         let span = Span{start_index, end_index: start_index+len-1};
-        Token {
-            kind,
-            val: content.to_string(),
-            span,
-        }
+        Token {kind, span}
     }
 
     pub fn lex(&mut self) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
         if self.src.is_empty() {
-            tokens.push(Self::gen_token(Eof, "", self.src.len(), 1));
+            tokens.push(Self::gen_token(Eof, self.src.len(), 1));
             return tokens;
         }
         loop {
@@ -208,34 +204,34 @@ impl Lexer {
             let start_index = self.index;
             match c {
                 ' ' | '\t' | '\n' | '\r' => (),
-                '.' => tokens.push(Self::gen_token(Period, ".", start_index, 1)),
-                ';' => tokens.push(Self::gen_token(Semicolon, ";", start_index, 1)),
-                ',' => tokens.push(Self::gen_token(Comma, ",", start_index, 1)),
-                '+' => tokens.push(Self::gen_token(Plus, "+", start_index, 1)),
-                '(' => tokens.push(Self::gen_token(LParen, "(", start_index, 1)),
-                ')' => tokens.push(Self::gen_token(RParen, ")", start_index, 1)),
-                '{' => tokens.push(Self::gen_token(LBrace, "{", start_index, 1)),
-                '}' => tokens.push(Self::gen_token(RBrace, "}", start_index, 1)),
-                '[' => tokens.push(Self::gen_token(LSqureBracket, "[", start_index, 1)),
-                ']' => tokens.push(Self::gen_token(RSqureBracket, "]", start_index, 1)),
-                '&' => tokens.push(Self::gen_token(Ampersand, "&", start_index, 1)),
+                '.' => tokens.push(Self::gen_token(Period, start_index, 1)),
+                ';' => tokens.push(Self::gen_token(Semicolon, start_index, 1)),
+                ',' => tokens.push(Self::gen_token(Comma, start_index, 1)),
+                '+' => tokens.push(Self::gen_token(Plus, start_index, 1)),
+                '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),
+                ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
+                '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
+                '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
+                '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
+                ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
+                '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
                 '-' => {
                     match self.peek_char() {
                         Some('>') => {
-                            tokens.push(Self::gen_token(Arrow, "->", start_index, 2));
+                            tokens.push(Self::gen_token(Arrow,  start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Minus, ">", start_index, 1)),
+                        _ => tokens.push(Self::gen_token(Minus, start_index, 1)),
                     }
                 },
-                '*' => tokens.push(Self::gen_token(Mul, "*", start_index, 1)),
-                '(' => tokens.push(Self::gen_token(LParen, "(", start_index, 1)),
-                ')' => tokens.push(Self::gen_token(RParen, ")", start_index, 1)),
-                '{' => tokens.push(Self::gen_token(LBrace, "{", start_index, 1)),
-                '}' => tokens.push(Self::gen_token(RBrace, "}", start_index, 1)),
-                '[' => tokens.push(Self::gen_token(LSqureBracket, "[", start_index, 1)),
-                ']' => tokens.push(Self::gen_token(RSqureBracket, "]", start_index, 1)),
-                '&' => tokens.push(Self::gen_token(Ampersand, "&", start_index, 1)),
+                '*' => tokens.push(Self::gen_token(Mul, start_index, 1)),
+                '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),
+                ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
+                '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
+                '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
+                '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
+                ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
+                '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
                 'a'..='z' | '_' => {
                     let name = self.read_ident();
                     let tok_kind = if self.is_keyword(&name) {
@@ -243,56 +239,56 @@ impl Lexer {
                     } else {
                         LexIdent(name.clone())
                     };
-                    let tok = Self::gen_token(tok_kind, &name, start_index, name.len());
+                    let tok = Self::gen_token(tok_kind, start_index, name.len());
                     tokens.push(tok);
                 },
                 '=' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(Eq), "==", start_index, 2));
+                            tokens.push(Self::gen_token(Compare(Eq), start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Assignment, "=", start_index, 1)),
+                        _ => tokens.push(Self::gen_token(Assignment, start_index, 1)),
                     }
                 },
                 '!' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(Neq), "!=", start_index, 2));
+                            tokens.push(Self::gen_token(Compare(Neq), start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Not, "!", start_index, 1)),
+                        _ => tokens.push(Self::gen_token(Not, start_index, 1)),
                     }
                 },
                 '<' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(LE), "<=", start_index, 2));
+                            tokens.push(Self::gen_token(Compare(LE), start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Compare(LT), "<", start_index, 1)),
+                        _ => tokens.push(Self::gen_token(Compare(LT), start_index, 1)),
                     }
                 },
                 '>' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(GE), ">=", start_index, 2));
+                            tokens.push(Self::gen_token(Compare(GE), start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Compare(GT), ">", start_index, 1)),
+                        _ => tokens.push(Self::gen_token(Compare(GT), start_index, 1)),
                     }
                 },
                 '0'..='9' => {
                     let num = self.read_int();
                     let num_str = num.to_string();
-                    tokens.push(Self::gen_token(Num(num), &num_str, start_index, num_str.len()));
+                    tokens.push(Self::gen_token(Num(num), start_index, num_str.len()));
                 },
                 '"' => {
                     match self.read_string() {
                         Ok(bytes) => {
                             let display = String::from_utf8_lossy(&bytes).into_owned();
                             let consumed = self.index - start_index + 1;
-                            tokens.push(Self::gen_token(StringLiteral(bytes), &display, start_index, consumed));
+                            tokens.push(Self::gen_token(StringLiteral(bytes), start_index, consumed));
                         },
                         Err(s) => {
                             lex_error_at(start_index, &s);
@@ -328,7 +324,7 @@ impl Lexer {
                                 }
                             }
                         },
-                        _ => tokens.push(Self::gen_token(Div, "/", start_index, 1)),
+                        _ => tokens.push(Self::gen_token(Div, start_index, 1)),
                     }
                 },
                 _ => {
@@ -342,7 +338,9 @@ impl Lexer {
                 break;
             }
         }
-        tokens.push(Self::gen_token(Eof, "", self.src.len(), 1));
+        // Rust interprets slicing indices as pointing to the spaces between elements,
+        // not the elements themselves. So the raw content of eof is just a empty string.
+        tokens.push(Self::gen_token(Eof, self.src.len(), 0));
         tokens
     }
 
