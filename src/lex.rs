@@ -119,17 +119,6 @@ pub fn precedence(kind: &TokenKind) -> Precedence {
     }
 }
 
-impl Default for Token {
-    fn default() -> Token {
-        let default_location = Span{start_index: 0, end_index: 0};
-        Token{
-            kind: Eof,
-            val: "".to_string(),
-            span: default_location,
-        }
-    }
-}
-
 pub struct Lexer {
     src: Vec<char>,
     index: usize,
@@ -139,7 +128,7 @@ pub struct Lexer {
 impl Lexer {
     pub fn new(s: &str) -> Lexer {
         let keywords: HashMap<String, TokenKind> = vec![
-            // add more keywords here 
+            // Add more keywords here.
             ("return".to_string(), Keyword(Ret)),
             ("if".to_string(), Keyword(If)),
             ("else".to_string(), Keyword(Else)),
@@ -161,7 +150,7 @@ impl Lexer {
         self.keywords.contains_key(name)
     }
 
-    fn get_tok_kind(&self, name: &str) -> TokenKind {
+    fn get_keyword_kind(&self, name: &str) -> TokenKind {
         self.keywords.get(name).unwrap().clone()
     }
 
@@ -171,15 +160,15 @@ impl Lexer {
 
     fn has_next(&self) -> bool {
         let len = self.src.len();
-        self.index < len - 1
+        self.index + 1 < len
     }
 
     fn next_char(&mut self) {
-        if self.index < self.src.len() {
+        if self.has_next() {
             self.index += 1;
         } else {
-            println!("lexing error: index {} out of bounds {}", self.index, self.src.len());
-            exit(0);
+            let error_message = format!("lexing error: index {} out of bounds {}", self.index, self.src.len());
+            lex_error_at(self.index, &error_message);
         }
     }
 
@@ -192,9 +181,6 @@ impl Lexer {
     }
 
     pub fn gen_token(kind: TokenKind, content: &str, start_index: usize, len: usize) -> Token {
-        if !(start_index+len >= 1) {
-            println!("fatal: this token {} has length of 0", content);
-        }
         let span = Span{start_index, end_index: start_index+len-1};
         Token {
             kind,
@@ -220,39 +206,6 @@ impl Lexer {
                 '+' => tokens.push(Self::gen_token(Plus, "+", start_index, 1)),
                 '-' => tokens.push(Self::gen_token(Minus, "-", start_index, 1)),
                 '*' => tokens.push(Self::gen_token(Mul, "*", start_index, 1)),
-                '/' => {
-                    match self.peek_char() {
-                        Some('/') => {
-                            // Line comment: skip until end of line.
-                            self.next_char();
-                            while let Some(nc) = self.peek_char() {
-                                if nc == '\n' { break; }
-                                self.next_char();
-                            }
-                        },
-                        Some('*') => {
-                            // Block comment: skip until closing "*/".
-                            self.next_char();
-                            loop {
-                                match self.peek_char() {
-                                    Some('*') => {
-                                        self.next_char();
-                                        if let Some('/') = self.peek_char() {
-                                            self.next_char();
-                                            break;
-                                        }
-                                    },
-                                    Some(_) => self.next_char(),
-                                    None => {
-                                        self.error_at(start_index, "unclosed block comment");
-                                        exit(0);
-                                    },
-                                }
-                            }
-                        },
-                        _ => tokens.push(Self::gen_token(Div, "/", start_index, 1)),
-                    }
-                },
                 '(' => tokens.push(Self::gen_token(LParen, "(", start_index, 1)),
                 ')' => tokens.push(Self::gen_token(RParen, ")", start_index, 1)),
                 '{' => tokens.push(Self::gen_token(LBrace, "{", start_index, 1)),
@@ -263,7 +216,7 @@ impl Lexer {
                 'a'..='z' | '_' => {
                     let name = self.read_ident();
                     let tok_kind = if self.is_keyword(&name) {
-                        self.get_tok_kind(&name)
+                        self.get_keyword_kind(&name)
                     } else {
                         LexIdent(name.clone())
                     };
@@ -307,16 +260,9 @@ impl Lexer {
                     }
                 },
                 '0'..='9' => {
-                    match self.read_int() {
-                        Ok(num) => {
-                            let num_str = &num.to_string();
-                            tokens.push(Self::gen_token(Num(num), num_str, start_index, num_str.len()));
-                        },
-                        Err(s) => {
-                            self.error_at(start_index, "unable to read integer.");
-                            exit(0);
-                        },
-                    }
+                    let num = self.read_int();
+                    let num_str = num.to_string();
+                    tokens.push(Self::gen_token(Num(num), &num_str, start_index, num_str.len()));
                 },
                 '"' => {
                     match self.read_string() {
@@ -326,15 +272,45 @@ impl Lexer {
                             tokens.push(Self::gen_token(StringLiteral(bytes), &display, start_index, consumed));
                         },
                         Err(s) => {
-                            self.error_at(start_index, "unable to read string literal.");
-                            exit(0);
+                            lex_error_at(start_index, &s);
                         },
                     }
                 },
+                '/' => {
+                    match self.peek_char() {
+                        Some('/') => {
+                            // Line comment: skip until end of line.
+                            self.next_char();
+                            while let Some(nc) = self.peek_char() {
+                                if nc == '\n' { break; }
+                                self.next_char();
+                            }
+                        },
+                        Some('*') => {
+                            // Block comment: skip until closing "*/".
+                            self.next_char();
+                            loop {
+                                match self.peek_char() {
+                                    Some('*') => {
+                                        self.next_char();
+                                        if let Some('/') = self.peek_char() {
+                                            self.next_char();
+                                            break;
+                                        }
+                                    },
+                                    Some(_) => self.next_char(),
+                                    None => {
+                                        lex_error_at(start_index, "unclosed block comment");
+                                    },
+                                }
+                            }
+                        },
+                        _ => tokens.push(Self::gen_token(Div, "/", start_index, 1)),
+                    }
+                },
                 _ => {
-                    let err_msg = &format!("lexing error: unknown character: '{}'", c);
-                    self.error_at(start_index, err_msg);
-                    exit(0);
+                    let err_msg = format!("lexing error: unknown character: '{}'", c);
+                    lex_error_at(start_index, &err_msg);
                 },
             }
             if !self.has_next() {
@@ -346,15 +322,11 @@ impl Lexer {
         tokens
     }
 
-    fn read_int(&mut self) -> Result<i32, String> {
-        let mut len: usize = 0;
+    fn read_int(&mut self) -> i32 {
+        debug_assert!(matches!(self.cur_char(), '0'..='9'));
         let c = self.cur_char();
-        let i = self.index;
-        if c <= '9' && c >= '0' {
-            len += 1;
-        } else {
-            return Err("read_int() function error: the first char is not a digit".to_string());
-        }
+        let mut len: usize = 1;
+        let start_index = self.index;
         loop {
             match self.peek_char() {
                 Some(c) => {
@@ -370,14 +342,23 @@ impl Lexer {
                 }
             }
         }
-        let s: &String = &self.src[i..i+len].iter().collect(); 
-        Ok(s.parse().unwrap())
+        let integer_string: &String = &self.src[start_index..start_index+len].iter().collect(); 
+        return integer_string.parse().unwrap();
     }
 
     fn read_string(&mut self) -> Result<Vec<u8>, String> {
+        debug_assert!(matches!(self.cur_char(), '"'));
         let mut bytes: Vec<u8> = Vec::new();
-        self.next_char(); // skip opening " character
-        while self.cur_char() != '"' {
+        loop {
+            if self.has_next() {
+                self.next_char();
+            } else {
+                let error_info = "reaching end of file without seeing closing \" while parsing string literal".to_string();
+                return Err(error_info);
+            }
+            if self.cur_char() == '"' {
+                return Ok(bytes);
+            }
             if self.cur_char() == '\\' {
                 bytes.push(self.read_escaped_char());
             } else {
@@ -385,9 +366,7 @@ impl Lexer {
                 let encoded = self.cur_char().encode_utf8(&mut buf);
                 bytes.extend_from_slice(encoded.as_bytes());
             }
-            self.next_char();
         }
-        Ok(bytes)
     }
 
     fn read_escaped_char(&mut self) -> u8 {
@@ -457,6 +436,7 @@ impl Lexer {
     }
 
     fn read_ident(&mut self) -> String {
+        debug_assert!(matches!(self.cur_char(), 'a'..='z' | '_'));
         let mut len = 1;
         let i = self.index;
         loop {
@@ -475,15 +455,19 @@ impl Lexer {
         self.src[i..i+len].iter().collect()
     }
 
-    fn error_at(&self, index: usize, err_msg: &str) {
-        let span = Span{start_index: index, end_index: index};
-        print_error_at(span, err_msg);
-    }
+}
+
+fn lex_error_at(index: usize, err_msg: &str) {
+    let span = Span{start_index: index, end_index: index};
+    report_error_at(span, err_msg);
+    // Lex error is strict, once encountered, we force compilation to stop.
+    exit(1);
 }
 
 // @Duplication: Duplicate with error reporter in parse.rs.
-fn print_error_at(span: Span, info: &str) {
+pub fn report_error_at(span: Span, info: &str) {
     let (start_line, satart_column, end_line, end_column) = span.locate();
+    // @Incomplete: Handle error across multiple lines.
     let start_line_content = get_src_content_at_line(start_line);
     let mut err_msg = String::new();
     err_msg.push_str(&start_line_content);
@@ -496,5 +480,4 @@ fn print_error_at(span: Span, info: &str) {
     };
     err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
     println!("{}", err_msg);
-    exit(1);
 }
