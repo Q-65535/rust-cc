@@ -1,22 +1,33 @@
+// Demo
+
+
+
+
+// int foo();
+
 int main() {
-    struct st1 {
-        int a;
-        char b;
+    struct coord {
+        int x;
+        int y;
+        char identifier;
     };
-    struct st1 qwer;
-    struct st1 *qwer_pointer = &qwer;
-    qwer.a = 11;
-    qwer.b = 22;
-    qwer_pointer.a = 12345;
-    printf("qwer.a=%d\n", qwer.a);
-    printf("qwer.b=%d\n", qwer.b);
+    struct coord location;
+    struct coord *location_pointer = &location;
+    location.x = 11;
+    location.y = 22;
+    printf("before: location.x=%d\n", location.x);
+    location_pointer.x = 12345;
+    printf("after: location.x=%d\n", location.x);
+    printf("location.y=%d\n", location.y);
 
     int i = 0;
     while (1) {
+        foo();
         printf("i=%d\n", i);
         i = i + 1;
         sleep(1);
     }
+    return 0;
 }
 
 int foo() {

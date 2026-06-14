@@ -21,6 +21,7 @@ pub enum TokenKind {
     Assignment,
     Compare(CompareToken),
     Not,
+    Arrow,
     Ampersand,
     Num(i32),
     Semicolon,
@@ -114,7 +115,7 @@ pub fn precedence(kind: &TokenKind) -> Precedence {
         Plus | Minus => Precedence::LV4,
         Mul | Div => Precedence::LV5,
         LParen | LSqureBracket => Precedence::LV6,
-        Period => Precedence::LV7,
+        Period | Arrow => Precedence::LV7,
         _ => Precedence::Lowest,
     }
 }
@@ -204,7 +205,22 @@ impl Lexer {
                 ';' => tokens.push(Self::gen_token(Semicolon, ";", start_index, 1)),
                 ',' => tokens.push(Self::gen_token(Comma, ",", start_index, 1)),
                 '+' => tokens.push(Self::gen_token(Plus, "+", start_index, 1)),
-                '-' => tokens.push(Self::gen_token(Minus, "-", start_index, 1)),
+                '(' => tokens.push(Self::gen_token(LParen, "(", start_index, 1)),
+                ')' => tokens.push(Self::gen_token(RParen, ")", start_index, 1)),
+                '{' => tokens.push(Self::gen_token(LBrace, "{", start_index, 1)),
+                '}' => tokens.push(Self::gen_token(RBrace, "}", start_index, 1)),
+                '[' => tokens.push(Self::gen_token(LSqureBracket, "[", start_index, 1)),
+                ']' => tokens.push(Self::gen_token(RSqureBracket, "]", start_index, 1)),
+                '&' => tokens.push(Self::gen_token(Ampersand, "&", start_index, 1)),
+                '-' => {
+                    match self.peek_char() {
+                        Some('>') => {
+                            tokens.push(Self::gen_token(Arrow, "->", start_index, 2));
+                            self.next_char();
+                        },
+                        _ => tokens.push(Self::gen_token(Minus, ">", start_index, 1)),
+                    }
+                },
                 '*' => tokens.push(Self::gen_token(Mul, "*", start_index, 1)),
                 '(' => tokens.push(Self::gen_token(LParen, "(", start_index, 1)),
                 ')' => tokens.push(Self::gen_token(RParen, ")", start_index, 1)),
