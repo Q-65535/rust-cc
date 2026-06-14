@@ -4,7 +4,7 @@ use crate::lex::{self, *};
 use crate::lex::Precedence::{self, *};
 use crate::lex::TokenKind::{self, *};
 use crate::lex::KeywordToken::{self, *};
-use crate::lex::TypeSpecifier::{self, *};
+use crate::lex::TypeSpecifier_e::{self, *};
 use ExprType::*;
 use crate::Type::{self, *};
 use crate::SRC;

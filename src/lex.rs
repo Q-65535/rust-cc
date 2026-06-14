@@ -1,9 +1,8 @@
-use std::{io::{self, Write}, process::exit};
-use std::cmp::{max, min};
+use std::process::exit;
 use std::collections::HashMap;
-use crate::*;
+use colored::*;
 use crate::SRC;
-use crate::common::{self, *};
+use crate::common::*;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
@@ -53,16 +52,16 @@ pub enum KeywordToken {
     While,
     Sizeof,
     Struct,
-    TypeSpecifier(TypeSpecifier),
+    TypeSpecifier(TypeSpecifier_e),
 }
 use KeywordToken::*;
 
 #[derive(PartialEq, Clone, Debug)]
-pub enum TypeSpecifier {
+pub enum TypeSpecifier_e {
     Int,
     Char,
 }
-use TypeSpecifier::*;
+use TypeSpecifier_e::*;
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, PartialOrd)]
@@ -171,6 +170,14 @@ impl Lexer {
             let error_message = format!("lexing error: index {} out of bounds {}", self.index, self.src.len());
             lex_error_at(self.index, &error_message);
         }
+    }
+
+    fn skip_cur_char(&mut self, c: char) {
+        if self.cur_char() != c {
+            let error_message = format!("lexing error: current char is {} but expect {}", self.cur_char(), c);
+            lex_error_at(self.index, &error_message);
+        }
+        self.next_char();
     }
 
     fn peek_char(&self) -> Option<char> {
@@ -329,10 +336,11 @@ impl Lexer {
                     lex_error_at(start_index, &err_msg);
                 },
             }
-            if !self.has_next() {
+            if self.has_next() {
+                self.next_char();
+            } else {
                 break;
             }
-            self.next_char();
         }
         tokens.push(Self::gen_token(Eof, "", self.src.len(), 1));
         tokens
@@ -386,7 +394,8 @@ impl Lexer {
     }
 
     fn read_escaped_char(&mut self) -> u8 {
-        self.next_char(); // skip '\' character
+        debug_assert!(matches!(self.cur_char(), '\\'));
+        self.skip_cur_char('\\');
         let c = self.cur_char();
         if c >= '0' && c <= '7' {
             return self.read_escaped_octal();
@@ -422,12 +431,12 @@ impl Lexer {
     }
 
     fn read_escaped_hex(&mut self) -> u8 {
-        self.next_char(); // Skip 'x' character.
+        self.skip_cur_char('x');
         let mut num: u8 = 0;
         let mut c = self.cur_char();
         if !c.is_ascii_hexdigit() {
-            println!("lex hexdigit error, wrong character following \\x");
-            exit(0);
+            let error_message = format!("lex hexdigit error, wrong character following \\x");
+            lex_error_at(self.index, &error_message);
         }
         while c.is_ascii_hexdigit() {
             let digit_number;
