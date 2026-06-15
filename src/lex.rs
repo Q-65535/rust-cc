@@ -96,7 +96,6 @@ impl std::ops::Sub<u8> for Precedence {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    // pub raw_content: String,
     pub span: Span,
 }
 
@@ -164,19 +163,12 @@ impl Lexer {
     }
 
     fn next_char(&mut self) {
-        if self.has_next() {
-            self.index += 1;
-        } else {
-            let error_message = format!("lexing error: index {} out of bounds {}", self.index, self.src.len());
-            lex_error_at(self.index, &error_message);
-        }
+        debug_assert!(self.has_next());
+        self.index += 1;
     }
 
     fn skip_cur_char(&mut self, c: char) {
-        if self.cur_char() != c {
-            let error_message = format!("lexing error: current char is {} but expect {}", self.cur_char(), c);
-            lex_error_at(self.index, &error_message);
-        }
+        debug_assert!(self.cur_char() == c);
         self.next_char();
     }
 
@@ -215,6 +207,14 @@ impl Lexer {
                 '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
                 ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
                 '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
+                '*' => tokens.push(Self::gen_token(Mul, start_index, 1)),
+                '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),
+                ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
+                '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
+                '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
+                '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
+                ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
+                '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
                 '-' => {
                     match self.peek_char() {
                         Some('>') => {
@@ -224,14 +224,6 @@ impl Lexer {
                         _ => tokens.push(Self::gen_token(Minus, start_index, 1)),
                     }
                 },
-                '*' => tokens.push(Self::gen_token(Mul, start_index, 1)),
-                '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),
-                ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
-                '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
-                '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
-                '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
-                ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
-                '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
                 'a'..='z' | '_' => {
                     let name = self.read_ident();
                     let tok_kind = if self.is_keyword(&name) {
@@ -328,7 +320,7 @@ impl Lexer {
                     }
                 },
                 _ => {
-                    let err_msg = format!("lexing error: unknown character: '{}'", c);
+                    let err_msg = format!("unknown character: '{}'", c);
                     lex_error_at(start_index, &err_msg);
                 },
             }
@@ -338,8 +330,13 @@ impl Lexer {
                 break;
             }
         }
-        // Rust interprets slicing indices as pointing to the spaces between elements,
-        // not the elements themselves. So the raw content of eof is just a empty string.
+        // Rust interprets slicing indices as pointing to the spaces between elements, not the elements themselves.
+        // Since we set Eof token's start_index to src.len(), length to 0,
+        // both start_index and end_index are src.len(), i.e., both 
+        // points to the space at the very end after the last element.
+        // So We get an empty string from src[start_index.. end_index].
+        // In fact, for any string and index: 
+        // as long as 0 ≤ index ≤ string.len() satisfied, string[index.. index] is a empty string.
         tokens.push(Self::gen_token(Eof, self.src.len(), 0));
         tokens
     }
@@ -392,7 +389,6 @@ impl Lexer {
     }
 
     fn read_escaped_char(&mut self) -> u8 {
-        debug_assert!(matches!(self.cur_char(), '\\'));
         self.skip_cur_char('\\');
         let c = self.cur_char();
         if c >= '0' && c <= '7' {
@@ -482,25 +478,28 @@ impl Lexer {
 
 fn lex_error_at(index: usize, err_msg: &str) {
     let span = Span{start_index: index, end_index: index};
-    report_error_at(span, err_msg);
+    let error_stage_info = "lexical error: ".to_string();
+    report_error_at(span, &(error_stage_info+err_msg));
     // Lex error is strict, once encountered, we force compilation to stop.
     exit(1);
 }
 
 // @Duplication: Duplicate with error reporter in parse.rs.
 pub fn report_error_at(span: Span, info: &str) {
-    let (start_line, satart_column, end_line, end_column) = span.locate();
-    // @Incomplete: Handle error across multiple lines.
-    let start_line_content = get_src_content_at_line(start_line);
     let mut err_msg = String::new();
+    let (start_line, start_column, end_line, end_column) = span.locate();
+    let extended_error_info = format!(":{}:{}: {}\n", start_line, start_column, info.red());
+    err_msg.push_str(&extended_error_info);
+    let start_line_content = get_src_content_at_line(start_line);
     err_msg.push_str(&start_line_content);
     err_msg.push_str("\n");
-    let spaces = " ".repeat(satart_column - 1);
+    let spaces = " ".repeat(start_column - 1);
     let arrows = if start_line == end_line {
         "^".repeat(span.end_index - span.start_index + 1)
+    // @Incomplete: Handle error across multiple lines.
     } else {
         "^".to_string()
     };
-    err_msg.push_str(&format!("{}{} {}", spaces, arrows.red(), info.red()));
+    err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
     println!("{}", err_msg);
 }

@@ -457,15 +457,14 @@ impl Parser {
         self.jump_over_next(&RParen)?;
         // parse then
         let then = Box::new(self.parse_stmt()?);
-        self.next_token();
-        // parse otherwise
-        let otherwise = match self.cur_token().kind {
-            Keyword(Else) => {
-                self.next_token();
-                Some(Box::new(self.parse_stmt()?))
-            }
-            _ => None
-        };
+
+        let mut otherwise = None;
+        // parse otherwise (if it exists)
+        if self.peek_token().kind == Keyword(Else) {
+            self.next_token();
+            self.skip_cur_token(&Keyword(Else));
+            otherwise = Some(Box::new(self.parse_stmt()?));
+        }
         Ok(IfStmt{cond, then, otherwise})
     }
 
