@@ -207,7 +207,7 @@ impl ProgramAnalyzer {
         use ir::Function;
         let mut afuns: Vec<ir::Function> = Vec::new();
         let mut a_global_decls: Vec<ir::Declaration> = Vec::new();
-        for unit in program.translation_units {
+        for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
                     if self.global_scope.resolve_symbol(&fun.name) == None {
@@ -215,14 +215,9 @@ impl ProgramAnalyzer {
                         let o = create_global_obj(&fun.name, &ty);
                         self.global_scope.add_obj(o);
                     } else {
-                        let err_info = format!("fatal error: parameter variable {} already defined", fun.name);
+                        let err_info = format!("semantic error: redefinition of {}", fun.name);
                         print_error_at(fun.name_span, &err_info);
                     }
-                    self.cur_offset = 0;
-                    self.cur_scope_tracker = ScopeTracker::new(&self.global_scope);
-                    self.cur_scope_tracker.enter_new_scope();
-                    let afun = self.analyze_function(fun);
-                    afuns.push(afun);
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
                     let mut batch_global_decls = self.analyze_global_decl(decl);
@@ -230,10 +225,19 @@ impl ProgramAnalyzer {
                 }
             }
         }
+        for unit in &mut program.translation_units {
+            if let parse::TranslationUnit::FunctionDef(fun) = unit {
+                self.cur_offset = 0;
+                self.cur_scope_tracker = ScopeTracker::new(&self.global_scope);
+                self.cur_scope_tracker.enter_new_scope();
+                let afun = self.analyze_function(fun);
+                afuns.push(afun);
+            }
+        }
         ir::AnalyzedProgram{afuns, global_decls: self.global_decls.clone()}
     }
 
-    pub fn analyze_global_decl(&mut self, mut decl: Declaration) -> Vec::<ir::Declaration> {
+    pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<ir::Declaration> {
         let mut decls: Vec<ir::Declaration> = Vec::new();
         let base_type = self.analyze_decl_spec(&decl.decl_spec);
         for init in &mut decl.init_declarators {
@@ -292,13 +296,13 @@ impl ProgramAnalyzer {
         decls
     }
 
-    pub fn analyze_function(&mut self, mut fun: Function) -> ir::Function {
+    pub fn analyze_function(&mut self, fun: &mut Function) -> ir::Function {
         let base_type = self.analyze_decl_spec(&fun.return_type);
         let mut return_type = base_type;
         for i in 0..fun.star_count {
             return_type = pointer_to(&return_type);
         }
-        let name = fun.name;
+        let name = fun.name.clone();
         let mut param_names: Vec<String> = Vec::new();
         for param in &fun.params {
             self.analyze_param(param);
