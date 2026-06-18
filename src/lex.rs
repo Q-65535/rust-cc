@@ -283,7 +283,7 @@ impl Lexer {
                             tokens.push(Self::gen_token(StringLiteral(bytes), start_index, consumed));
                         },
                         Err(s) => {
-                            lex_error_at(start_index, &s);
+                            lexical_error_at(start_index, &s);
                         },
                     }
                 },
@@ -311,7 +311,7 @@ impl Lexer {
                                     },
                                     Some(_) => self.next_char(),
                                     None => {
-                                        lex_error_at(start_index, "unclosed block comment");
+                                        lexical_error_at(start_index, "unclosed block comment");
                                     },
                                 }
                             }
@@ -321,7 +321,7 @@ impl Lexer {
                 },
                 _ => {
                     let err_msg = format!("unknown character: '{}'", c);
-                    lex_error_at(start_index, &err_msg);
+                    lexical_error_at(start_index, &err_msg);
                 },
             }
             if self.has_next() {
@@ -430,7 +430,7 @@ impl Lexer {
         let mut c = self.cur_char();
         if !c.is_ascii_hexdigit() {
             let error_message = format!("lex hexdigit error, wrong character following \\x");
-            lex_error_at(self.index, &error_message);
+            lexical_error_at(self.index, &error_message);
         }
         while c.is_ascii_hexdigit() {
             let digit_number;
@@ -476,7 +476,7 @@ impl Lexer {
 
 }
 
-fn lex_error_at(index: usize, err_msg: &str) {
+fn lexical_error_at(index: usize, err_msg: &str) {
     let span = Span{start_index: index, end_index: index};
     let error_stage_info = "lexical error: ".to_string();
     report_error_at(span, &(error_stage_info+err_msg));

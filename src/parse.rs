@@ -264,8 +264,7 @@ impl Parser {
 
     pub fn parse(&mut self) -> Result<Program, String> {
         let mut translation_units: Vec<TranslationUnit> = Vec::new();
-        loop {
-            if self.cur_token().kind == Eof {break};
+        while self.cur_token().kind != Eof {
             let find_LBrace = self.find_LBrace_before_encounter_semicolon()?;
             // Only function definition have LBrace, so if we hit LBrace then just start parsing function def.
             let current_unit = if find_LBrace {
@@ -403,6 +402,8 @@ impl Parser {
                         self.jump_over_next(&LSqureBracket);
                         let cur_array_len: i32 = self.parse_raw_integer()?;
                         lens.push(cur_array_len);
+                        // parsing array declaration error
+                        // let syntax_error_type = "while parsing array declaration: "
                         self.expect_peek(&RSqureBracket);
                     }
                     end_index = self.cur_token().span.end_index;
@@ -890,6 +891,12 @@ impl Parser {
         } else {
             Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
+    }
+
+    fn syntax_error_at(&mut self, index: usize, err_msg: &str) {
+        let span = Span{start_index: index, end_index: index};
+        let error_stage_info = "syntax error: ".to_string();
+        error_span(span, &(error_stage_info+err_msg));
     }
 
 }
