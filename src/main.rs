@@ -115,20 +115,19 @@ fn main() {
     // pretty::print_tokens(&tokens);
     // parse
     let mut parser = Parser::new(tokens);
-    match parser.parse() {
-        Ok(program) => {
-            // pretty::print_program(&program);
-            // analyze
-            let mut analyzer = ProgramAnalyzer::new();
-            let analyzed_program = analyzer.analyze(program);
-            // codegen
-            set_output(&opt_o);
-            let mut gen = Generator::new(analyzed_program);
-            gen.gen_code();
-        }
-        Err(err) => {
-            println!("{}", err);
-            exit(1);
+    let (program, syntax_errors) = parser.parse();
+    if syntax_errors.is_empty() {
+        // pretty::print_program(&program);
+        // analyze
+        let mut analyzer = ProgramAnalyzer::new();
+        let analyzed_program = analyzer.analyze(program);
+        // codegen
+        set_output(&opt_o);
+        let mut gen = Generator::new(analyzed_program);
+        gen.gen_code();
+    } else {
+        for e in syntax_errors {
+            println!("{}", e);
         }
     }
 }

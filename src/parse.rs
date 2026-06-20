@@ -168,6 +168,7 @@ impl Expr {
 pub struct Parser {
     tokens: Vec<Token>,
     cur_index: usize,
+    syntax_errors: Vec<String>,
 }
 
 impl Parser {
@@ -175,6 +176,7 @@ impl Parser {
         Parser {
             tokens,
             cur_index: 0,
+            syntax_errors: Vec::new(),
         }
     }
 
@@ -186,24 +188,26 @@ impl Parser {
         self.cur_index += 1;
     }
 
+    fn advance(&mut self, n: usize) {
+        self.cur_index += n;
+    }
+
     fn peek_token(&self) -> &Token {
         &self.tokens[self.cur_index+1]
     }
 
     fn find_LBrace_before_encounter_semicolon(&self) -> Result<bool, String> {
         let mut index = self.cur_index;
-        while self.tokens[index].kind != Semicolon {
-            if self.tokens[index].kind == Eof {
-                let err_msg = format!("find_LBrace_before_encounter_semicolon: expect '{{' or ';', but got Eof");
-                return Err(error_token(self.cur_token(), err_msg.as_str()));
-            }
+        while index != self.tokens.len() {
             if self.tokens[index].kind == LBrace {return Ok(true)};
+            if self.tokens[index].kind == Semicolon {return Ok(false)};
             index += 1;
         }
-        return Ok(false);
+        let error_message = format!("From here to eof, can't find ';' or '{{' to start parse!");
+        return Err(error_token(self.cur_token(), &error_message));
     }
 
-    fn skip_cur_token(&mut self, expect_kind: &TokenKind) -> Result<(), String> {
+    fn consume(&mut self, expect_kind: &TokenKind) -> Result<(), String> {
         if &self.cur_token().kind == expect_kind {
             self.next_token();
             Ok(())
@@ -234,21 +238,50 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Program, String> {
-        let mut translation_units: Vec<TranslationUnit> = Vec::new();
+    pub fn sync_parse_point(&mut self) {
         while self.cur_token().kind != Eof {
-            let find_LBrace = self.find_LBrace_before_encounter_semicolon()?;
-            // Only function definition have LBrace, so if we hit LBrace then just start parsing function def.
-            let current_unit = if find_LBrace {
-                FunctionDef(self.parse_fun_def()?)
-            // Others are all declarations.
-            } else {
-                GlobalDecl(self.parse_decl()?)
-            };
-            translation_units.push(current_unit);
+            if (matches!(self.cur_token().kind, Semicolon | RBrace)) {
+                break;
+            }
             self.next_token();
         }
-        Ok(Program{translation_units})
+
+    }
+
+    pub fn parse(mut self) -> (Program, Vec<String>) {
+        let mut translation_units: Vec<TranslationUnit> = Vec::new();
+        while self.cur_token().kind != Eof {
+            let result = self.find_LBrace_before_encounter_semicolon();
+            let find_LBrace: bool;
+            match result {
+                Err(e) => {
+                    self.syntax_errors.push(e);
+                    return (Program{translation_units}, self.syntax_errors);
+                }
+                Ok(find) => find_LBrace = find,
+            }
+            // Only function definition have LBrace, so if we hit LBrace then just start parsing function def.
+            if find_LBrace {
+                match self.parse_fun_def() {
+                    Err(error_message) => {
+                        self.syntax_errors.push(error_message);
+                        self.sync_parse_point();
+                    },
+                    Ok(fun) => translation_units.push(FunctionDef(fun)),
+                }
+            // Others are all declarations.
+            } else {
+                match self.parse_decl() {
+                    Err(error_message) => {
+                        self.syntax_errors.push(error_message);
+                        self.sync_parse_point();
+                    },
+                    Ok(decl) => translation_units.push(GlobalDecl(decl)),
+                }
+            }
+            self.next_token();
+        }
+        return (Program{translation_units}, self.syntax_errors);
     }
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
@@ -280,7 +313,7 @@ impl Parser {
                 }
                 Semicolon => break,
                 _ => {
-                    let err_msg = error_token(self.cur_token(), "invalid token");
+                    let err_msg = error_token(self.cur_token(), "parsing decl error: invalid token");
                     return Err(err_msg);
                 },
             }
@@ -307,7 +340,7 @@ impl Parser {
     }
 
     fn parse_struct_specifier(&mut self) -> Result<StructSpecifer, String> {
-        self.skip_cur_token(&Keyword(Struct));
+        self.consume(&Keyword(Struct));
         match &self.cur_token().clone().kind {
             LexIdent(name) => {
                 if self.peek_token().kind == LBrace {
@@ -330,7 +363,7 @@ impl Parser {
     }
 
     fn parse_struct_decl_list(&mut self) -> Result<Vec<Member>, String> {
-        self.skip_cur_token(&LBrace);
+        self.consume(&LBrace);
         let mut members = Vec::new();
         while self.cur_token().kind != RBrace {
             let decl_spec = self.parse_decl_spec()?;
@@ -372,8 +405,13 @@ impl Parser {
                     let mut lens: Vec<i32> = Vec::new();
                     while &self.peek_token().kind == &LSqureBracket {
                         self.jump_over_next_token(&LSqureBracket);
-                        let cur_array_len: i32 = self.parse_raw_integer()?;
-                        lens.push(cur_array_len);
+                        if let Num(n) = self.cur_token().kind {
+                            let cur_array_len: i32 = self.parse_raw_integer()?;
+                            lens.push(cur_array_len);
+                        } else {
+                            let err_msg = format!("expect a integer after square bracket in array decl");
+                            return Err(error_token(self.cur_token(), &err_msg));
+                        }
                         // parsing array declaration error
                         // let syntax_error_type = "while parsing array declaration: "
                         self.jump_to_next_token(&RSqureBracket);
@@ -418,7 +456,7 @@ impl Parser {
             Keyword(KeywordToken::For) => Ok(StmtType::For(self.parse_for_stmt()?)),
             Keyword(While) => Ok(StmtType::For(self.parse_while_stmt()?)),
             Semicolon => Ok(Block(Vec::new())),
-            LBrace => Ok(Block(self.parse_block()?)),
+            LBrace => Ok(Block(self.parse_block())),
             _ => Ok(Ex(self.parse_expr_stmt()?)),
         }
     }
@@ -434,14 +472,13 @@ impl Parser {
         let mut otherwise = None;
         // parse otherwise (if it exists)
         if self.peek_token().kind == Keyword(Else) {
-            self.next_token();
-            self.skip_cur_token(&Keyword(Else));
+            self.advance(2);
             otherwise = Some(Box::new(self.parse_stmt()?));
         }
         Ok(IfStmt{cond, then, otherwise})
     }
 
-    fn parse_block(&mut self) -> Result<Vec<BlockItem>, String> {
+    fn parse_block(&mut self) -> Vec<BlockItem> {
         let mut items: Vec<BlockItem> = Vec::new();
         self.next_token(); // skip '{'
         let mut cur_kind: TokenKind = self.cur_token().kind.clone();
@@ -450,22 +487,36 @@ impl Parser {
             // @Future: if the token kind is a declaration-specifier (i.e., storage-class-specifier,
             // type-specifier or function-specifier), we parse decl.
             if matches!(cur_kind, Keyword(Struct | TypeSpecifier(_))) {
-                item = Decl(self.parse_decl()?);
+                match self.parse_decl() {
+                    Err(error_message) => {
+                        self.syntax_errors.push(error_message);
+                        self.sync_parse_point();
+                        if (self.cur_token().kind == RBrace) {
+                            break;
+                        }
+                    },
+                    Ok(decl) => items.push(Decl(decl)),
+                }
             } else {
-                item = Stmt(self.parse_stmt()?);
+                match self.parse_stmt() {
+                    Err(error_message) => {
+                        self.syntax_errors.push(error_message);
+                        self.sync_parse_point();
+                        if (self.cur_token().kind == RBrace) {
+                            break;
+                        }
+                    },
+                    Ok(stmt) => items.push(Stmt(stmt)),
+                }
             }
-            items.push(item);
-            // skip semicolon ';'
-            self.next_token();
-            if matches!(cur_kind, Eof) {
-                return Err("parsing block statement error: reach the end of file.".to_string())
-            }
+            self.next_token(); // skip ';' or '}', ready to parse next BlockItem.
             cur_kind = self.cur_token().kind.clone();
         }
-        Ok(items)
+        items
     }
 
     fn parse_ret_stmt(&mut self) -> Result<Expr, String> {
+        debug_assert!(matches!(self.cur_token().kind, Keyword(Ret)));
         self.next_token();
         let expr = self.parse_expr(Lowest)?;
         self.jump_to_next_token(&Semicolon)?;
@@ -479,7 +530,7 @@ impl Parser {
         let inc: Option<Expr>;
         init  = match self.cur_token().kind {
             Semicolon => {
-                self.skip_cur_token(&Semicolon)?;
+                self.consume(&Semicolon)?;
                 None
             },
             _ => {
@@ -490,7 +541,7 @@ impl Parser {
         };
         cond = match self.cur_token().kind {
             Semicolon => {
-                self.skip_cur_token(&Semicolon)?;
+                self.consume(&Semicolon)?;
                 None
             },
             _ => {
@@ -501,7 +552,7 @@ impl Parser {
         };
         inc = match self.cur_token().kind {
             RParen => {
-                self.skip_cur_token(&RParen)?;
+                self.consume(&RParen)?;
                 None
             },
             _ => {
@@ -521,7 +572,7 @@ impl Parser {
         let cond: Option<Expr>;
         cond = match self.cur_token().kind {
             RParen => {
-                self.skip_cur_token(&RParen)?;
+                self.consume(&RParen)?;
                 None
             },
             _ => {
@@ -595,7 +646,7 @@ impl Parser {
 
     fn parse_paren(&mut self) -> Result<Expr, String> {
         let start_index = self.cur_token().span.start_index;
-        self.skip_cur_token(&LParen)?;
+        self.consume(&LParen)?;
         let inner = self.parse_expr(Precedence::Lowest)?;
         self.jump_to_next_token(&RParen)?;
         let end_index = self.cur_token().span.end_index;
@@ -615,7 +666,7 @@ impl Parser {
                     return self.parse_paren();
                 }
             },
-            Num(_) => self.parse_integer(),
+            Num(n) => Ok(self.parse_integer(n)),
             Plus => {
                 self.next_token();
                 self.parse_prefix()
@@ -662,14 +713,14 @@ impl Parser {
             },
             LexIdent(_) => self.parse_ident(),
             StringLiteral(s) => self.parse_string(),
-            _ => Err(error_token(&cur_token_snapshot, "parsing error: can't parse prefix expression here"))
+            _ => Err(error_token(&cur_token_snapshot, "can't parse prefix expression here"))
         }
     }
 
     fn parse_stmt_expr(&mut self) -> Result<Expr, String> {
         let start_index = self.cur_token().span.start_index;
-        self.skip_cur_token(&LParen);
-        let items = self.parse_block()?;
+        self.consume(&LParen);
+        let items = self.parse_block();
         self.jump_to_next_token(&RParen);
         let end_index = self.cur_token().span.end_index;
         let expr_span = Span{start_index, end_index};
@@ -703,18 +754,14 @@ impl Parser {
         }
     }
 
-    fn parse_integer(&self) -> Result<Expr, String> {
-        let tok = self.cur_token().clone();
-        if let Num(n) = tok.kind {
-            let span = Span {
-                start_index: tok.span.start_index,
-                end_index: tok.span.end_index,
-                            };
-            let expr = Expr::new(Number(n), span);
-            return Ok(expr);
-        } else {
-            return Err(error_token(self.cur_token(), "expect a number"));
-        }
+    fn parse_integer(&self, n: i32) -> Expr {
+        debug_assert!(matches!(self.cur_token().kind, Num(_)));
+        let span = Span {
+            start_index: self.cur_token().span.start_index,
+            end_index: self.cur_token().span.end_index,
+        };
+        let expr = Expr::new(Number(n), span);
+        return expr;
     }
 
     fn parse_raw_integer(&self) -> Result<i32, String> {
@@ -754,7 +801,7 @@ impl Parser {
                 let content = ExprType::Assign(Box::new(lhs), Box::new(val));
                 Ok(Expr::new(content, span))
             },
-            _ => Err(error_span(lhs.span, "definitely not a lvalue name")),
+            _ => Err(syntax_error(lhs.span, "definitely not a lvalue name")),
         }
     }
 
@@ -857,7 +904,7 @@ impl Parser {
         let declarator = self.parse_declarator()?;
         if let Some(FunParam(params)) = &declarator.suffix {
             self.jump_to_next_token(&LBrace);
-            let items = self.parse_block()?;
+            let items = self.parse_block();
             Ok(Function{name: declarator.name, name_span: declarator.span, return_type,
                 star_count: declarator.star_count, params: params.clone(), items})
         } else {
@@ -865,12 +912,11 @@ impl Parser {
         }
     }
 
-    fn syntax_error_at(&mut self, index: usize, err_msg: &str) {
-        let span = Span{start_index: index, end_index: index};
-        let error_stage_info = "syntax error: ".to_string();
-        error_span(span, &(error_stage_info+err_msg));
-    }
+}
 
+fn syntax_error(span: Span, err_msg: &str) -> String {
+    let error_stage_info = "syntax error: ".to_string();
+    error_span(span, &(error_stage_info+err_msg))
 }
 
 fn error_span(span: Span, info: &str) -> String {
@@ -892,5 +938,5 @@ fn error_span(span: Span, info: &str) -> String {
 }
 
 fn error_token(tok: &Token, info: &str) -> String {
-    error_span(tok.span, info)
+    syntax_error(tok.span, info)
 }

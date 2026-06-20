@@ -67,9 +67,10 @@ test: $(TESTS)
 
 # `make clean`: remove cargo artifacts, generated .s/.exe, temp + backup files.
 clean:
-	cargo clean
 	rm -rf tmp* $(TESTS) test/*.s test/*.exe
 	find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
+
+fulltest: clean test
 
 # These are command names, not files to produce, so always run them even if a
 # file of the same name happens to exist in the directory.
