@@ -240,12 +240,15 @@ impl Parser {
 
     pub fn sync_parse_point(&mut self) {
         while self.cur_token().kind != Eof {
-            if (matches!(self.cur_token().kind, Semicolon | RBrace)) {
-                break;
+            if (matches!(self.cur_token().kind, Semicolon | RBrace | RParen | RSqureBracket)) {
+                self.next_token();
+                return;
+            }
+            if (matches!(self.cur_token().kind, LBrace | LParen | RSqureBracket)) {
+                return;
             }
             self.next_token();
         }
-
     }
 
     pub fn parse(mut self) -> (Program, Vec<String>) {
@@ -266,6 +269,7 @@ impl Parser {
                     Err(error_message) => {
                         self.syntax_errors.push(error_message);
                         self.sync_parse_point();
+                        continue;
                     },
                     Ok(fun) => translation_units.push(FunctionDef(fun)),
                 }
@@ -275,6 +279,7 @@ impl Parser {
                     Err(error_message) => {
                         self.syntax_errors.push(error_message);
                         self.sync_parse_point();
+                        continue;
                     },
                     Ok(decl) => translation_units.push(GlobalDecl(decl)),
                 }
@@ -481,19 +486,16 @@ impl Parser {
     fn parse_block(&mut self) -> Vec<BlockItem> {
         let mut items: Vec<BlockItem> = Vec::new();
         self.next_token(); // skip '{'
-        let mut cur_kind: TokenKind = self.cur_token().kind.clone();
-        while cur_kind != RBrace {
+        while self.cur_token().kind != RBrace {
             let item: BlockItem;
             // @Future: if the token kind is a declaration-specifier (i.e., storage-class-specifier,
             // type-specifier or function-specifier), we parse decl.
-            if matches!(cur_kind, Keyword(Struct | TypeSpecifier(_))) {
+            if matches!(self.cur_token().kind, Keyword(Struct | TypeSpecifier(_))) {
                 match self.parse_decl() {
                     Err(error_message) => {
                         self.syntax_errors.push(error_message);
                         self.sync_parse_point();
-                        if (self.cur_token().kind == RBrace) {
-                            break;
-                        }
+                        continue;
                     },
                     Ok(decl) => items.push(Decl(decl)),
                 }
@@ -502,15 +504,12 @@ impl Parser {
                     Err(error_message) => {
                         self.syntax_errors.push(error_message);
                         self.sync_parse_point();
-                        if (self.cur_token().kind == RBrace) {
-                            break;
-                        }
+                        continue;
                     },
                     Ok(stmt) => items.push(Stmt(stmt)),
                 }
             }
             self.next_token(); // skip ';' or '}', ready to parse next BlockItem.
-            cur_kind = self.cur_token().kind.clone();
         }
         items
     }
