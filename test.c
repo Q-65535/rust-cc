@@ -29,6 +29,7 @@ int main() {
             return 0;
         }
         sleep(1);
+    // @CompilerBug: If without the RBrace, compiler will trap in an infinite loop.
     }
     return 0;
 }

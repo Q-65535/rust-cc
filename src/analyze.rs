@@ -240,19 +240,19 @@ impl ProgramAnalyzer {
     pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<ir::Declaration> {
         let mut decls: Vec<ir::Declaration> = Vec::new();
         let base_type = self.analyze_decl_spec(&decl.decl_spec);
-        for init in &mut decl.init_declarators {
-            if let Some(_) = self.global_scope.resolve_symbol(&init.declarator.name) {
-                let err_info = format!("global variable {} already defined", init.declarator.name);
+        for declarator in &mut decl.declarators {
+            if let Some(_) = self.global_scope.resolve_symbol(&declarator.name) {
+                let err_info = format!("global variable {} already defined", declarator.name);
                 // TODO: error handling
-                print_error_at(init.declarator.span, &err_info);
+                print_error_at(declarator.span, &err_info);
             }
             // deal with pointers
             let mut cur_type = base_type.clone();
-            for i in 0..init.declarator.star_count {
+            for i in 0..declarator.star_count {
                 cur_type = pointer_to(&cur_type);
             }
             // deal with suffix
-            if let Some(suffix) = &mut init.declarator.suffix {
+            if let Some(suffix) = &mut declarator.suffix {
                 match suffix {
                     DeclaratorSuffix::ArrayLen(lens) => {
                         while lens.len() > 0 {
@@ -263,7 +263,7 @@ impl ProgramAnalyzer {
                     DeclaratorSuffix::FunParam(_) => todo!(),
                 }
             }
-            if let Some(expr) = &mut init.init_expr {
+            if let Some(expr) = &mut declarator.init_expr {
                 let analyzed_expr = self.analyze_expr(expr);
                 // @Future: Currently, we only support constant number assignment.
                 // We will add array and struct initialization expr assignment in the future.
@@ -271,10 +271,10 @@ impl ProgramAnalyzer {
                     ir::ExprType::Number(n) => {
                         if !can_assign(&cur_type, &analyzed_expr.ty) {
                             let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                            init.declarator.name, &cur_type, &analyzed_expr.ty);
-                            print_error_at(init.declarator.span, &err_info);
+                            declarator.name, &cur_type, &analyzed_expr.ty);
+                            print_error_at(declarator.span, &err_info);
                         } else {
-                            let object = create_global_obj(&init.declarator.name, &cur_type);
+                            let object = create_global_obj(&declarator.name, &cur_type);
                             let value_in_bytes = n.to_le_bytes();
                             let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: Some(value_in_bytes.to_vec())};
                             decls.push(analyzed_decl);
@@ -287,7 +287,7 @@ impl ProgramAnalyzer {
                     }
                 }
             } else { // decl without initializer
-                let object = create_global_obj(&init.declarator.name, &cur_type);
+                let object = create_global_obj(&declarator.name, &cur_type);
                 let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: None};
                 decls.push(analyzed_decl);
                 self.global_scope.add_obj(object);
@@ -358,18 +358,18 @@ impl ProgramAnalyzer {
     fn analyze_decl(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         let base_type = self.analyze_decl_spec(&decl.decl_spec);
-        for init in &mut decl.init_declarators {
-            if let Some(_) = self.cur_scope_tracker.resolve_symbol_at_current_scope(&init.declarator.name) {
-                let err_info = format!("variable {} already defined", init.declarator.name);
-                print_error_at(init.declarator.span, &err_info);
+        for declarator in &mut decl.declarators {
+            if let Some(_) = self.cur_scope_tracker.resolve_symbol_at_current_scope(&declarator.name) {
+                let err_info = format!("variable {} already defined", declarator.name);
+                print_error_at(declarator.span, &err_info);
             }
             // deal with pointers
             let mut cur_type = base_type.clone();
-            for i in 0..init.declarator.star_count {
+            for i in 0..declarator.star_count {
                 cur_type = pointer_to(&cur_type);
             }
             // deal with suffix
-            if let Some(suffix) = &init.declarator.suffix {
+            if let Some(suffix) = &declarator.suffix {
                 match suffix {
                     DeclaratorSuffix::ArrayLen(lens) => {
                         for len in lens.iter().rev() {
@@ -380,18 +380,18 @@ impl ProgramAnalyzer {
                 }
             }
 
-            let obj = self.create_obj(&cur_type, &init.declarator.name);
+            let obj = self.create_obj(&cur_type, &declarator.name);
             self.cur_scope_tracker.add_obj(obj.clone());
-            if let Some(expr) = &mut init.init_expr {
+            if let Some(expr) = &mut declarator.init_expr {
                 let analyzed_expr = self.analyze_expr(expr);
                 if !can_assign(&obj.ty, &analyzed_expr.ty) {
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                     obj.name, &obj.ty, &analyzed_expr.ty);
-                    print_error_at(init.declarator.span, &err_info);
+                    print_error_at(declarator.span, &err_info);
                 } else {
                     let expr = self.gen_expr_from_obj(&obj);
                     let content = ir::ExprType::Assign(Box::new(expr), Box::new(analyzed_expr));
-                    let generated_expr = ir::Expr{content, ty: obj.ty, span: init.declarator.span};
+                    let generated_expr = ir::Expr{content, ty: obj.ty, span: declarator.span};
                     let generated_stmt = ir::StmtType::Ex(generated_expr);
                     stmts.push(generated_stmt);
                 }

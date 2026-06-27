@@ -81,7 +81,7 @@ pub struct Parameter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub decl_spec: DeclarationSpecifier,
-    pub init_declarators: Vec<InitDeclarator>,
+    pub declarators: Vec<Declarator>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,16 +115,11 @@ pub enum StructSpecifer {
 use StructSpecifer::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct InitDeclarator {
-    pub declarator: Declarator,
-    pub init_expr: Option<Expr>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
     pub star_count: i32,
     pub name: String,
     pub suffix: Option<DeclaratorSuffix>,
+    pub init_expr: Option<Expr>,
     pub span: Span,
 }
 
@@ -290,27 +285,13 @@ impl Parser {
     }
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
+        let mut declarators: Vec<Declarator> = Vec::new();
         let decl_spec = self.parse_decl_spec()?;
         self.next_token();
-
-        // parse init declarators
-        let mut init_declarators: Vec<InitDeclarator> = Vec::new();
-        loop {
-            if self.cur_token().kind == Semicolon {
-                return Ok(Declaration{decl_spec, init_declarators});
-            }
+        while self.cur_token().kind != Semicolon {
             let declarator = self.parse_declarator()?;
+            declarators.push(declarator);
             self.next_token();
-            let mut init_expr = None;
-            if let Assignment = self.cur_token().kind {
-                let assignment_token = self.cur_token().clone();
-                self.next_token();
-                let expr = self.parse_expr(assignment_token.precedence())?;
-                self.next_token();
-                init_expr = Some(expr);
-            }
-            let init_declarator = InitDeclarator {declarator, init_expr};
-            init_declarators.push(init_declarator);
             match self.cur_token().kind {
                 Comma => {
                     self.next_token();
@@ -323,8 +304,7 @@ impl Parser {
                 },
             }
         }
-        let declaration = Declaration{decl_spec, init_declarators};
-        Ok(declaration)
+        return Ok(Declaration{decl_spec, declarators});
     }
 
     fn parse_decl_spec(&mut self) -> Result<DeclarationSpecifier, String> {
@@ -444,9 +424,18 @@ impl Parser {
                 }
                 _ => {},
             }
+            // This span doesn't include init_expr, just the declarator itself!
+            // The init expr has its own span.
             let span = Span{start_index, end_index};
-
-            Ok(Declarator{star_count, name, suffix, span})
+            let mut init_expr = None;
+            if let Assignment = self.peek_token().kind {
+                self.jump_to_next_token(&Assignment);
+                let assignment_precedence = self.cur_token().precedence();
+                self.consume(&Assignment);
+                let expr = self.parse_expr(assignment_precedence)?;
+                init_expr = Some(expr);
+            }
+            Ok(Declarator{star_count, name, suffix, init_expr, span})
         } else {
             let err_msg = error_token(self.cur_token(), "not an identifier");
             return Err(err_msg);

@@ -196,19 +196,19 @@ fn print_declaration(d: &Declaration, prefix: &str, is_last: bool) {
     let conn = if is_last { LAST } else { TEE };
     println!("{prefix}{conn}{MAGENTA}Decl{RESET}  {DIM}type={ty}{RESET}");
     let cp = child_prefix(prefix, is_last);
-    let ic = d.init_declarators.len();
-    for (i, id) in d.init_declarators.iter().enumerate() {
-        print_init_declarator(id, ty, &cp, i + 1 == ic);
+    let ic = d.declarators.len();
+    for (i, id) in d.declarators.iter().enumerate() {
+        print_declarator(id, ty, &cp, i + 1 == ic);
     }
 }
 
-fn print_init_declarator(id: &InitDeclarator, base_ty: &str, prefix: &str, is_last: bool) {
-    let stars  = "*".repeat(id.declarator.star_count as usize);
-    let suffix = declarator_suffix_str(&id.declarator.suffix);
+fn print_declarator(id: &Declarator, base_ty: &str, prefix: &str, is_last: bool) {
+    let stars  = "*".repeat(id.star_count as usize);
+    let suffix = declarator_suffix_str(&id.suffix);
     let conn   = if is_last { LAST } else { TEE };
     println!(
         "{prefix}{conn}{CYAN}{}{RESET}{DIM}: {stars}{base_ty}{suffix}{RESET}",
-        id.declarator.name
+        id.name
     );
     if let Some(expr) = &id.init_expr {
         let cp = child_prefix(prefix, is_last);

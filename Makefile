@@ -52,6 +52,8 @@ struct_test:
 	echo struct.exe; ./struct.exe || exit 1; echo;
 
 local_test:
+	rm -f test.s
+	rm -f test.exe
 	cargo build
 	$(RUST_CC) -o test.s test.c
 	gcc -o test.exe test.s
@@ -67,6 +69,7 @@ test: $(TESTS)
 
 # `make clean`: remove cargo artifacts, generated .s/.exe, temp + backup files.
 clean:
+	cargo clean
 	rm -rf tmp* $(TESTS) test/*.s test/*.exe
 	find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
 
