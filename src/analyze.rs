@@ -22,6 +22,7 @@ pub enum Type {
     // function return ... type
     TyFunc(Box<Type>),
     TyStruct(ir::Struct),
+    TyTagged(String),
     ty_none,
 }
 use Type::*;
@@ -71,14 +72,14 @@ pub struct Obj {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
     pub objects: Vec<Obj>,
-    pub named_structs: Vec<ir::Struct>,
+    pub tags: Vec<ir::Tagged_Struct>,
 }
 
 impl Scope {
     pub fn new() -> Self {
         Scope{
             objects: Vec::new(),
-            named_structs: Vec::new(),
+            tags: Vec::new(),
         }
     }
 
@@ -92,7 +93,7 @@ impl Scope {
     }
 
     pub fn resolve_struct_tag(&self, s: &str) -> Option<&ir::Struct> {
-        for st in &self.named_structs {
+        for st in &self.tags {
             if let Some(name) = &st.tag_name {
                 if name == s{
                     return Some(st);
@@ -106,8 +107,9 @@ impl Scope {
         self.objects.push(o);
     }
 
-    pub fn add_named_struct(&mut self, st: ir::Struct) {
-        self.named_structs.push(st);
+    pub fn add_tagged_struct(&mut self, tag_name: String, attribute: ir::Struct) {
+        let tagged_struct = ir::Tagged_Struct{tag_name, attribute};
+        self.tags.push(tagged_struct);
     }
 }
 
@@ -134,7 +136,7 @@ impl ScopeTracker {
         self.current_scope_index -= 1;
     }
 
-    pub fn resolve_struct_tag(&self, s: &str) -> Option<&ir::Struct> {
+    pub fn resolve_tag(&self, s: &str) -> Option<&ir::Struct> {
         let index = self.current_scope_index;
         for i in (0..=index).rev() {
             let current_scope = &self.scopes[i];
@@ -145,7 +147,7 @@ impl ScopeTracker {
         return None
     }
 
-    pub fn resolve_struct_tag_at_current_scope(&self, s: &str) -> Option<&ir::Struct> {
+    pub fn resolve_tag_at_current_scope(&self, s: &str) -> Option<&ir::Struct> {
         let current_scope = &self.scopes[self.current_scope_index];
         return current_scope.resolve_struct_tag(s);
     }
@@ -171,9 +173,9 @@ impl ScopeTracker {
         current_scope.add_obj(o);
     }
 
-    pub fn add_named_struct(&mut self, st: ir::Struct) {
+    pub fn add_struct_spec(&mut self, st: ir::Struct) {
         let current_scope = &mut self.scopes[self.current_scope_index];
-        current_scope.add_named_struct(st);
+        current_scope.add_tagged_struct(st);
     }
 
     pub fn add_private_global_obj(&mut self, o: Obj) {
@@ -404,48 +406,35 @@ impl ProgramAnalyzer {
         match decl_spec {
             SpecInt => TyInt,
             SpecChar => TyChar,
-            SpecStruct(st) => {
-                let analyzed_struct = self.analyze_struct(st);
-                TyStruct(analyzed_struct)
-            },
+            SpecStruct(st) => self.analyze_struct(st),
         }
     }
 
-    fn analyze_struct(&mut self, st: &StructSpecifer) -> ir::Struct {
-        match st {
-            StructSpecifer::List(name_or_none, members) => {
-                let mut analyzed_struct = self.analyze_struct_members(members);
-                if let Some(name) = name_or_none {
-                    if let None = self.cur_scope_tracker.resolve_struct_tag_at_current_scope(name) {
-                        analyzed_struct.tag_name = Some(name.clone());
-                        self.cur_scope_tracker.add_named_struct(analyzed_struct.clone());
-                    } else {
-                        let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
-                        // @TODO add span info to declaration specifier
-                        print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
-                    }
-                    return analyzed_struct;
+    fn analyze_struct(&mut self, st: &StructSpecifer) -> Type {
+        if let Some(name) = &st.name {
+            let mut struct_spec = ir::Tagged_Struct{tag_name: name.clone(), attribute: None};
+            if let Some(members) = &st.members {
+                if let None = self.cur_scope_tracker.resolve_tag_at_current_scope(name) {
+                    struct_spec.attribute = self.analyze_struct_members(members);
+                    self.cur_scope_tracker.add_tagged_struct(name.clone(), struct_spec);
                 } else {
-                    return analyzed_struct;
-                }
-            },
-            StructSpecifer::Identifier(name) => {
-                if let Some(analyzed_struct) = self.cur_scope_tracker.resolve_struct_tag(name) {
-                    return analyzed_struct.clone();
-                } else {
-                    let err_info = format!("semantic error: unknown struct tag name: '{}'", name);
+                    let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
-                    // @Fix: This is becoming rediculous, we definitely shold not return a random struct to
-                    // satisfy the requirements of this function.
-                    return ir::Struct{
-                        tag_name: None,
-                        members: Vec::new(),
-                        size: 0,
-                        align: 0,
-                    };
                 }
-            },
+            }
+            return TyTagged(name.clone());
+        } else {
+            if let Some(members) = &st.members {
+                    let attribute = self.analyze_struct_members(members);
+                    return TyStruct(attribute);
+            } else {
+                let err_info = format!("semantic error: analyzing strcut decl: both identifier and decl list are empty.");
+                // @TODO add span info to declaration specifier
+                print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
+                // @Refactor: We return an error here.
+                return ty_none;
+            }
         }
     }
 
@@ -466,7 +455,6 @@ impl ProgramAnalyzer {
         }
         let struct_size = align_to(offset, struct_align);
         return ir::Struct{
-            tag_name: None,
             members: analyzed_members,
             size: struct_size,
             align: struct_align,

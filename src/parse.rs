@@ -108,11 +108,10 @@ pub enum DeclarationSpecifier {
 use DeclarationSpecifier::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum StructSpecifer {
-    List(Option<String>, Vec<Member>),
-    Identifier(String),
+pub struct StructSpecifer {
+    pub name: Option<String>,
+    pub members: Option<Vec<Member>>,
 }
-use StructSpecifer::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
@@ -326,25 +325,24 @@ impl Parser {
 
     fn parse_struct_specifier(&mut self) -> Result<StructSpecifer, String> {
         self.consume(&Keyword(Struct));
+        let mut struct_specifier = StructSpecifer{name: None, members: None};
         match &self.cur_token().clone().kind {
             LexIdent(name) => {
+                struct_specifier.name = Some(name.clone());
                 if self.peek_token().kind == LBrace {
                     self.next_token();
-                    let struct_decl_list = self.parse_struct_decl_list()?;
-                    return Ok(StructSpecifer::List(Some(name.clone()), struct_decl_list));
-                } else {
-                    return Ok(StructSpecifer::Identifier(name.clone()));
+                    struct_specifier.members = Some(self.parse_struct_decl_list()?);
                 }
             },
             LBrace => {
-                let struct_decl_list = self.parse_struct_decl_list()?;
-                return Ok(StructSpecifer::List(None, struct_decl_list));
+                struct_specifier.members = Some(self.parse_struct_decl_list()?);
             },
             _ => {
-                let err_msg = error_token(self.cur_token(), "syntatic error: parsing struct specifier error: unknown token after 'struct'");
+                let err_msg = error_token(self.cur_token(), "parsing struct specifier error: unknown token after 'struct'");
                 return Err(err_msg);
             }
         }
+        return Ok(struct_specifier);
     }
 
     fn parse_struct_decl_list(&mut self) -> Result<Vec<Member>, String> {
