@@ -392,7 +392,7 @@ fn decl_spec_str(ds: &TypeSpec) -> &'static str {
     match ds {
         TypeSpec::Int => "int",
         TypeSpec::Char => "char",
-        TypeSpec::SpecStruct(_) => "struct",
+        TypeSpec::Struct(_) => "struct",
     }
 }
 

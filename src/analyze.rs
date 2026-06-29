@@ -7,7 +7,6 @@ use ExprType::*;
 use StmtType::*;
 use TokenKind::{Plus, Minus, Mul, Div, Eq, Neq, LT, LE, GT, GE};
 use BlockItem::*;
-use TypeSpec::*;
 use crate::SRC;
 use crate::common::{self, *};
 
@@ -424,7 +423,7 @@ impl ProgramAnalyzer {
         match decl_spec {
             TypeSpec::Int => Type::Int,
             TypeSpec::Char => Type::Char,
-            TypeSpec::SpecStruct(st) => self.analyze_struct(st),
+            TypeSpec::Struct(st) => self.analyze_struct(st),
         }
     }
 

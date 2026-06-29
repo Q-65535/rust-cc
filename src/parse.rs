@@ -94,9 +94,8 @@ pub struct Member {
 pub enum TypeSpec {
     Int,
     Char,
-    SpecStruct(StructSpecifier),
+    Struct(StructSpecifier),
 }
-use TypeSpec::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructSpecifier {
@@ -305,7 +304,7 @@ impl Parser {
             TokenKind::Char => Ok(TypeSpec::Char),
             TokenKind::Struct => {
                 let struct_spec = self.parse_struct_specifier()?;
-                Ok(SpecStruct(struct_spec))
+                Ok(TypeSpec::Struct(struct_spec))
             },
             _ => {
                 let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
