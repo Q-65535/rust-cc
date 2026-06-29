@@ -47,7 +47,8 @@ test/%.exe: build test/%.c
 
 # `make struct`: build and run just the struct.c test.
 struct_test:
-	$(CC) -o- -E -P -C test/struct.c | $(RUST_CC) -o test/struct.s -
+	$(CC) -E -P -C test/struct.c -o test/struct.i
+	$(RUST_CC) -o test/struct.s test/struct.i
 	$(CC) -o struct.exe test/struct.s -xc test/common
 	echo struct.exe; ./struct.exe || exit 1; echo;
 

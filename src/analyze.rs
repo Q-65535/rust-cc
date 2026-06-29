@@ -35,9 +35,8 @@ impl Type {
             TyChar => 1,
             ArrayOf(element_ty, len) => element_ty.align(),
             TyFunc(_) => 8,
-            TyStruct(st) => {
-                st.align
-            },
+            TyStruct(st) => st.align,
+            TyTagged(_) => 0,
             ty_none => 1,
         }
     }
@@ -52,6 +51,12 @@ pub fn sizeof(ty: &Type) -> i32 {
         TyFunc(_) => 8,
         TyStruct(st) => {
             st.size
+        },
+        TyTagged(tag_name) => {
+            // @Refactor: Return an error.
+            let error_info = format!("unable to get the size of incomplete type");
+            println!("{}", error_info);
+            exit(1);
         },
         // @TODO This should return 0.
         ty_none => 8,
@@ -94,12 +99,14 @@ impl Scope {
 
     pub fn resolve_struct_tag(&self, s: &str) -> Option<&ir::Struct> {
         for st in &self.tags {
-            if let Some(name) = &st.tag_name {
-                if name == s{
-                    return Some(st);
+            if &st.tag_name == s {
+                if let Some(attribute) = &st.attribute {
+                    return Some(attribute);
                 }
+                break;
             }
         }
+        // @Smell: What does this None mean? No such name found or found but the struct attribute is None.
         None
     }
 
@@ -107,9 +114,15 @@ impl Scope {
         self.objects.push(o);
     }
 
-    pub fn add_tagged_struct(&mut self, tag_name: String, attribute: ir::Struct) {
-        let tagged_struct = ir::Tagged_Struct{tag_name, attribute};
-        self.tags.push(tagged_struct);
+    pub fn add_tagged_struct(&mut self, tagged: ir::Tagged_Struct) {
+        // debug_assert!(self.resolve_struct_tag(&tagged.tag_name) == None);
+        for st in &mut self.tags {
+            if &st.tag_name == &tagged.tag_name {
+                st.attribute = tagged.attribute;
+                return;
+            }
+        }
+        self.tags.push(tagged);
     }
 }
 
@@ -173,9 +186,9 @@ impl ScopeTracker {
         current_scope.add_obj(o);
     }
 
-    pub fn add_struct_spec(&mut self, st: ir::Struct) {
+    pub fn add_tagged_struct(&mut self, tagged: ir::Tagged_Struct) {
         let current_scope = &mut self.scopes[self.current_scope_index];
-        current_scope.add_tagged_struct(st);
+        current_scope.add_tagged_struct(tagged);
     }
 
     pub fn add_private_global_obj(&mut self, o: Obj) {
@@ -382,6 +395,17 @@ impl ProgramAnalyzer {
                 }
             }
 
+            if let TyTagged(tag_name) = cur_type.clone() {
+                match self.cur_scope_tracker.resolve_tag(&tag_name) {
+                    Some(attribute) => cur_type = TyStruct(attribute.clone()),
+                    None => {
+                        let err_info = format!("storage size of {} is unkonwn", &declarator.name);
+                        print_error_at(declarator.span, &err_info);
+                        continue;
+                    },
+                }
+            }
+
             let obj = self.create_obj(&cur_type, &declarator.name);
             self.cur_scope_tracker.add_obj(obj.clone());
             if let Some(expr) = &mut declarator.init_expr {
@@ -412,11 +436,13 @@ impl ProgramAnalyzer {
 
     fn analyze_struct(&mut self, st: &StructSpecifer) -> Type {
         if let Some(name) = &st.name {
-            let mut struct_spec = ir::Tagged_Struct{tag_name: name.clone(), attribute: None};
             if let Some(members) = &st.members {
+                let struct_spec = ir::Tagged_Struct{
+                    tag_name: name.clone(),
+                    attribute: Some(self.analyze_struct_members(members)),
+                };
                 if let None = self.cur_scope_tracker.resolve_tag_at_current_scope(name) {
-                    struct_spec.attribute = self.analyze_struct_members(members);
-                    self.cur_scope_tracker.add_tagged_struct(name.clone(), struct_spec);
+                    self.cur_scope_tracker.add_tagged_struct(struct_spec);
                 } else {
                     let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
@@ -705,39 +731,36 @@ impl ProgramAnalyzer {
                 let mut struct_ref = self.analyze_expr(struct_ref);
                 let mut offset: i32 = 0;
                 let mut ty = ty_none;
-                let cur_ty = struct_ref.ty.clone();
-                match cur_ty {
-                    TyStruct(st) => {
-                        match st.get_member(&member_name) {
-                            Ok(m) => {
-                                offset = m.offset;
-                                ty = m.ty;
-                            },
-                            Err(err) => print_error_at(expr.span, &err),
-                        }
-                    },
-                    TyPtr(inner) => {
-                        if let TyStruct(st) = *inner {
-                            let deref_ty = TyStruct(st.clone());
-                            let content = ExprType::Deref(Box::new(struct_ref));
-                            struct_ref = ir::Expr{content, ty: deref_ty, span};
-                            match st.get_member(&member_name) {
-                                Ok(m) => {
-                                    offset = m.offset;
-                                    ty = m.ty;
-                                },
-                                Err(err) => print_error_at(expr.span, &err),
-                            }
-                        } else {
-                            let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
-                            print_error_at(struct_ref.span, &err_info);
-                        }
-                    },
-                    _ => {
-                        let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
+                let mut cur_ty = struct_ref.ty.clone();
+                if let TyPtr(inner) =  cur_ty.clone() {
+                    cur_ty = *inner;
+                    let content = ExprType::Deref(Box::new(struct_ref));
+                    struct_ref = ir::Expr{content, ty: cur_ty.clone(), span};
+                }
+
+                if let TyTagged(tag_name) = cur_ty.clone() {
+                    let result = self.cur_scope_tracker.resolve_tag(&tag_name).clone();
+                    if let Some(st) = result {
+                        cur_ty = TyStruct(st.clone());
+                    } else {
+                        let err_info = format!("it has incomplete struct or union type definition.");
                         print_error_at(struct_ref.span, &err_info);
                     }
                 }
+
+                if let TyStruct(st) = cur_ty {
+                    match st.get_member(&member_name) {
+                        Ok(m) => {
+                            offset = m.offset;
+                            ty = m.ty;
+                        },
+                        Err(err) => print_error_at(expr.span, &err),
+                    }
+                } else {
+                    let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
+                    print_error_at(struct_ref.span, &err_info);
+                }
+
                 let content = ir::ExprType::RequestStructMember(Box::new(struct_ref), offset);
                 ir::Expr{content, ty, span}
             }
