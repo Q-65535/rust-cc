@@ -18,44 +18,23 @@ pub enum TokenKind {
     LSqureBracket,
     RSqureBracket,
     Assignment,
-    Compare(CompareToken),
+    // Compares
+    Eq, Neq, LT, LE, GT, GE,
     Not,
     Arrow,
     Ampersand,
-    Num(i32),
     Semicolon,
     Comma,
+    Num(i32),
     LexIdent(String),
     StringLiteral(Vec<u8>),
-    Keyword(KeywordToken),
+    // Keywords
+    Ret, If, Else, For, While,
+    Sizeof, Struct, Int, Char,
+
     Eof,
 }
 use TokenKind::*;
-
-#[derive(PartialEq, Clone, Debug)]
-pub enum CompareToken {
-    Eq,
-    Neq,
-    LT,
-    LE,
-    GT,
-    GE,
-}
-use CompareToken::*;
-
-#[derive(PartialEq, Clone, Debug)]
-pub enum KeywordToken {
-    Ret,
-    If,
-    Else,
-    For,
-    While,
-    Sizeof,
-    Struct,
-    Int,
-    Char,
-}
-use KeywordToken::*;
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, PartialOrd)]
@@ -100,22 +79,23 @@ impl Token {
 
     pub fn is_decl_spec(&self) -> bool {
         match self.kind {
-            Keyword(Struct | Int | Char) => true,
+            (Struct | Int | Char) => true,
             _ => false,
         }
     }
 }
 
 pub fn precedence(kind: &TokenKind) -> Precedence {
+    use Precedence::{*};
     return match kind {
-        Comma => Precedence::LV1,
-        Assignment => Precedence::LV2,
-        Compare(_) => Precedence::LV3,
-        Plus | Minus => Precedence::LV4,
-        Mul | Div => Precedence::LV5,
-        LParen | LSqureBracket => Precedence::LV6,
-        Period | Arrow => Precedence::LV7,
-        _ => Precedence::Lowest,
+        Comma =>LV1,
+        Assignment => LV2,
+        Eq | Neq | LT | LE | GT | GE => LV3,
+        Plus | Minus => LV4,
+        Mul | Div => LV5,
+        LParen | LSqureBracket => LV6,
+        Period | Arrow => LV7,
+        _ => Lowest,
     }
 }
 
@@ -129,15 +109,15 @@ impl Lexer {
     pub fn new(s: &str) -> Lexer {
         let keywords: HashMap<String, TokenKind> = vec![
             // Add more keywords here.
-            ("return".to_string(), Keyword(Ret)),
-            ("if".to_string(), Keyword(If)),
-            ("else".to_string(), Keyword(Else)),
-            ("for".to_string(), Keyword(For)),
-            ("while".to_string(), Keyword(While)),
-            ("int".to_string(), Keyword(Int)),
-            ("sizeof".to_string(), Keyword(Sizeof)),
-            ("struct".to_string(), Keyword(Struct)),
-            ("char".to_string(), Keyword(Char)),
+            ("return".to_string(), Ret),
+            ("if".to_string(), If),
+            ("else".to_string(), Else),
+            ("for".to_string(), For),
+            ("while".to_string(), While),
+            ("int".to_string(), Int),
+            ("sizeof".to_string(), Sizeof),
+            ("struct".to_string(), Struct),
+            ("char".to_string(), Char),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),
@@ -238,7 +218,7 @@ impl Lexer {
                 '=' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(Eq), start_index, 2));
+                            tokens.push(Self::gen_token(Eq, start_index, 2));
                             self.next_char();
                         },
                         _ => tokens.push(Self::gen_token(Assignment, start_index, 1)),
@@ -247,7 +227,7 @@ impl Lexer {
                 '!' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(Neq), start_index, 2));
+                            tokens.push(Self::gen_token(Neq, start_index, 2));
                             self.next_char();
                         },
                         _ => tokens.push(Self::gen_token(Not, start_index, 1)),
@@ -256,19 +236,19 @@ impl Lexer {
                 '<' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(LE), start_index, 2));
+                            tokens.push(Self::gen_token(LE, start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Compare(LT), start_index, 1)),
+                        _ => tokens.push(Self::gen_token(LT, start_index, 1)),
                     }
                 },
                 '>' => {
                     match self.peek_char() {
                         Some('=') => {
-                            tokens.push(Self::gen_token(Compare(GE), start_index, 2));
+                            tokens.push(Self::gen_token(GE, start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Compare(GT), start_index, 1)),
+                        _ => tokens.push(Self::gen_token(GT, start_index, 1)),
                     }
                 },
                 '0'..='9' => {

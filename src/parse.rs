@@ -3,9 +3,7 @@ use colored::*;
 use crate::lex::{self, *};
 use crate::lex::Precedence::{self, *};
 use crate::lex::TokenKind::{self, *};
-use crate::lex::KeywordToken::{self, *};
 use ExprType::*;
-// use crate::Type::{self, *};
 use crate::SRC;
 use crate::common::{self, *};
 
@@ -81,11 +79,6 @@ pub struct Parameter {
 pub struct Declaration {
     pub decl_spec: TypeSpec,
     pub declarators: Vec<Declarator>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Struct {
-    pub members: Vec<Member>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -308,9 +301,9 @@ impl Parser {
         let kind = &self.cur_token().kind;
         let decl_spec: TypeSpec;
         match kind {
-            Keyword(KeywordToken::Int) => Ok(TypeSpec::Int),
-            Keyword(KeywordToken::Char) => Ok(TypeSpec::Char),
-            Keyword(Struct) => {
+            TokenKind::Int => Ok(TypeSpec::Int),
+            TokenKind::Char => Ok(TypeSpec::Char),
+            TokenKind::Struct => {
                 let struct_spec = self.parse_struct_specifier()?;
                 Ok(SpecStruct(struct_spec))
             },
@@ -322,7 +315,7 @@ impl Parser {
     }
 
     fn parse_struct_specifier(&mut self) -> Result<StructSpecifier, String> {
-        self.consume(&Keyword(Struct));
+        self.consume(&TokenKind::Struct);
         let mut struct_specifier = StructSpecifier{name: None, members: None};
         match &self.cur_token().clone().kind {
             LexIdent(name) => {
@@ -441,10 +434,10 @@ impl Parser {
     fn parse_stmt(&mut self) -> Result<StmtType, String> {
         let kind = &self.cur_token().kind;
         match kind {
-            Keyword(Ret) => Ok(Return(self.parse_ret_stmt()?)),
-            Keyword(KeywordToken::If) => Ok(StmtType::If(self.parse_if_stmt()?)),
-            Keyword(KeywordToken::For) => Ok(StmtType::For(self.parse_for_stmt()?)),
-            Keyword(While) => Ok(StmtType::For(self.parse_while_stmt()?)),
+            TokenKind::Ret => Ok(Return(self.parse_ret_stmt()?)),
+            TokenKind::If => Ok(StmtType::If(self.parse_if_stmt()?)),
+            TokenKind::For => Ok(StmtType::For(self.parse_for_stmt()?)),
+            TokenKind::While => Ok(StmtType::For(self.parse_while_stmt()?)),
             Semicolon => Ok(Block(Vec::new())),
             LBrace => Ok(Block(self.parse_block())),
             _ => Ok(Ex(self.parse_expr_stmt()?)),
@@ -461,7 +454,7 @@ impl Parser {
 
         let mut otherwise = None;
         // parse otherwise (if it exists)
-        if self.peek_token().kind == Keyword(Else) {
+        if self.peek_token().kind == TokenKind::Else {
             self.advance(2);
             otherwise = Some(Box::new(self.parse_stmt()?));
         }
@@ -500,7 +493,7 @@ impl Parser {
     }
 
     fn parse_ret_stmt(&mut self) -> Result<Expr, String> {
-        debug_assert!(matches!(self.cur_token().kind, Keyword(Ret)));
+        debug_assert!(matches!(self.cur_token().kind, TokenKind::Ret));
         self.next_token();
         let expr = self.parse_expr(Lowest)?;
         self.jump_to_next_token(&Semicolon)?;
@@ -587,7 +580,7 @@ impl Parser {
                     match self.peek_token().kind {
                         Plus | Minus |
                         Mul | Div |
-                        Compare(_) => {
+                        Eq | Neq | LT | LE | GT | GE => {
                             self.next_token();
                             expr = self.parse_infix(expr)?;
                         },
@@ -685,7 +678,7 @@ impl Parser {
                 let expr = Expr::new(AddrOf(operand), span);
                 Ok(expr)
             },
-            Keyword(KeywordToken::Sizeof) => {
+            TokenKind::Sizeof => {
                 self.next_token(); // skip "sizeof"
                 let operand = self.parse_prefix()?;
                 let operand = Box::new(operand);

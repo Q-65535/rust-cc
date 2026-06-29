@@ -12,7 +12,6 @@ use crate::lex::*;
 use crate::parse::*;
 use crate::analyze::*;
 use crate::TokenKind::*;
-use crate::CompareToken::*;
 use crate::ExprType::*;
 use crate::codegen::*;
 use std::sync::Mutex;

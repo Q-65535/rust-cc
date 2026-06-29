@@ -5,7 +5,7 @@
 //   pretty::print_tokens(&tokens);
 //   pretty::print_program(&program);
 
-use crate::lex::{Token, TokenKind, CompareToken};
+use crate::lex::{Token, TokenKind};
 use crate::parse::*;
 use crate::common::Span;
 use crate::SRC;
@@ -76,7 +76,15 @@ pub fn print_tokens(tokens: &[Token]) {
 
 fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
     match kind {
-        TokenKind::Keyword(_)        => ("Keyword",   BLUE),
+        TokenKind::Ret               => ("Keyword",   BLUE),
+        TokenKind::If                => ("Keyword",   BLUE),
+        TokenKind::Else              => ("Keyword",   BLUE),
+        TokenKind::For               => ("Keyword",   BLUE),
+        TokenKind::While             => ("Keyword",   BLUE),
+        TokenKind::Sizeof            => ("Keyword",   BLUE),
+        TokenKind::Struct            => ("Keyword",   BLUE),
+        TokenKind::Int               => ("Keyword",   BLUE),
+        TokenKind::Char              => ("Keyword",   BLUE),
         TokenKind::LexIdent(_)       => ("Ident",     CYAN),
         TokenKind::Num(_)            => ("Number",    GREEN),
         TokenKind::StringLiteral(_)  => ("String",    GREEN),
@@ -87,7 +95,12 @@ fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
         TokenKind::Ampersand         => ("Ampersand", YELLOW),
         TokenKind::Not               => ("Not",       YELLOW),
         TokenKind::Assignment        => ("Assign",    MAGENTA),
-        TokenKind::Compare(_)        => ("Compare",   MAGENTA),
+        TokenKind::Eq                => ("Compare",   MAGENTA),
+        TokenKind::Neq               => ("Compare",   MAGENTA),
+        TokenKind::LT                => ("Compare",   MAGENTA),
+        TokenKind::LE                => ("Compare",   MAGENTA),
+        TokenKind::GT                => ("Compare",   MAGENTA),
+        TokenKind::GE                => ("Compare",   MAGENTA),
         TokenKind::LParen            => ("LParen",    DIM),
         TokenKind::RParen            => ("RParen",    DIM),
         TokenKind::LBrace            => ("LBrace",    DIM),
@@ -408,14 +421,12 @@ fn token_op_str(kind: &TokenKind) -> &'static str {
         TokenKind::Div        => "/",
         TokenKind::Ampersand  => "&",
         TokenKind::Not        => "!",
-        TokenKind::Compare(c) => match c {
-            CompareToken::Eq  => "==",
-            CompareToken::Neq => "!=",
-            CompareToken::LT  => "<",
-            CompareToken::LE  => "<=",
-            CompareToken::GT  => ">",
-            CompareToken::GE  => ">=",
-        },
+        TokenKind::Eq         => "==",
+        TokenKind::Neq        => "!=",
+        TokenKind::LT         => "<",
+        TokenKind::LE         => "<=",
+        TokenKind::GT         => ">",
+        TokenKind::GE         => ">=",
         _ => "?",
     }
 }

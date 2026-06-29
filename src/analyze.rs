@@ -5,8 +5,7 @@ use crate::lex::{self, *};
 use crate::ir;
 use ExprType::*;
 use StmtType::*;
-use TokenKind::*;
-use CompareToken::*;
+use TokenKind::{Plus, Minus, Mul, Div, Eq, Neq, LT, LE, GT, GE};
 use BlockItem::*;
 use TypeSpec::*;
 use crate::SRC;
@@ -1017,12 +1016,12 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
         Minus => OP::Minus,
         Mul => OP::Mul,
         Div => OP::Div,
-        Compare(Eq) => OP::Compare(ir::CompareToken::Eq),
-        Compare(Neq) => OP::Compare(ir::CompareToken::Neq),
-        Compare(LT) => OP::Compare(ir::CompareToken::LT),
-        Compare(LE) => OP::Compare(ir::CompareToken::LE),
-        Compare(GT) => OP::Compare(ir::CompareToken::GT),
-        Compare(GE) => OP::Compare(ir::CompareToken::GE),
+        Eq => OP::Compare(ir::CompareToken::Eq),
+        Neq => OP::Compare(ir::CompareToken::Neq),
+        LT => OP::Compare(ir::CompareToken::LT),
+        LE => OP::Compare(ir::CompareToken::LE),
+        GT => OP::Compare(ir::CompareToken::GT),
+        GE => OP::Compare(ir::CompareToken::GE),
         // @Cleanup: Binary operation should be defined at parsing phase.
         // Currently the operation is just tokenkind in parsing.
         _ => OP::Compare(ir::CompareToken::Eq),
