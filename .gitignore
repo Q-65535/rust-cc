@@ -9,3 +9,4 @@
 /.claude
 gcc_tester.c
 *.exe
+*.i
