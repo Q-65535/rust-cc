@@ -100,13 +100,9 @@ impl Scope {
     pub fn resolve_struct_tag(&self, s: &str) -> Option<&ir::Struct> {
         for st in &self.tags {
             if &st.tag_name == s {
-                if let Some(attribute) = &st.attribute {
-                    return Some(attribute);
-                }
-                break;
+                    return Some(&st.the_struct);
             }
         }
-        // @Smell: What does this None mean? No such name found or found but the struct attribute is None.
         None
     }
 
@@ -115,10 +111,10 @@ impl Scope {
     }
 
     pub fn add_tagged_struct(&mut self, tagged: ir::Tagged_Struct) {
-        // debug_assert!(self.resolve_struct_tag(&tagged.tag_name) == None);
+        debug_assert!(self.resolve_struct_tag(&tagged.tag_name) == None);
         for st in &mut self.tags {
             if &st.tag_name == &tagged.tag_name {
-                st.attribute = tagged.attribute;
+                st.the_struct = tagged.the_struct;
                 return;
             }
         }
@@ -439,7 +435,7 @@ impl ProgramAnalyzer {
             if let Some(members) = &st.members {
                 let struct_spec = ir::Tagged_Struct{
                     tag_name: name.clone(),
-                    attribute: Some(self.analyze_struct_members(members)),
+                    the_struct: self.analyze_struct_members(members),
                 };
                 if let None = self.cur_scope_tracker.resolve_tag_at_current_scope(name) {
                     self.cur_scope_tracker.add_tagged_struct(struct_spec);
