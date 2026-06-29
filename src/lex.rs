@@ -52,16 +52,10 @@ pub enum KeywordToken {
     While,
     Sizeof,
     Struct,
-    TypeSpecifier(TypeSpecifier_e),
-}
-use KeywordToken::*;
-
-#[derive(PartialEq, Clone, Debug)]
-pub enum TypeSpecifier_e {
     Int,
     Char,
 }
-use TypeSpecifier_e::*;
+use KeywordToken::*;
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, PartialOrd)]
@@ -103,6 +97,13 @@ impl Token {
     pub fn precedence(&self) -> Precedence {
         return precedence(&self.kind);
     }
+
+    pub fn is_decl_spec(&self) -> bool {
+        match self.kind {
+            Keyword(Struct | Int | Char) => true,
+            _ => false,
+        }
+    }
 }
 
 pub fn precedence(kind: &TokenKind) -> Precedence {
@@ -133,10 +134,10 @@ impl Lexer {
             ("else".to_string(), Keyword(Else)),
             ("for".to_string(), Keyword(For)),
             ("while".to_string(), Keyword(While)),
-            ("int".to_string(), Keyword(TypeSpecifier(Int))),
-            ("sizeof".to_string(), Keyword(KeywordToken::Sizeof)),
-            ("struct".to_string(), Keyword(KeywordToken::Struct)),
-            ("char".to_string(), Keyword(TypeSpecifier(Char))),
+            ("int".to_string(), Keyword(Int)),
+            ("sizeof".to_string(), Keyword(Sizeof)),
+            ("struct".to_string(), Keyword(Struct)),
+            ("char".to_string(), Keyword(Char)),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

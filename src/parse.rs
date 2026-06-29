@@ -4,9 +4,8 @@ use crate::lex::{self, *};
 use crate::lex::Precedence::{self, *};
 use crate::lex::TokenKind::{self, *};
 use crate::lex::KeywordToken::{self, *};
-use crate::lex::TypeSpecifier_e::{self, *};
 use ExprType::*;
-use crate::Type::{self, *};
+// use crate::Type::{self, *};
 use crate::SRC;
 use crate::common::{self, *};
 
@@ -66,7 +65,7 @@ pub struct Program {
 pub struct Function {
     pub name: String,
     pub name_span: Span,
-    pub return_type: DeclarationSpecifier,
+    pub return_type: TypeSpec,
     pub star_count: i32,
     pub params: Vec<Parameter>,
     pub items: Vec<BlockItem>,
@@ -74,13 +73,13 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
-    pub decl_spec: DeclarationSpecifier,
+    pub decl_spec: TypeSpec,
     pub declarator: Declarator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
-    pub decl_spec: DeclarationSpecifier,
+    pub decl_spec: TypeSpec,
     pub declarators: Vec<Declarator>,
 }
 
@@ -91,7 +90,7 @@ pub struct Struct {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
-    pub decl_spec: DeclarationSpecifier,
+    pub decl_spec: TypeSpec,
     pub declarator: Declarator,
 }
 
@@ -99,16 +98,15 @@ pub struct Member {
 // @Rename: Actually, this should be renamed to TypeSpecifier.
 // DeclarationSpecifier includes TypeSpecifier.
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
-pub enum DeclarationSpecifier {
-    SpecInt,
-    SpecChar,
-    SpecStruct(StructSpecifer),
-    // SpecStruct(Struct),
+pub enum TypeSpec {
+    Int,
+    Char,
+    SpecStruct(StructSpecifier),
 }
-use DeclarationSpecifier::*;
+use TypeSpec::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StructSpecifer {
+pub struct StructSpecifier {
     pub name: Option<String>,
     pub members: Option<Vec<Member>>,
 }
@@ -306,12 +304,12 @@ impl Parser {
         return Ok(Declaration{decl_spec, declarators});
     }
 
-    fn parse_decl_spec(&mut self) -> Result<DeclarationSpecifier, String> {
+    fn parse_decl_spec(&mut self) -> Result<TypeSpec, String> {
         let kind = &self.cur_token().kind;
-        let decl_spec: DeclarationSpecifier;
+        let decl_spec: TypeSpec;
         match kind {
-            Keyword(TypeSpecifier(Int)) => Ok(SpecInt),
-            Keyword(TypeSpecifier(Char)) => Ok(SpecChar),
+            Keyword(KeywordToken::Int) => Ok(TypeSpec::Int),
+            Keyword(KeywordToken::Char) => Ok(TypeSpec::Char),
             Keyword(Struct) => {
                 let struct_spec = self.parse_struct_specifier()?;
                 Ok(SpecStruct(struct_spec))
@@ -323,9 +321,9 @@ impl Parser {
         }
     }
 
-    fn parse_struct_specifier(&mut self) -> Result<StructSpecifer, String> {
+    fn parse_struct_specifier(&mut self) -> Result<StructSpecifier, String> {
         self.consume(&Keyword(Struct));
-        let mut struct_specifier = StructSpecifer{name: None, members: None};
+        let mut struct_specifier = StructSpecifier{name: None, members: None};
         match &self.cur_token().clone().kind {
             LexIdent(name) => {
                 struct_specifier.name = Some(name.clone());
@@ -477,7 +475,7 @@ impl Parser {
             let item: BlockItem;
             // @Future: if the token kind is a declaration-specifier (i.e., storage-class-specifier,
             // type-specifier or function-specifier), we parse decl.
-            if matches!(self.cur_token().kind, Keyword(Struct | TypeSpecifier(_))) {
+            if self.cur_token().is_decl_spec() {
                 match self.parse_decl() {
                     Err(error_message) => {
                         self.syntax_errors.push(error_message);

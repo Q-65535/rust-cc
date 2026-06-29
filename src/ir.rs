@@ -37,7 +37,7 @@ pub struct Expr {
 
 impl Expr {
     pub fn is_integer(&self) -> bool {
-        if let TyInt = &self.ty {
+        if let Type::Int = &self.ty {
             true
         } else {
             false
@@ -46,7 +46,7 @@ impl Expr {
     // @Naming: is_ptr_or_array
     pub fn is_pointer_or_array(&self) -> bool {
         match &self.ty {
-            TyPtr(_) | ArrayOf(_, _) => true,
+            Pointer_To(_) | ArrayOf(_, _) => true,
             _ => false
         }
     }

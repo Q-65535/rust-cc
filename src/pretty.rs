@@ -375,11 +375,11 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
 
 // ── Helpers ───────────────────────────────────────────
 
-fn decl_spec_str(ds: &DeclarationSpecifier) -> &'static str {
+fn decl_spec_str(ds: &TypeSpec) -> &'static str {
     match ds {
-        DeclarationSpecifier::SpecInt => "int",
-        DeclarationSpecifier::SpecChar => "char",
-        DeclarationSpecifier::SpecStruct(_) => "struct",
+        TypeSpec::Int => "int",
+        TypeSpec::Char => "char",
+        TypeSpec::SpecStruct(_) => "struct",
     }
 }
 

@@ -8,21 +8,20 @@ use StmtType::*;
 use TokenKind::*;
 use CompareToken::*;
 use BlockItem::*;
-use DeclarationSpecifier::*;
+use TypeSpec::*;
 use crate::SRC;
 use crate::common::{self, *};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    // pointer to ... type
-    TyPtr(Box<Type>),
-    TyInt,
-    TyChar,
+    Pointer_To(Box<Type>),
+    Int,
+    Char,
     ArrayOf(Box<Type>, i32),
     // function return ... type
-    TyFunc(Box<Type>),
-    TyStruct(ir::Struct),
-    TyTagged(String),
+    Func(Box<Type>),
+    Struct(ir::Struct),
+    Tagged_Struct(String),
     ty_none,
 }
 use Type::*;
@@ -30,13 +29,13 @@ use Type::*;
 impl Type {
     fn align(&self) -> i32 {
         match self {
-            TyPtr(_) => 8,
-            TyInt => 8,
-            TyChar => 1,
+            Pointer_To(_) => 8,
+            Type::Int => 8,
+            Type::Char => 1,
             ArrayOf(element_ty, len) => element_ty.align(),
-            TyFunc(_) => 8,
-            TyStruct(st) => st.align,
-            TyTagged(_) => 0,
+            Func(_) => 8,
+            Struct(st) => st.align,
+            Tagged_Struct(_) => 0,
             ty_none => 1,
         }
     }
@@ -44,15 +43,15 @@ impl Type {
 
 pub fn sizeof(ty: &Type) -> i32 {
     match ty {
-        TyPtr(_) => 8,
-        TyInt => 8,
-        TyChar => 1,
+        Pointer_To(_) => 8,
+        Type::Int => 8,
+        Type::Char => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
-        TyFunc(_) => 8,
-        TyStruct(st) => {
+        Func(_) => 8,
+        Struct(st) => {
             st.size
         },
-        TyTagged(tag_name) => {
+        Tagged_Struct(tag_name) => {
             // @Refactor: Return an error.
             let error_info = format!("unable to get the size of incomplete type");
             println!("{}", error_info);
@@ -391,9 +390,9 @@ impl ProgramAnalyzer {
                 }
             }
 
-            if let TyTagged(tag_name) = cur_type.clone() {
+            if let Tagged_Struct(tag_name) = cur_type.clone() {
                 match self.cur_scope_tracker.resolve_tag(&tag_name) {
-                    Some(attribute) => cur_type = TyStruct(attribute.clone()),
+                    Some(attribute) => cur_type = Struct(attribute.clone()),
                     None => {
                         let err_info = format!("storage size of {} is unkonwn", &declarator.name);
                         print_error_at(declarator.span, &err_info);
@@ -422,15 +421,15 @@ impl ProgramAnalyzer {
         stmts
     }
 
-    fn analyze_decl_spec(&mut self, decl_spec: &DeclarationSpecifier) -> Type {
+    fn analyze_decl_spec(&mut self, decl_spec: &TypeSpec) -> Type {
         match decl_spec {
-            SpecInt => TyInt,
-            SpecChar => TyChar,
-            SpecStruct(st) => self.analyze_struct(st),
+            TypeSpec::Int => Type::Int,
+            TypeSpec::Char => Type::Char,
+            TypeSpec::SpecStruct(st) => self.analyze_struct(st),
         }
     }
 
-    fn analyze_struct(&mut self, st: &StructSpecifer) -> Type {
+    fn analyze_struct(&mut self, st: &StructSpecifier) -> Type {
         if let Some(name) = &st.name {
             if let Some(members) = &st.members {
                 let struct_spec = ir::Tagged_Struct{
@@ -445,11 +444,11 @@ impl ProgramAnalyzer {
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
                 }
             }
-            return TyTagged(name.clone());
+            return Tagged_Struct(name.clone());
         } else {
             if let Some(members) = &st.members {
                     let attribute = self.analyze_struct_members(members);
-                    return TyStruct(attribute);
+                    return Struct(attribute);
             } else {
                 let err_info = format!("semantic error: analyzing strcut decl: both identifier and decl list are empty.");
                 // @TODO add span info to declaration specifier
@@ -586,7 +585,7 @@ impl ProgramAnalyzer {
         match &mut expr.content {
             Number(n) => {
                 let content = ExprType::Number(*n);
-                let ty = TyInt;
+                let ty = Type::Int;
                 ir::Expr {content, ty, span}
             }
             Binary(lhs, rhs, tokenKind) => {
@@ -606,7 +605,7 @@ impl ProgramAnalyzer {
                         if lhs.is_pointer_or_array() && rhs.is_integer() {
                             let mut scal: i32;
                             match &lhs.ty {
-                                TyPtr(..) => scal = sizeof(&lhs.ty),
+                                Pointer_To(..) => scal = sizeof(&lhs.ty),
                                 ArrayOf(element_type, _) => scal = sizeof(element_type),
                                 _ => scal = 8,
                             }
@@ -623,7 +622,7 @@ impl ProgramAnalyzer {
                         if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
                             let mut scal: i32;
                             match &lhs.ty {
-                                TyPtr(..) => scal = sizeof(&lhs.ty),
+                                Pointer_To(..) => scal = sizeof(&lhs.ty),
                                 ArrayOf(element_type, _) => scal = sizeof(element_type),
                                 _ => scal = 8,
                             }
@@ -632,13 +631,13 @@ impl ProgramAnalyzer {
                             let mut basic_ty = lhs.ty.clone();
 							if let ArrayOf(basic, _) = &lhs.ty {
 								basic_ty = *basic.clone();
-							} else if let TyPtr(basic) = &lhs.ty {
+							} else if let Pointer_To(basic) = &lhs.ty {
 								basic_ty = *basic.clone();
                             }
 							if lhs.ty != rhs.ty {
 								print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
 							}
-                            let ty = TyInt;
+                            let ty = Type::Int;
                             let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
                             let expr = ir::Expr {content, ty, span};
                             let scal = sizeof(&basic_ty);
@@ -689,7 +688,7 @@ impl ProgramAnalyzer {
             Deref(val) => {
                 let val = self.analyze_expr(val);
                 let base_ty = match &val.ty {
-                    TyPtr(base) => {
+                    Pointer_To(base) => {
                         *base.clone()
                     }
                     ArrayOf(base, _) => {
@@ -728,23 +727,23 @@ impl ProgramAnalyzer {
                 let mut offset: i32 = 0;
                 let mut ty = ty_none;
                 let mut cur_ty = struct_ref.ty.clone();
-                if let TyPtr(inner) =  cur_ty.clone() {
+                if let Pointer_To(inner) =  cur_ty.clone() {
                     cur_ty = *inner;
                     let content = ExprType::Deref(Box::new(struct_ref));
                     struct_ref = ir::Expr{content, ty: cur_ty.clone(), span};
                 }
 
-                if let TyTagged(tag_name) = cur_ty.clone() {
+                if let Tagged_Struct(tag_name) = cur_ty.clone() {
                     let result = self.cur_scope_tracker.resolve_tag(&tag_name).clone();
                     if let Some(st) = result {
-                        cur_ty = TyStruct(st.clone());
+                        cur_ty = Struct(st.clone());
                     } else {
                         let err_info = format!("it has incomplete struct or union type definition.");
                         print_error_at(struct_ref.span, &err_info);
                     }
                 }
 
-                if let TyStruct(st) = cur_ty {
+                if let Struct(st) = cur_ty {
                     match st.get_member(&member_name) {
                         Ok(m) => {
                             offset = m.offset;
@@ -783,7 +782,7 @@ impl ProgramAnalyzer {
                         // Array indexing is converted to pointer arithmatic and dereferencing
                         // pointer arithmatic.
                         let element_size = match &base.ty {
-                                TyPtr(pointee) => sizeof(pointee),
+                                Pointer_To(pointee) => sizeof(pointee),
                                 ArrayOf(element_type, _) => sizeof(element_type),
                                 _ => 8,
                             };
@@ -797,7 +796,7 @@ impl ProgramAnalyzer {
 
                         // Dereferencing.
                         let base_ty = match &pointer_arithmatic_expr.ty {
-                            TyPtr(base) => {
+                            Pointer_To(base) => {
                                 *base.clone()
                             }
                             ArrayOf(base, _) => {
@@ -873,7 +872,7 @@ impl ProgramAnalyzer {
                 self.unique_string_name_index += 1;
                 // In C, a string ends with an extra \0 character, so the array length +1.
                 let len = s.len() + 1;
-                let ty: Type = ArrayOf(Box::new(TyChar), len.try_into().unwrap());
+                let ty: Type = ArrayOf(Box::new(Type::Char), len.try_into().unwrap());
 
                 let global_obj = create_global_obj(&unique_name, &ty);
                 // @Cleanup: We don't need to add the obj to global scope
@@ -907,7 +906,7 @@ impl ProgramAnalyzer {
 
 fn pointer_to(ty: &Type) -> Type {
     let base = Box::new(ty.clone());
-    TyPtr(base)
+    Pointer_To(base)
 }
 
 fn array_of(ty: &Type, len: i32) -> Type {
@@ -927,13 +926,13 @@ fn dimension_of(ty: &Type) -> i32 {
 
 fn function_type(ty: &Type) -> Type {
     let return_type = Box::new(ty.clone());
-    TyFunc(return_type)
+    Func(return_type)
 }
 
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
 fn is_integer(ty: &Type) -> bool {
-    matches!(ty, TyInt | TyChar)
+    matches!(ty, Type::Int | Type::Char)
 }
 
 fn can_assign(left: &Type, right: &Type) -> bool {
@@ -972,14 +971,14 @@ fn can_be_rvalue(expr: &Expr) -> bool {
 
 pub fn is_pointer_or_array(t: &Type) -> bool {
     match t {
-        TyPtr(_) | ArrayOf(_, _) => true,
+        Pointer_To(_) | ArrayOf(_, _) => true,
         _ => false
     }
 }
 
 pub fn is_pointer(t: &Type) -> bool {
     match t {
-        TyPtr(_) => true,
+        Pointer_To(_) => true,
         _ => false
     }
 }
@@ -997,7 +996,7 @@ fn scal_expr(expr: &ir::Expr, operation: TokenKind, scal: i32) -> ir::Expr {
     let num_expr_type = ir::ExprType::Number(scal);
     let num_expr = ir::Expr {
         content: num_expr_type,
-        ty: TyInt,
+        ty: Type::Int,
         span: expr.span
     };
 
