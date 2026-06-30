@@ -183,11 +183,6 @@ impl ScopeTracker {
         let current_scope = &mut self.scopes[self.current_scope_index];
         current_scope.add_tagged_struct(tagged);
     }
-
-    pub fn add_private_global_obj(&mut self, o: Obj) {
-        let global_scope_in_current_function = &mut self.scopes[0];
-        global_scope_in_current_function.add_obj(o);
-    }
 }
 
 pub struct ProgramAnalyzer {
@@ -215,6 +210,7 @@ impl ProgramAnalyzer {
         use ir::Function;
         let mut afuns: Vec<ir::Function> = Vec::new();
         let mut a_global_decls: Vec<ir::Declaration> = Vec::new();
+        // Record all symbols at first pass.
         for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
@@ -222,6 +218,8 @@ impl ProgramAnalyzer {
                         let ty = self.analyze_decl_spec(&fun.return_type);
                         let o = create_global_obj(&fun.name, &ty);
                         self.global_scope.add_obj(o);
+                    // It is not allowed that function and variable have the same name in the same scope.
+                    // So we only check whether we encounter a duplicate name without considering its is a function or a variable.
                     } else {
                         let err_info = format!("semantic error: redefinition of {}", fun.name);
                         print_error_at(fun.name_span, &err_info);
@@ -233,6 +231,7 @@ impl ProgramAnalyzer {
                 }
             }
         }
+        // Analyze function bodies at second pass.
         for unit in &mut program.translation_units {
             if let parse::TranslationUnit::FunctionDef(fun) = unit {
                 self.cur_offset = 0;
@@ -310,11 +309,10 @@ impl ProgramAnalyzer {
         for i in 0..fun.star_count {
             return_type = pointer_to(&return_type);
         }
-        let name = fun.name.clone();
-        let mut param_names: Vec<String> = Vec::new();
+        let mut analyzed_params: Vec<Obj> = Vec::new();
         for param in &fun.params {
-            self.analyze_param(param);
-            param_names.push(param.declarator.name.clone());
+            let p = self.analyze_param(param);
+            analyzed_params.push(p);
         }
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in &mut fun.items {
@@ -329,9 +327,8 @@ impl ProgramAnalyzer {
                 }
             }
         }
-        let scope_tracker = self.cur_scope_tracker.clone();
         let stack_size = self.cur_offset;
-        ir::Function{name, return_type, param_names, stmts, scope_tracker, stack_size}
+        ir::Function{name: fun.name.clone(), return_type, params: analyzed_params, stmts, stack_size}
     }
 
     fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
@@ -346,7 +343,7 @@ impl ProgramAnalyzer {
     }
 
 
-    fn analyze_param(&mut self, param: &Parameter) {
+    fn analyze_param(&mut self, param: &Parameter) -> Obj {
         let base_type = self.analyze_decl_spec(&param.decl_spec);
         let mut cur_type = base_type.clone();
         for _ in 0..param.declarator.star_count {
@@ -354,11 +351,12 @@ impl ProgramAnalyzer {
         }
         let obj = self.create_obj(&cur_type, &param.declarator.name);
         if self.cur_scope_tracker.resolve_symbol(&obj.name) == None {
-            self.cur_scope_tracker.add_obj(obj);
+            self.cur_scope_tracker.add_obj(obj.clone());
         } else {
             let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
             print_error_at(param.declarator.span, &err_info);
         }
+        return obj;
     }
 
 
@@ -873,8 +871,9 @@ impl ProgramAnalyzer {
                 let ty: Type = ArrayOf(Box::new(Type::Char), len.try_into().unwrap());
 
                 let global_obj = create_global_obj(&unique_name, &ty);
-                // @Cleanup: We don't need to add the obj to global scope
-                self.cur_scope_tracker.add_private_global_obj(global_obj.clone());
+                // Although the content of this obj is stored in .data section, it can only be accessed
+                // at current scope. So we add the obj in current scope.
+                self.cur_scope_tracker.add_obj(global_obj.clone());
                 let mut value_in_bytes = s.clone();
                 value_in_bytes.push(b'\0');
                 let global_decl = ir::Declaration{obj: global_obj.clone(), init_value: Some(value_in_bytes)};

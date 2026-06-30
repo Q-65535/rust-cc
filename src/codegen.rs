@@ -94,6 +94,8 @@ impl Generator {
                     emit!("  .byte {}", b);
                 }
             } else {
+                // @Temporary: Before really implementing uninitialzed global variable (which is designated to .bss),
+                // we just manually set its content to all zero in .data section.
                 emit!("  .zero {}", sizeof(&global_decl.obj.ty));
             }
         }
@@ -120,11 +122,10 @@ impl Generator {
         emit!("  sub ${}, %rsp", aligned_stack_size);
         emit!();
         let mut i = 0;
-        for param in &self.cur_afun().param_names {
-            let obj = self.cur_afun().scope_tracker.resolve_symbol(&param).unwrap();
-            match sizeof(&obj.ty) {
-                1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[i], -self.cur_afun().stack_size+obj.offset),
-                _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[i], -self.cur_afun().stack_size+obj.offset),
+        for param in &self.cur_afun().params {
+            match sizeof(&param.ty) {
+                1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[i], -self.cur_afun().stack_size+param.offset),
+                _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[i], -self.cur_afun().stack_size+param.offset),
             }
             i += 1;
         }
@@ -300,11 +301,6 @@ impl Generator {
     fn count(&self) -> i32 {
         self.lable_count.set(self.lable_count.get()+1);
         self.lable_count.get()
-    }
-
-    fn gen_addr_by_name(&self, name: &str) {
-        let obj = self.cur_afun().scope_tracker.resolve_symbol(name).unwrap();
-        emit!("  lea {}(%rbp), %rax", -self.cur_afun().stack_size+obj.offset);
     }
 
     fn gen_addr(&self, expr: &Expr) {

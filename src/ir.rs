@@ -56,9 +56,8 @@ impl Expr {
 pub struct Function {
     pub name: String,
     pub return_type: Type,
-    pub param_names: Vec<String>,
+    pub params: Vec<Obj>,
     pub stmts: Vec<StmtType>,
-    pub scope_tracker: ScopeTracker,
     pub stack_size: i32,
 }
 
