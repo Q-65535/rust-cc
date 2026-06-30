@@ -94,6 +94,10 @@ impl Scope {
         None
     }
 
+    pub fn add_obj(&mut self, o: Obj) {
+        self.objects.push(o);
+    }
+
     pub fn resolve_struct_tag(&self, s: &str) -> Option<&ir::Struct> {
         for st in &self.tags {
             if &st.tag_name == s {
@@ -101,10 +105,6 @@ impl Scope {
             }
         }
         None
-    }
-
-    pub fn add_obj(&mut self, o: Obj) {
-        self.objects.push(o);
     }
 
     pub fn add_tagged_struct(&mut self, tagged: ir::Tagged_Struct) {
@@ -120,16 +120,16 @@ impl Scope {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ScopeTracker {
+pub struct ScopeManager {
     pub scopes: Vec<Scope>,
     pub current_scope_index: usize,
 }
 
-impl ScopeTracker {
-    pub fn new(base_scope: &Scope) -> Self {
+impl ScopeManager {
+    pub fn new() -> Self {
         let mut scopes: Vec<Scope> = Vec::new();
-        scopes.push(base_scope.clone());
-        ScopeTracker{scopes, current_scope_index: 0}
+        scopes.push(Scope::new());
+        ScopeManager{scopes, current_scope_index: 0}
     }
 
     pub fn enter_new_scope(&mut self) {
@@ -140,22 +140,6 @@ impl ScopeTracker {
     pub fn exit_current_scope(&mut self) {
         self.scopes.pop();
         self.current_scope_index -= 1;
-    }
-
-    pub fn resolve_tag(&self, s: &str) -> Option<&ir::Struct> {
-        let index = self.current_scope_index;
-        for i in (0..=index).rev() {
-            let current_scope = &self.scopes[i];
-            if let Some(st) = current_scope.resolve_struct_tag(s) {
-                return Some(st)
-            }
-        }
-        return None
-    }
-
-    pub fn resolve_tag_at_current_scope(&self, s: &str) -> Option<&ir::Struct> {
-        let current_scope = &self.scopes[self.current_scope_index];
-        return current_scope.resolve_struct_tag(s);
     }
 
     pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
@@ -179,6 +163,22 @@ impl ScopeTracker {
         current_scope.add_obj(o);
     }
 
+    pub fn resolve_tag(&self, s: &str) -> Option<&ir::Struct> {
+        let index = self.current_scope_index;
+        for i in (0..=index).rev() {
+            let current_scope = &self.scopes[i];
+            if let Some(st) = current_scope.resolve_struct_tag(s) {
+                return Some(st)
+            }
+        }
+        return None
+    }
+
+    pub fn resolve_tag_at_current_scope(&self, s: &str) -> Option<&ir::Struct> {
+        let current_scope = &self.scopes[self.current_scope_index];
+        return current_scope.resolve_struct_tag(s);
+    }
+
     pub fn add_tagged_struct(&mut self, tagged: ir::Tagged_Struct) {
         let current_scope = &mut self.scopes[self.current_scope_index];
         current_scope.add_tagged_struct(tagged);
@@ -186,11 +186,9 @@ impl ScopeTracker {
 }
 
 pub struct ProgramAnalyzer {
-    pub global_scope: Scope,
     pub global_decls: Vec<ir::Declaration>,
-    // At the start of each function analyzation, the folloing two fields are cleared
-    pub cur_scope_tracker: ScopeTracker,
-    pub cur_offset: i32,
+    pub scope_manager: ScopeManager,
+    pub current_local_var_offset: i32,
     pub unique_string_name_index: i32,
 }
 
@@ -198,15 +196,14 @@ impl ProgramAnalyzer {
     pub fn new() -> Self {
         let scope = Scope::new();
         ProgramAnalyzer{
-                        global_scope: scope.clone(),
                         global_decls: Vec::new(),
-                        cur_scope_tracker: ScopeTracker::new(&scope),
-                        cur_offset: 0,
+                        scope_manager: ScopeManager::new(),
+                        current_local_var_offset: 0,
                         unique_string_name_index: 0,
                         }
     }
 
-    pub fn analyze(&mut self, mut program: Program) -> ir::AnalyzedProgram {
+    pub fn analyze(mut self, mut program: Program) -> ir::AnalyzedProgram {
         use ir::Function;
         let mut afuns: Vec<ir::Function> = Vec::new();
         let mut a_global_decls: Vec<ir::Declaration> = Vec::new();
@@ -214,10 +211,10 @@ impl ProgramAnalyzer {
         for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
-                    if self.global_scope.resolve_symbol(&fun.name) == None {
+                    if self.scope_manager.resolve_symbol(&fun.name) == None {
                         let ty = self.analyze_decl_spec(&fun.return_type);
                         let o = create_global_obj(&fun.name, &ty);
-                        self.global_scope.add_obj(o);
+                        self.scope_manager.add_obj(o);
                     // It is not allowed that function and variable have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering its is a function or a variable.
                     } else {
@@ -234,21 +231,20 @@ impl ProgramAnalyzer {
         // Analyze function bodies at second pass.
         for unit in &mut program.translation_units {
             if let parse::TranslationUnit::FunctionDef(fun) = unit {
-                self.cur_offset = 0;
-                self.cur_scope_tracker = ScopeTracker::new(&self.global_scope);
-                self.cur_scope_tracker.enter_new_scope();
+                self.scope_manager.enter_new_scope();
                 let afun = self.analyze_function(fun);
+                self.scope_manager.exit_current_scope();
                 afuns.push(afun);
             }
         }
-        ir::AnalyzedProgram{afuns, global_decls: self.global_decls.clone()}
+        ir::AnalyzedProgram{afuns, global_decls: self.global_decls}
     }
 
     pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<ir::Declaration> {
         let mut decls: Vec<ir::Declaration> = Vec::new();
         let base_type = self.analyze_decl_spec(&decl.decl_spec);
         for declarator in &mut decl.declarators {
-            if let Some(_) = self.global_scope.resolve_symbol(&declarator.name) {
+            if let Some(_) = self.scope_manager.resolve_symbol(&declarator.name) {
                 let err_info = format!("global variable {} already defined", declarator.name);
                 // TODO: error handling
                 print_error_at(declarator.span, &err_info);
@@ -285,7 +281,7 @@ impl ProgramAnalyzer {
                             let value_in_bytes = n.to_le_bytes();
                             let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: Some(value_in_bytes.to_vec())};
                             decls.push(analyzed_decl);
-                            self.global_scope.add_obj(object);
+                            self.scope_manager.add_obj(object);
                         }
                     }
                     _ => {
@@ -297,13 +293,18 @@ impl ProgramAnalyzer {
                 let object = create_global_obj(&declarator.name, &cur_type);
                 let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: None};
                 decls.push(analyzed_decl);
-                self.global_scope.add_obj(object);
+                self.scope_manager.add_obj(object);
             }
         }
         decls
     }
 
     pub fn analyze_function(&mut self, fun: &mut Function) -> ir::Function {
+        // At the start of each function analyzation, cur_offset is reset to 0
+        // and will be used to determine the position of all local variables in current
+        // to-be-analyzed function.
+        self.current_local_var_offset = 0;
+
         let base_type = self.analyze_decl_spec(&fun.return_type);
         let mut return_type = base_type;
         for i in 0..fun.star_count {
@@ -327,7 +328,7 @@ impl ProgramAnalyzer {
                 }
             }
         }
-        let stack_size = self.cur_offset;
+        let stack_size = self.current_local_var_offset;
         ir::Function{name: fun.name.clone(), return_type, params: analyzed_params, stmts, stack_size}
     }
 
@@ -350,8 +351,8 @@ impl ProgramAnalyzer {
             cur_type = pointer_to(&cur_type);
         }
         let obj = self.create_obj(&cur_type, &param.declarator.name);
-        if self.cur_scope_tracker.resolve_symbol(&obj.name) == None {
-            self.cur_scope_tracker.add_obj(obj.clone());
+        if self.scope_manager.resolve_symbol(&obj.name) == None {
+            self.scope_manager.add_obj(obj.clone());
         } else {
             let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
             print_error_at(param.declarator.span, &err_info);
@@ -365,7 +366,7 @@ impl ProgramAnalyzer {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         let base_type = self.analyze_decl_spec(&decl.decl_spec);
         for declarator in &mut decl.declarators {
-            if let Some(_) = self.cur_scope_tracker.resolve_symbol_at_current_scope(&declarator.name) {
+            if let Some(_) = self.scope_manager.resolve_symbol_at_current_scope(&declarator.name) {
                 let err_info = format!("variable {} already defined", declarator.name);
                 print_error_at(declarator.span, &err_info);
             }
@@ -387,7 +388,7 @@ impl ProgramAnalyzer {
             }
 
             if let Tagged_Struct(tag_name) = cur_type.clone() {
-                match self.cur_scope_tracker.resolve_tag(&tag_name) {
+                match self.scope_manager.resolve_tag(&tag_name) {
                     Some(attribute) => cur_type = Struct(attribute.clone()),
                     None => {
                         let err_info = format!("storage size of {} is unkonwn", &declarator.name);
@@ -398,7 +399,7 @@ impl ProgramAnalyzer {
             }
 
             let obj = self.create_obj(&cur_type, &declarator.name);
-            self.cur_scope_tracker.add_obj(obj.clone());
+            self.scope_manager.add_obj(obj.clone());
             if let Some(expr) = &mut declarator.init_expr {
                 let analyzed_expr = self.analyze_expr(expr);
                 if !can_assign(&obj.ty, &analyzed_expr.ty) {
@@ -432,8 +433,8 @@ impl ProgramAnalyzer {
                     tag_name: name.clone(),
                     the_struct: self.analyze_struct_members(members),
                 };
-                if let None = self.cur_scope_tracker.resolve_tag_at_current_scope(name) {
-                    self.cur_scope_tracker.add_tagged_struct(struct_spec);
+                if let None = self.scope_manager.resolve_tag_at_current_scope(name) {
+                    self.scope_manager.add_tagged_struct(struct_spec);
                 } else {
                     let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
@@ -513,11 +514,11 @@ impl ProgramAnalyzer {
     // @Naming: Rename it to create_local_obj.
     fn create_obj(&mut self, ty: &Type, name: &str) -> Obj {
         let mut size: i32 = sizeof(ty);
-        let aligned_offset = align_to(self.cur_offset, ty.align());
-        self.cur_offset = aligned_offset;
-        let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.cur_offset, is_global: false};
+        let aligned_offset = align_to(self.current_local_var_offset, ty.align());
+        self.current_local_var_offset = aligned_offset;
+        let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.current_local_var_offset, is_global: false};
         // @Smell: This line should be executed outside of this function.
-        self.cur_offset += size;
+        self.current_local_var_offset += size;
         obj
     }
 
@@ -533,9 +534,9 @@ impl ProgramAnalyzer {
                 StmtType::Return(expr)
             },
             Block(items) => {
-                self.cur_scope_tracker.enter_new_scope();
+                self.scope_manager.enter_new_scope();
                 let stmts = self.analyze_items(items);
-                self.cur_scope_tracker.exit_current_scope();
+                self.scope_manager.exit_current_scope();
                 StmtType::Block(stmts)
             }
             If(parse::IfStmt{cond, then, otherwise}) => {
@@ -706,7 +707,7 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             }
             Ident(s) => {
-                let obj = if let Some(o) = self.cur_scope_tracker.resolve_symbol(s) {
+                let obj = if let Some(o) = self.scope_manager.resolve_symbol(s) {
                     o.clone()
                 } else {
                     let err_info = format!("semantic error: symbol '{}' not found", s);
@@ -730,7 +731,7 @@ impl ProgramAnalyzer {
                 }
 
                 if let Tagged_Struct(tag_name) = cur_ty.clone() {
-                    let result = self.cur_scope_tracker.resolve_tag(&tag_name).clone();
+                    let result = self.scope_manager.resolve_tag(&tag_name).clone();
                     if let Some(st) = result {
                         cur_ty = Struct(st.clone());
                     } else {
@@ -825,11 +826,11 @@ impl ProgramAnalyzer {
                 // dealt with the corresponding declaration).
                 match &ident.content {
                     Ident(s) => {
-                        if let Some(_) = self.cur_scope_tracker.resolve_symbol(s) {
+                        if let Some(_) = self.scope_manager.resolve_symbol(s) {
 
                         } else {
                             let obj = self.create_obj(&ty_none, &s);
-                            self.cur_scope_tracker.add_obj(obj.clone());
+                            self.scope_manager.add_obj(obj.clone());
                         }
                     }
                     _ => println!("currently only support function name as call reference"),
@@ -873,7 +874,7 @@ impl ProgramAnalyzer {
                 let global_obj = create_global_obj(&unique_name, &ty);
                 // Although the content of this obj is stored in .data section, it can only be accessed
                 // at current scope. So we add the obj in current scope.
-                self.cur_scope_tracker.add_obj(global_obj.clone());
+                self.scope_manager.add_obj(global_obj.clone());
                 let mut value_in_bytes = s.clone();
                 value_in_bytes.push(b'\0');
                 let global_decl = ir::Declaration{obj: global_obj.clone(), init_value: Some(value_in_bytes)};
@@ -884,9 +885,9 @@ impl ProgramAnalyzer {
             }
             Paren(inner) => self.analyze_expr(inner),
             StmtExpr(items) => {
-                self.cur_scope_tracker.enter_new_scope();
+                self.scope_manager.enter_new_scope();
                 let stmts = self.analyze_items(items);
-                self.cur_scope_tracker.exit_current_scope();
+                self.scope_manager.exit_current_scope();
                 let ty = match stmts.last() {
                     Some(ir::StmtType::Ex(e)) => e.ty.clone(),
                     _ => {
