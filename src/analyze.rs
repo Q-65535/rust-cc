@@ -249,39 +249,22 @@ impl ProgramAnalyzer {
                 // TODO: error handling
                 print_error_at(declarator.span, &err_info);
             }
-            // deal with pointers
-            let mut cur_type = base_type.clone();
-            for i in 0..declarator.star_count {
-                cur_type = pointer_to(&cur_type);
-            }
-            // deal with suffix
-            if let Some(suffix) = &mut declarator.suffix {
-                match suffix {
-                    DeclaratorSuffix::ArrayLen(lens) => {
-                        while lens.len() > 0 {
-                            let len: i32 = lens.pop().unwrap();
-                            cur_type = array_of(&cur_type, len);
-                        }
-                    }
-                    DeclaratorSuffix::FunParam(_) => todo!(),
-                }
-            }
+            let final_type = self.resolve_final_type(&base_type, declarator);
+
+            let mut init_value = None;
             if let Some(expr) = &mut declarator.init_expr {
                 let analyzed_expr = self.analyze_expr(expr);
                 // @Future: Currently, we only support constant number assignment.
                 // We will add array and struct initialization expr assignment in the future.
                 match analyzed_expr.content {
                     ir::ExprType::Number(n) => {
-                        if !can_assign(&cur_type, &analyzed_expr.ty) {
-                            let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                            declarator.name, &cur_type, &analyzed_expr.ty);
-                            print_error_at(declarator.span, &err_info);
-                        } else {
-                            let object = create_global_obj(&declarator.name, &cur_type);
+                        if can_assign(&final_type, &analyzed_expr.ty) {
                             let value_in_bytes = n.to_le_bytes();
-                            let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: Some(value_in_bytes.to_vec())};
-                            decls.push(analyzed_decl);
-                            self.scope_manager.add_obj(object);
+                            init_value = Some(value_in_bytes.to_vec());
+                        } else {
+                            let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+                            declarator.name, &final_type, &analyzed_expr.ty);
+                            print_error_at(declarator.span, &err_info);
                         }
                     }
                     _ => {
@@ -289,14 +272,54 @@ impl ProgramAnalyzer {
                         print_error_at(analyzed_expr.span, &err_info);
                     }
                 }
-            } else { // decl without initializer
-                let object = create_global_obj(&declarator.name, &cur_type);
-                let analyzed_decl = ir::Declaration{obj: object.clone(), init_value: None};
-                decls.push(analyzed_decl);
-                self.scope_manager.add_obj(object);
             }
+            let object = create_global_obj(&declarator.name, &final_type);
+            let analyzed_decl = ir::Declaration{obj: object.clone(), init_value};
+            decls.push(analyzed_decl);
+            self.scope_manager.add_obj(object);
         }
         decls
+    }
+
+    fn resolve_final_type(&self, base_type: &Type, declarator: &Declarator) -> Type {
+        // deal with pointers
+        let mut cur_type = base_type.clone();
+        for i in 0..declarator.star_count {
+            cur_type = pointer_to(&cur_type);
+        }
+        // deal with suffix
+        if let Some(suffix) = &declarator.suffix {
+            match suffix {
+                DeclaratorSuffix::ArrayLen(lens) => {
+                    for len in lens.iter().rev() {
+                        cur_type = array_of(&cur_type, *len);
+                    }
+                }
+                DeclaratorSuffix::FunParam(_) => todo!(),
+            }
+        }
+
+        // For global declaration, resolve_tag should give a concrete strcut even if
+        // the definition of the struct is written after the usage of it.
+        // For example:
+        // struct Stuff abc;
+        // struct Stuff {
+        //     int a;
+        // };
+        // The above code doesn't have any problem in global scope.
+        // But, in a function body, this will cause a compile error saying that
+        // storage of abc is unknown.
+        // deal with struct tag
+        if let Tagged_Struct(tag_name) = cur_type.clone() {
+            match self.scope_manager.resolve_tag(&tag_name) {
+                Some(the_struct) => cur_type = Struct(the_struct.clone()),
+                None => {
+                    let err_info = format!("storage size of {} is unkonwn", &declarator.name);
+                    print_error_at(declarator.span, &err_info);
+                },
+            }
+        }
+        return cur_type;
     }
 
     pub fn analyze_function(&mut self, fun: &mut Function) -> ir::Function {
@@ -350,14 +373,15 @@ impl ProgramAnalyzer {
         for _ in 0..param.declarator.star_count {
             cur_type = pointer_to(&cur_type);
         }
-        let obj = self.create_obj(&cur_type, &param.declarator.name);
-        if self.scope_manager.resolve_symbol(&obj.name) == None {
+        if self.scope_manager.resolve_symbol(&param.declarator.name) == None {
+            let obj = self.create_local_obj(&cur_type, &param.declarator.name);
             self.scope_manager.add_obj(obj.clone());
+            return obj;
         } else {
-            let err_info = format!("fatal error: parameter variable {} already defined", obj.name);
+            let err_info = format!("fatal error: parameter variable {} already defined", &param.declarator.name);
             print_error_at(param.declarator.span, &err_info);
+            return create_empty_local_obj();
         }
-        return obj;
     }
 
 
@@ -370,48 +394,22 @@ impl ProgramAnalyzer {
                 let err_info = format!("variable {} already defined", declarator.name);
                 print_error_at(declarator.span, &err_info);
             }
-            // deal with pointers
-            let mut cur_type = base_type.clone();
-            for i in 0..declarator.star_count {
-                cur_type = pointer_to(&cur_type);
-            }
-            // deal with suffix
-            if let Some(suffix) = &declarator.suffix {
-                match suffix {
-                    DeclaratorSuffix::ArrayLen(lens) => {
-                        for len in lens.iter().rev() {
-                            cur_type = array_of(&cur_type, *len);
-                        }
-                    }
-                    DeclaratorSuffix::FunParam(_) => todo!(),
-                }
-            }
+            let final_type = self.resolve_final_type(&base_type, declarator);
 
-            if let Tagged_Struct(tag_name) = cur_type.clone() {
-                match self.scope_manager.resolve_tag(&tag_name) {
-                    Some(attribute) => cur_type = Struct(attribute.clone()),
-                    None => {
-                        let err_info = format!("storage size of {} is unkonwn", &declarator.name);
-                        print_error_at(declarator.span, &err_info);
-                        continue;
-                    },
-                }
-            }
-
-            let obj = self.create_obj(&cur_type, &declarator.name);
+            let obj = self.create_local_obj(&final_type, &declarator.name);
             self.scope_manager.add_obj(obj.clone());
             if let Some(expr) = &mut declarator.init_expr {
                 let analyzed_expr = self.analyze_expr(expr);
-                if !can_assign(&obj.ty, &analyzed_expr.ty) {
-                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                    obj.name, &obj.ty, &analyzed_expr.ty);
-                    print_error_at(declarator.span, &err_info);
-                } else {
+                if can_assign(&obj.ty, &analyzed_expr.ty) {
                     let expr = self.gen_expr_from_obj(&obj);
                     let content = ir::ExprType::Assign(Box::new(expr), Box::new(analyzed_expr));
                     let generated_expr = ir::Expr{content, ty: obj.ty, span: declarator.span};
                     let generated_stmt = ir::StmtType::Ex(generated_expr);
                     stmts.push(generated_stmt);
+                } else {
+                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+                    obj.name, &obj.ty, &analyzed_expr.ty);
+                    print_error_at(declarator.span, &err_info);
                 }
             }
         }
@@ -511,8 +509,7 @@ impl ProgramAnalyzer {
     }
 
 
-    // @Naming: Rename it to create_local_obj.
-    fn create_obj(&mut self, ty: &Type, name: &str) -> Obj {
+    fn create_local_obj(&mut self, ty: &Type, name: &str) -> Obj {
         let mut size: i32 = sizeof(ty);
         let aligned_offset = align_to(self.current_local_var_offset, ty.align());
         self.current_local_var_offset = aligned_offset;
@@ -712,8 +709,7 @@ impl ProgramAnalyzer {
                 } else {
                     let err_info = format!("semantic error: symbol '{}' not found", s);
                     print_error_at(expr.span, &err_info);
-                    // @Watchout: create_obj() changes the offset, which it should not.
-                    self.create_obj(&ty_none, &s)
+                    create_empty_local_obj()
                 };
                 let ty = obj.ty.clone();
                 let content = ExprType::Ident(obj);
@@ -826,10 +822,8 @@ impl ProgramAnalyzer {
                 // dealt with the corresponding declaration).
                 match &ident.content {
                     Ident(s) => {
-                        if let Some(_) = self.scope_manager.resolve_symbol(s) {
-
-                        } else {
-                            let obj = self.create_obj(&ty_none, &s);
+                        if self.scope_manager.resolve_symbol(s) == None {
+                            let obj = self.create_local_obj(&ty_none, &s);
                             self.scope_manager.add_obj(obj.clone());
                         }
                     }
@@ -1054,6 +1048,13 @@ fn print_error_at(span: Span, info: &str) {
     err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
     println!("{}", err_msg);
     exit(1);
+}
+
+// @Temporal: Call this when you want to get a silly obj when handling error situation.
+fn create_empty_local_obj() -> Obj {
+    let size = 0;
+    let obj = Obj{name: "".to_string(), ty: ty_none, offset: 0, is_global: false};
+    obj
 }
 
 pub fn align_to(n: i32, align: i32) -> i32 {
