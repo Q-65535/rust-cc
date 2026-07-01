@@ -334,14 +334,11 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
             println!("{prefix}{conn}{YELLOW}Sizeof{RESET}");
             print_expr(inner, &child_prefix(prefix, is_last), true);
         }
-        ExprType::ArrayIndexing(base, indices) => {
-            println!("{prefix}{conn}{YELLOW}ArrayIndex{RESET}");
+        ExprType::ArrayIndexing(base, index) => {
+            println!("{prefix}{conn}{YELLOW}Index{RESET}");
             let cp = child_prefix(prefix, is_last);
-            let ic = indices.len();
-            print_expr(base, &cp, ic == 0);
-            for (i, idx) in indices.iter().enumerate() {
-                print_expr(idx, &cp, i + 1 == ic);
-            }
+            print_expr(base, &cp, false);
+            print_expr(index, &cp, true);
         }
         ExprType::Paren(inner) => {
             println!("{prefix}{conn}{YELLOW}Paren{RESET}");

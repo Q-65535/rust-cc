@@ -603,9 +603,9 @@ impl ProgramAnalyzer {
                                 ArrayOf(element_type, _) => scale = sizeof(element_type),
                                 _ => scale = 8,
                             }
-                            rhs = gen_new_binary_expr(&rhs, scale, OP::Mul, &rhs.ty);
+                            rhs = scale_expr(&rhs, scale, OP::Mul, &rhs.ty);
                         }
-                        return gen_new_binary_expr_from_2_expr(&lhs, &rhs, OP::Plus, &lhs.ty, span);
+                        return gen_binary_expr_from_2_expr(&lhs, &rhs, OP::Plus, &lhs.ty, span);
                     }
                     Minus => {
                         if lhs.is_integer() && rhs.is_pointer_or_array() {
@@ -618,7 +618,7 @@ impl ProgramAnalyzer {
                                 ArrayOf(element_type, _) => scale = sizeof(element_type),
                                 _ => scale = 8,
                             }
-                            rhs = gen_new_binary_expr(&rhs, scale, OP::Mul, &rhs.ty);
+                            rhs = scale_expr(&rhs, scale, OP::Mul, &rhs.ty);
                         } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
                             let mut basic_ty = lhs.ty.clone();
 							if let ArrayOf(basic, _) = &lhs.ty {
@@ -630,15 +630,15 @@ impl ProgramAnalyzer {
 								print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
 							}
                             // The result of "pointer - pointer" is the number of elements between them.
-                            let expr = gen_new_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &lhs.ty, span);
+                            let expr = gen_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &lhs.ty, span);
                             let scale = sizeof(&basic_ty);
-                            return gen_new_binary_expr(&expr, scale, OP::Div, &Type::Int);
+                            return scale_expr(&expr, scale, OP::Div, &Type::Int);
                         }
-                        return gen_new_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &lhs.ty, span);
+                        return gen_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &lhs.ty, span);
                     }
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
-                        return gen_new_binary_expr_from_2_expr(&lhs, &rhs, op, &lhs.ty, span);
+                        return gen_binary_expr_from_2_expr(&lhs, &rhs, op, &lhs.ty, span);
                     }
                 }
             }
@@ -674,21 +674,7 @@ impl ProgramAnalyzer {
             }
             Deref(val) => {
                 let val = self.analyze_expr(val);
-                let base_ty = match &val.ty {
-                    Pointer_To(base) => {
-                        *base.clone()
-                    }
-                    ArrayOf(base, _) => {
-                        *base.clone()
-                    }
-                    _ => {
-                        let err_msg = format!("semantic error: invalid dereferencing: try to dereference {:?}", val.ty);
-                        print_error_at(expr.span, &err_msg);
-                        val.ty.clone()
-                    }
-                };
-                let content = ExprType::Deref(Box::new(val));
-                ir::Expr{content, ty: base_ty, span}
+                return gen_deref_expr(&val);
             }
             AddrOf(val) => {
                 let val = self.analyze_expr(val);
@@ -708,100 +694,72 @@ impl ProgramAnalyzer {
                 let content = ExprType::Ident(obj);
                 ir::Expr{content, ty, span}
             }
-            RequestStructMember(struct_ref, member_name) => {
-                let mut struct_ref = self.analyze_expr(struct_ref);
-                let mut offset: i32 = 0;
-                let mut ty = ty_none;
-                let mut cur_ty = struct_ref.ty.clone();
-                if let Pointer_To(inner) =  cur_ty.clone() {
-                    cur_ty = *inner;
-                    let content = ExprType::Deref(Box::new(struct_ref));
-                    struct_ref = ir::Expr{content, ty: cur_ty.clone(), span};
+            RequestStructMember(struct_expr, member_name) => {
+                let mut struct_expr = self.analyze_expr(struct_expr);
+                // Automatic dereference a->b to *(a).b
+                if matches!(struct_expr.ty, Pointer_To(_)) {
+                    struct_expr = gen_deref_expr(&struct_expr);
                 }
 
-                if let Tagged_Struct(tag_name) = cur_ty.clone() {
+                let mut cur_ty = struct_expr.ty.clone();
+                if let Tagged_Struct(tag_name) = &cur_ty {
                     let result = self.scope_manager.resolve_tag(&tag_name).clone();
                     if let Some(st) = result {
                         cur_ty = Struct(st.clone());
                     } else {
                         let err_info = format!("it has incomplete struct or union type definition.");
-                        print_error_at(struct_ref.span, &err_info);
+                        print_error_at(struct_expr.span, &err_info);
                     }
                 }
 
-                if let Struct(st) = cur_ty {
+                let mut offset: i32 = 0;
+                let mut ty = ty_none;
+                if let Struct(st) = &cur_ty {
                     match st.get_member(&member_name) {
                         Ok(m) => {
-                            offset = m.offset;
-                            ty = m.ty;
+                            let content = ir::ExprType::RequestStructMember(Box::new(struct_expr), m.offset);
+                            ir::Expr{content, ty: m.ty, span}
+
                         },
-                        Err(err) => print_error_at(expr.span, &err),
+                        Err(err) => {
+                            print_error_at(expr.span, &err);
+                            exit(1);
+                        }
                     }
                 } else {
                     let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
-                    print_error_at(struct_ref.span, &err_info);
+                    print_error_at(struct_expr.span, &err_info);
+                    exit(1);
                 }
-
-                let content = ir::ExprType::RequestStructMember(Box::new(struct_ref), offset);
-                ir::Expr{content, ty, span}
             }
-            ArrayIndexing(arr_ref, indices) => {
-                let mut analyzed_indices = Vec::new();
-                let mut arr_ref = self.analyze_expr(arr_ref);
-                for index in indices {
-                    let analyzed_index = self.analyze_expr(index);
-                    analyzed_indices.push(analyzed_index);
+            ArrayIndexing(base_position, index) => {
+                let mut base_position = self.analyze_expr(base_position);
+                let mut index = self.analyze_expr(index);
+                if !base_position.is_pointer_or_array() {
+                    swap(&mut base_position, &mut index);
                 }
-                let cur_ref = &mut arr_ref;
-                for index in analyzed_indices {
-                    // a[b] is *(a+b); pointer addition is commutative, so b[a] is valid too.
-                    let (base_position, index) = if !cur_ref.is_pointer_or_array() && index.is_pointer_or_array() {
-                        (index, cur_ref.clone())
-                    } else {
-                        (cur_ref.clone(), index)
-                    };
-                    // @TODO: Check whether the data type of idx is integer.
-                    // type checking
-                    if !base_position.is_pointer_or_array() {
-                        print_error_at(base_position.span, "subscripted value is neither array nor pointer nor vector");
-                    } else {
-                        // Array indexing is converted to pointer arithmatic and dereferencing
-                        // pointer arithmatic.
-                        let element_size = match &base_position.ty {
-                                Pointer_To(pointee_type) => sizeof(pointee_type),
-                                ArrayOf(element_type, _) => sizeof(element_type),
-                                _ => 8,
-                            };
-                        let scaled = gen_new_binary_expr(&index, element_size, OP::Mul, &index.ty);
-                        let pointer_arithmatic_expr = gen_new_binary_expr_from_2_expr(&base_position, &scaled, OP::Plus, &base_position.ty, span);
-
-                        // Dereferencing.
-                        let base_ty = match &pointer_arithmatic_expr.ty {
-                            Pointer_To(base) => {
-                                *base.clone()
-                            }
-                            ArrayOf(base, _) => {
-                                *base.clone()
-                            }
-                            _ => {
-                                let err_msg = format!("semantic error: invalid dereferencing:
-                                try to dereference {:?}", pointer_arithmatic_expr.ty);
-                                print_error_at(expr.span, &err_msg);
-                                base_position.ty.clone()
-                            }
-                        };
-
-                        let deref = ExprType::Deref(Box::new(pointer_arithmatic_expr));
-                        let deref_expr = ir::Expr {
-                            content: deref,
-                            ty: base_ty,
-                            span,
-                        };
-                        *cur_ref = deref_expr;
-                    }
+                // type checking
+                if !base_position.is_pointer_or_array() {
+                    print_error_at(base_position.span, "subscripted value is neither array nor pointer nor vector");
+                    exit(1);
                 }
-                (*cur_ref).clone()
-            }
+                if !index.is_integer() {
+                    print_error_at(index.span, "array subscript is not an integer");
+                    exit(1);
+                }
+                let element_type = match &base_position.ty {
+                    Pointer_To(pointee_type) => pointee_type.clone(),
+                    ArrayOf(element_type, _) => element_type.clone(),
+                    _ => {
+                        println!("array indexing error: the base type is nither pointer nor array");
+                        exit(1);
+                    },
+                };
+                let element_size = sizeof(&element_type);
+                let scaled = scale_expr(&index, element_size, OP::Mul, &index.ty);
+                let pointer_arithmatic_expr = gen_binary_expr_from_2_expr(&base_position, &scaled, OP::Plus, &pointer_to(&element_type), span);
+                return gen_deref_expr(&pointer_arithmatic_expr);
+            },
             FunCall(ident, args) => {
                 // @Fix: The problem is that analyze_expr(ident) will check whether ident is declared and if not declared,
                 // that's an error, but the function name is intentionally left undeclared (currently). 
@@ -970,9 +928,9 @@ pub fn is_array(t: &Type) -> bool {
     }
 }
 
-fn gen_new_binary_expr(expr: &ir::Expr, raw_num: i32, op: ir::OP, ty: &Type) -> ir::Expr {
+fn scale_expr(expr: &ir::Expr, factor: i32, op: ir::OP, ty: &Type) -> ir::Expr {
     // expr for scale num
-    let num_expr_content = ir::ExprType::Number(raw_num);
+    let num_expr_content = ir::ExprType::Number(factor);
     let num_expr = ir::Expr {
         content: num_expr_content,
         ty: Type::Int,
@@ -988,12 +946,30 @@ fn gen_new_binary_expr(expr: &ir::Expr, raw_num: i32, op: ir::OP, ty: &Type) -> 
     }
 }
 
-fn gen_new_binary_expr_from_2_expr(lhs: &ir::Expr, rhs: &ir::Expr, op: ir::OP, ty: &Type, span: Span) -> ir::Expr {
+fn gen_binary_expr_from_2_expr(lhs: &ir::Expr, rhs: &ir::Expr, op: ir::OP, ty: &Type, span: Span) -> ir::Expr {
     let new_expr_content = ir::ExprType::Binary(Box::new(lhs.clone()), Box::new(rhs.clone()), op);
     ir::Expr {
         content: new_expr_content,
         ty: ty.clone(),
         span,
+    }
+}
+
+fn gen_deref_expr(expr: &ir::Expr) -> ir::Expr {
+    let new_expr_content = ir::ExprType::Deref(Box::new(expr.clone()));
+    let dereferenced_type = match &expr.ty {
+        Pointer_To(pointee_type) => *pointee_type.clone(),
+        ArrayOf(element_type, _) => *element_type.clone(),
+        _ => {
+            print_error_at(expr.span, "unable to generate deference of this expression, because it is
+            nither a pointer nor array.");
+            exit(1);
+        },
+    };
+    ir::Expr {
+        content: new_expr_content,
+        ty: dereferenced_type,
+        span: expr.span,
     }
 }
 

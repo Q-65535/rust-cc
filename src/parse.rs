@@ -121,8 +121,7 @@ pub enum ExprType {
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
     Ident(String),
-    // ArrayIndexing(ref: Box<Expr>, index: Box<Expr>),
-    ArrayIndexing(Box<Expr>, Vec<Expr>),
+    ArrayIndexing(Box<Expr>, Box<Expr>),
     RequestStructMember(Box<Expr>, String),
     CommaExpression(Box<Expr>, Box<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
@@ -828,23 +827,16 @@ impl Parser {
     }
 
     fn parse_array_indexing(&mut self, lhs: Expr) -> Result<Expr, String> {
-        let prime_token = self.cur_token().clone();
-        let mut indices: Vec<Expr> = Vec::new();
-        while self.peek_token().kind == LSqureBracket {
-            self.jump_over_next_token(&LSqureBracket);
-            let cur_index = self.parse_expr(Lowest)?;
-            indices.push(cur_index);
-            self.jump_to_next_token(&RSqureBracket);
-        }
-        let end_index = match indices.last() {
-            None => prime_token.span.end_index,
-            Some(expr) => expr.span.end_index,
-        };
+        debug_assert!(matches!(self.peek_token().kind, LSqureBracket));
+        self.jump_over_next_token(&LSqureBracket);
+        let the_index = self.parse_expr(Lowest)?;
+        self.jump_to_next_token(&RSqureBracket);
+
         let span = Span {
             start_index: lhs.span.start_index,
-            end_index,
-                    };
-        let content = ArrayIndexing(Box::new(lhs), indices);
+            end_index: self.cur_token().span.end_index,
+        };
+        let content = ArrayIndexing(Box::new(lhs), Box::new(the_index));
         return Ok(Expr::new(content, span))
     }
 
