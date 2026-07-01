@@ -597,30 +597,28 @@ impl ProgramAnalyzer {
                             swap(&mut lhs, &mut rhs);
                         }
                         if lhs.is_pointer_or_array() && rhs.is_integer() {
-                            let mut scal: i32;
+                            let mut scale: i32;
                             match &lhs.ty {
-                                Pointer_To(..) => scal = sizeof(&lhs.ty),
-                                ArrayOf(element_type, _) => scal = sizeof(element_type),
-                                _ => scal = 8,
+                                Pointer_To(pointee_type) => scale = sizeof(pointee_type),
+                                ArrayOf(element_type, _) => scale = sizeof(element_type),
+                                _ => scale = 8,
                             }
-                            rhs = scal_expr(&mut rhs, Mul, scal);
+                            rhs = gen_new_binary_expr(&rhs, scale, OP::Mul, &rhs.ty);
                         }
-                        let ty = lhs.ty.clone();
-                        let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Plus);
-                        ir::Expr {content, ty, span}
+                        return gen_new_binary_expr_from_2_expr(&lhs, &rhs, OP::Plus, &lhs.ty, span);
                     }
                     Minus => {
                         if lhs.is_integer() && rhs.is_pointer_or_array() {
                             print_error_at(rhs.span, "error: integer - ptr");
                         }
                         if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
-                            let mut scal: i32;
+                            let mut scale: i32;
                             match &lhs.ty {
-                                Pointer_To(..) => scal = sizeof(&lhs.ty),
-                                ArrayOf(element_type, _) => scal = sizeof(element_type),
-                                _ => scal = 8,
+                                Pointer_To(pointee_type) => scale = sizeof(pointee_type),
+                                ArrayOf(element_type, _) => scale = sizeof(element_type),
+                                _ => scale = 8,
                             }
-                            rhs = scal_expr(&rhs, Mul, scal);
+                            rhs = gen_new_binary_expr(&rhs, scale, OP::Mul, &rhs.ty);
                         } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
                             let mut basic_ty = lhs.ty.clone();
 							if let ArrayOf(basic, _) = &lhs.ty {
@@ -631,21 +629,16 @@ impl ProgramAnalyzer {
 							if lhs.ty != rhs.ty {
 								print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
 							}
-                            let ty = Type::Int;
-                            let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
-                            let expr = ir::Expr {content, ty, span};
-                            let scal = sizeof(&basic_ty);
-                            return scal_expr(&expr, Div, scal);
+                            // The result of "pointer - pointer" is the number of elements between them.
+                            let expr = gen_new_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &lhs.ty, span);
+                            let scale = sizeof(&basic_ty);
+                            return gen_new_binary_expr(&expr, scale, OP::Div, &Type::Int);
                         }
-                        let ty = lhs.ty.clone();
-                        let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), OP::Minus);
-                        ir::Expr {content, ty, span}
+                        return gen_new_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &lhs.ty, span);
                     }
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
-                        let ty = lhs.ty.clone();
-                        let content = ExprType::Binary(Box::new(lhs), Box::new(rhs), op);
-                        ir::Expr {content, ty, span}
+                        return gen_new_binary_expr_from_2_expr(&lhs, &rhs, op, &lhs.ty, span);
                     }
                 }
             }
@@ -762,30 +755,25 @@ impl ProgramAnalyzer {
                 let cur_ref = &mut arr_ref;
                 for index in analyzed_indices {
                     // a[b] is *(a+b); pointer addition is commutative, so b[a] is valid too.
-                    let (base, idx) = if !cur_ref.is_pointer_or_array() && index.is_pointer_or_array() {
+                    let (base_position, index) = if !cur_ref.is_pointer_or_array() && index.is_pointer_or_array() {
                         (index, cur_ref.clone())
                     } else {
                         (cur_ref.clone(), index)
                     };
                     // @TODO: Check whether the data type of idx is integer.
                     // type checking
-                    if !base.is_pointer_or_array() {
-                        print_error_at(base.span, "subscripted value is neither array nor pointer nor vector");
+                    if !base_position.is_pointer_or_array() {
+                        print_error_at(base_position.span, "subscripted value is neither array nor pointer nor vector");
                     } else {
                         // Array indexing is converted to pointer arithmatic and dereferencing
                         // pointer arithmatic.
-                        let element_size = match &base.ty {
-                                Pointer_To(pointee) => sizeof(pointee),
+                        let element_size = match &base_position.ty {
+                                Pointer_To(pointee_type) => sizeof(pointee_type),
                                 ArrayOf(element_type, _) => sizeof(element_type),
                                 _ => 8,
                             };
-                        let scaled = scal_expr(&idx, Mul, element_size);
-                        let pointer_arithmatic = ExprType::Binary(Box::new(base.clone()), Box::new(scaled), OP::Plus);
-                        let pointer_arithmatic_expr = ir::Expr {
-                            content: pointer_arithmatic,
-                            ty: base.ty.clone(),
-                            span,
-                        };
+                        let scaled = gen_new_binary_expr(&index, element_size, OP::Mul, &index.ty);
+                        let pointer_arithmatic_expr = gen_new_binary_expr_from_2_expr(&base_position, &scaled, OP::Plus, &base_position.ty, span);
 
                         // Dereferencing.
                         let base_ty = match &pointer_arithmatic_expr.ty {
@@ -799,7 +787,7 @@ impl ProgramAnalyzer {
                                 let err_msg = format!("semantic error: invalid dereferencing:
                                 try to dereference {:?}", pointer_arithmatic_expr.ty);
                                 print_error_at(expr.span, &err_msg);
-                                base.ty.clone()
+                                base_position.ty.clone()
                             }
                         };
 
@@ -982,23 +970,30 @@ pub fn is_array(t: &Type) -> bool {
     }
 }
 
-fn scal_expr(expr: &ir::Expr, operation: TokenKind, scal: i32) -> ir::Expr {
-    use ir::OP;
-    // expr for scal num
-    let num_expr_type = ir::ExprType::Number(scal);
+fn gen_new_binary_expr(expr: &ir::Expr, raw_num: i32, op: ir::OP, ty: &Type) -> ir::Expr {
+    // expr for scale num
+    let num_expr_content = ir::ExprType::Number(raw_num);
     let num_expr = ir::Expr {
-        content: num_expr_type,
+        content: num_expr_content,
         ty: Type::Int,
-        span: expr.span
+        span: expr.span,
     };
 
     // scalled expr
-    let op = tokenkind_to_op(&operation);
-    let new_expr_type = ir::ExprType::Binary(Box::new(expr.clone()), Box::new(num_expr), op);
+    let new_expr_content = ir::ExprType::Binary(Box::new(expr.clone()), Box::new(num_expr), op);
     ir::Expr {
-        content: new_expr_type,
-        ty: expr.ty.clone(), 
+        content: new_expr_content,
+        ty: ty.clone(),
         span: expr.span,
+    }
+}
+
+fn gen_new_binary_expr_from_2_expr(lhs: &ir::Expr, rhs: &ir::Expr, op: ir::OP, ty: &Type, span: Span) -> ir::Expr {
+    let new_expr_content = ir::ExprType::Binary(Box::new(lhs.clone()), Box::new(rhs.clone()), op);
+    ir::Expr {
+        content: new_expr_content,
+        ty: ty.clone(),
+        span,
     }
 }
 
@@ -1025,8 +1020,6 @@ fn create_global_obj(name: &str, base_type: &Type) -> Obj {
     let mut cur_type = base_type.clone();
     let mut size: i32 = sizeof(base_type);
     let obj = Obj{name: name.to_string(), ty: base_type.clone(), offset: 0, is_global: true};
-    // @Smell: This line should be executed outside of this function.
-    // self.cur_offset += size;
     obj
 }
 

@@ -43,7 +43,6 @@ impl Expr {
             false
         }
     }
-    // @Naming: is_ptr_or_array
     pub fn is_pointer_or_array(&self) -> bool {
         match &self.ty {
             Pointer_To(_) | ArrayOf(_, _) => true,
