@@ -395,6 +395,7 @@ impl ProgramAnalyzer {
             if let Some(_) = self.scope_manager.resolve_symbol_at_current_scope(&declarator.name) {
                 let err_info = format!("variable {} already defined", declarator.name);
                 print_error_at(declarator.span, &err_info);
+                exit(1);
             }
             let final_type = self.resolve_final_type(&base_type, declarator);
 
@@ -412,6 +413,7 @@ impl ProgramAnalyzer {
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                     obj.name, &obj.ty, &analyzed_expr.ty);
                     print_error_at(declarator.span, &err_info);
+                    exit(1);
                 }
             }
         }
@@ -429,20 +431,27 @@ impl ProgramAnalyzer {
     fn analyze_struct(&mut self, st: &StructSpecifier) -> Type {
         if let Some(name) = &st.name {
             if let Some(members) = &st.members {
-                let struct_spec = ir::Tagged_Struct{
+                let the_struct = self.analyze_struct_members(members);
+                let tagged_struct = ir::Tagged_Struct{
                     tag_name: name.clone(),
-                    the_struct: self.analyze_struct_members(members),
+                    the_struct: the_struct.clone(),
                 };
                 if let None = self.scope_manager.resolve_tag_at_current_scope(name) {
-                    self.scope_manager.add_tagged_struct(struct_spec);
+                    self.scope_manager.add_tagged_struct(tagged_struct);
+                    return Struct(the_struct);
                 } else {
                     let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
                     exit(1);
                 }
+            } else {
+                if let Some(the_struct) = self.scope_manager.resolve_tag(name) {
+                    return Struct(the_struct.clone());
+                } else {
+                    return Tagged_Struct(name.clone());
+                }
             }
-            return Tagged_Struct(name.clone());
         } else {
             if let Some(members) = &st.members {
                     let attribute = self.analyze_struct_members(members);
@@ -711,6 +720,7 @@ impl ProgramAnalyzer {
                     } else {
                         let err_info = format!("it has incomplete struct or union type definition.");
                         print_error_at(struct_expr.span, &err_info);
+                        exit(1);
                     }
                 }
 
