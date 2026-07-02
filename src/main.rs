@@ -4,7 +4,7 @@ pub mod lex;
 pub mod analyze;
 pub mod codegen;
 pub mod ir;
-pub mod pretty;
+// pub mod pretty;
 pub mod common;
 use std::{io::{self, Read, Write}, process::exit, env, fs};
 use colored::*;

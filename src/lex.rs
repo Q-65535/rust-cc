@@ -30,7 +30,7 @@ pub enum TokenKind {
     StringLiteral(Vec<u8>),
     // Keywords
     Ret, If, Else, For, While,
-    Sizeof, Struct, Int, Char,
+    Sizeof, Struct, Int, Char, Union,
 
     Eof,
 }
@@ -117,6 +117,7 @@ impl Lexer {
             ("int".to_string(), Int),
             ("sizeof".to_string(), Sizeof),
             ("struct".to_string(), Struct),
+            ("union".to_string(), Union),
             ("char".to_string(), Char),
         ].into_iter().collect();
         Lexer{
@@ -311,7 +312,8 @@ impl Lexer {
                 break;
             }
         }
-        // Rust interprets slicing indices as pointing to the spaces between elements, not the elements themselves.
+        // Rust interprets slicing indices as pointing to the spaces between elements,
+        // not the elements themselves.
         // Since we set Eof token's start_index to src.len(), length to 0,
         // both start_index and end_index are src.len(), i.e., both 
         // points to the space at the very end after the last element.
