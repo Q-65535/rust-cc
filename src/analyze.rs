@@ -1,4 +1,4 @@
-use std::{io::{self, Write}, collections::VecDeque, process::exit, mem::swap};
+use std::{io::{self, Write}, collections::{VecDeque, HashMap}, process::exit, mem::swap};
 use colored::*;
 use crate::parse::{self, *};
 use crate::lex::{self, *};
@@ -19,7 +19,8 @@ pub enum Type {
     // function return ... type
     Func(Box<Type>),
     Struct(ir::Struct),
-    Tagged_Struct(String),
+    Union(ir::Struct),
+    Tag(String),
     ty_none,
 }
 use Type::*;
@@ -33,7 +34,8 @@ impl Type {
             ArrayOf(element_ty, len) => element_ty.align(),
             Func(_) => 8,
             Struct(st) => st.align,
-            Tagged_Struct(_) => 0,
+            Union(st) => st.align,
+            Tag(_) => 0,
             ty_none => 1,
         }
     }
@@ -46,10 +48,9 @@ pub fn sizeof(ty: &Type) -> i32 {
         Type::Char => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         Func(_) => 8,
-        Struct(st) => {
-            st.size
-        },
-        Tagged_Struct(tag_name) => {
+        Struct(st) => st.size,
+        Union(st) => st.size,
+        Tag(tag_name) => {
             // @Refactor: Return an error.
             let error_info = format!("unable to get the size of incomplete type");
             println!("{}", error_info);
@@ -74,14 +75,14 @@ pub struct Obj {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
     pub objects: Vec<Obj>,
-    pub tags: Vec<ir::Tagged_Struct>,
+    pub tags: HashMap<String, Type>,
 }
 
 impl Scope {
     pub fn new() -> Self {
         Scope{
             objects: Vec::new(),
-            tags: Vec::new(),
+            tags: HashMap::new(),
         }
     }
 
@@ -96,26 +97,6 @@ impl Scope {
 
     pub fn add_obj(&mut self, o: Obj) {
         self.objects.push(o);
-    }
-
-    pub fn resolve_struct_tag(&self, s: &str) -> Option<&ir::Struct> {
-        for st in &self.tags {
-            if &st.tag_name == s {
-                    return Some(&st.the_struct);
-            }
-        }
-        None
-    }
-
-    pub fn add_tagged_struct(&mut self, tagged: ir::Tagged_Struct) {
-        debug_assert!(self.resolve_struct_tag(&tagged.tag_name) == None);
-        for st in &mut self.tags {
-            if &st.tag_name == &tagged.tag_name {
-                st.the_struct = tagged.the_struct;
-                return;
-            }
-        }
-        self.tags.push(tagged);
     }
 }
 
@@ -163,25 +144,26 @@ impl ScopeManager {
         current_scope.add_obj(o);
     }
 
-    pub fn resolve_tag(&self, s: &str) -> Option<&ir::Struct> {
+    pub fn resolve_tag(&self, name: &str) -> Option<&Type> {
         let index = self.current_scope_index;
         for i in (0..=index).rev() {
             let current_scope = &self.scopes[i];
-            if let Some(st) = current_scope.resolve_struct_tag(s) {
-                return Some(st)
+            if let Some(the_type) = current_scope.tags.get(name) {
+                return Some(the_type)
             }
         }
         return None
     }
 
-    pub fn resolve_tag_at_current_scope(&self, s: &str) -> Option<&ir::Struct> {
+    pub fn resolve_tag_at_current_scope(&self, s: &str) -> Option<&Type> {
         let current_scope = &self.scopes[self.current_scope_index];
-        return current_scope.resolve_struct_tag(s);
+        return current_scope.tags.get(s);
     }
 
-    pub fn add_tagged_struct(&mut self, tagged: ir::Tagged_Struct) {
+    pub fn add_tag(&mut self, name: &str, the_type: &Type) {
         let current_scope = &mut self.scopes[self.current_scope_index];
-        current_scope.add_tagged_struct(tagged);
+        debug_assert!(current_scope.tags.get(name) == None);
+        current_scope.tags.insert(name.to_string(), the_type.clone());
     }
 }
 
@@ -312,9 +294,9 @@ impl ProgramAnalyzer {
         // The above code doesn't have any problem in global scope.
         // But, in a function body, this will cause a compile error saying that
         // storage of abc is unknown.
-        if let Tagged_Struct(tag_name) = cur_type.clone() {
+        if let Tag(tag_name) = cur_type.clone() {
             match self.scope_manager.resolve_tag(&tag_name) {
-                Some(the_struct) => cur_type = Struct(the_struct.clone()),
+                Some(the_type) => cur_type = the_type.clone(),
                 None => {
                     let err_info = format!("storage size of {} is unkonwn", &declarator.name);
                     print_error_at(declarator.span, &err_info);
@@ -432,13 +414,10 @@ impl ProgramAnalyzer {
         if let Some(name) = &st.name {
             if let Some(members) = &st.members {
                 let the_struct = self.analyze_struct_members(members);
-                let tagged_struct = ir::Tagged_Struct{
-                    tag_name: name.clone(),
-                    the_struct: the_struct.clone(),
-                };
+                let the_type = Struct(the_struct);
                 if let None = self.scope_manager.resolve_tag_at_current_scope(name) {
-                    self.scope_manager.add_tagged_struct(tagged_struct);
-                    return Struct(the_struct);
+                    self.scope_manager.add_tag(name, &the_type);
+                    return the_type;
                 } else {
                     let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
@@ -446,16 +425,16 @@ impl ProgramAnalyzer {
                     exit(1);
                 }
             } else {
-                if let Some(the_struct) = self.scope_manager.resolve_tag(name) {
-                    return Struct(the_struct.clone());
+                if let Some(the_type) = self.scope_manager.resolve_tag(name) {
+                    return the_type.clone();
                 } else {
-                    return Tagged_Struct(name.clone());
+                    return Tag(name.clone());
                 }
             }
         } else {
             if let Some(members) = &st.members {
-                    let attribute = self.analyze_struct_members(members);
-                    return Struct(attribute);
+                    let the_struct = self.analyze_struct_members(members);
+                    return Struct(the_struct);
             } else {
                 let err_info = format!("semantic error: analyzing strcut decl: both identifier and decl list are empty.");
                 // @TODO add span info to declaration specifier
@@ -713,10 +692,10 @@ impl ProgramAnalyzer {
                 }
 
                 let mut cur_ty = struct_expr.ty.clone();
-                if let Tagged_Struct(tag_name) = &cur_ty {
+                if let Tag(tag_name) = &cur_ty {
                     let result = self.scope_manager.resolve_tag(&tag_name).clone();
-                    if let Some(st) = result {
-                        cur_ty = Struct(st.clone());
+                    if let Some(the_type) = result {
+                        cur_ty = the_type.clone();
                     } else {
                         let err_info = format!("it has incomplete struct or union type definition.");
                         print_error_at(struct_expr.span, &err_info);

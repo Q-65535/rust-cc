@@ -67,12 +67,6 @@ pub struct Declaration {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Tagged_Struct {
-    pub tag_name: String,
-    pub the_struct: Struct,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub members: Vec<Member>,
     pub size: i32,
