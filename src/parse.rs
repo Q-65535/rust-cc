@@ -88,8 +88,6 @@ pub struct Member {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-// @Rename: Actually, this should be renamed to TypeSpecifier.
-// DeclarationSpecifier includes TypeSpecifier.
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
 pub enum TypeSpec {
     Int,

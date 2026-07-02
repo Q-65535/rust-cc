@@ -206,7 +206,6 @@ impl ProgramAnalyzer {
     pub fn analyze(mut self, mut program: Program) -> ir::AnalyzedProgram {
         use ir::Function;
         let mut afuns: Vec<ir::Function> = Vec::new();
-        let mut a_global_decls: Vec<ir::Declaration> = Vec::new();
         // Record all symbols at first pass.
         for unit in &mut program.translation_units {
             match unit {
@@ -220,6 +219,7 @@ impl ProgramAnalyzer {
                     } else {
                         let err_info = format!("semantic error: redefinition of {}", fun.name);
                         print_error_at(fun.name_span, &err_info);
+                        exit(1);
                     }
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
@@ -248,6 +248,7 @@ impl ProgramAnalyzer {
                 let err_info = format!("global variable {} already defined", declarator.name);
                 // TODO: error handling
                 print_error_at(declarator.span, &err_info);
+                exit(1);
             }
             let final_type = self.resolve_final_type(&base_type, declarator);
 
@@ -265,11 +266,13 @@ impl ProgramAnalyzer {
                             let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                             declarator.name, &final_type, &analyzed_expr.ty);
                             print_error_at(declarator.span, &err_info);
+                            exit(1);
                         }
                     }
                     _ => {
                         let err_info = format!("This is not a constant number expression!");
                         print_error_at(analyzed_expr.span, &err_info);
+                        exit(1);
                     }
                 }
             }
@@ -309,7 +312,6 @@ impl ProgramAnalyzer {
         // The above code doesn't have any problem in global scope.
         // But, in a function body, this will cause a compile error saying that
         // storage of abc is unknown.
-        // deal with struct tag
         if let Tagged_Struct(tag_name) = cur_type.clone() {
             match self.scope_manager.resolve_tag(&tag_name) {
                 Some(the_struct) => cur_type = Struct(the_struct.clone()),
@@ -380,7 +382,7 @@ impl ProgramAnalyzer {
         } else {
             let err_info = format!("fatal error: parameter variable {} already defined", &param.declarator.name);
             print_error_at(param.declarator.span, &err_info);
-            return create_empty_local_obj();
+            exit(1);
         }
     }
 
@@ -437,6 +439,7 @@ impl ProgramAnalyzer {
                     let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
+                    exit(1);
                 }
             }
             return Tagged_Struct(name.clone());
@@ -448,8 +451,7 @@ impl ProgramAnalyzer {
                 let err_info = format!("semantic error: analyzing strcut decl: both identifier and decl list are empty.");
                 // @TODO add span info to declaration specifier
                 print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
-                // @Refactor: We return an error here.
-                return ty_none;
+                exit(1);
             }
         }
     }
@@ -688,7 +690,7 @@ impl ProgramAnalyzer {
                 } else {
                     let err_info = format!("semantic error: symbol '{}' not found", s);
                     print_error_at(expr.span, &err_info);
-                    create_empty_local_obj()
+                    exit(1);
                 };
                 let ty = obj.ty.clone();
                 let content = ExprType::Ident(obj);
@@ -1017,13 +1019,6 @@ fn print_error_at(span: Span, info: &str) {
     err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
     println!("{}", err_msg);
     exit(1);
-}
-
-// @Temporal: Call this when you want to get a silly obj when handling error situation.
-fn create_empty_local_obj() -> Obj {
-    let size = 0;
-    let obj = Obj{name: "".to_string(), ty: ty_none, offset: 0, is_global: false};
-    obj
 }
 
 pub fn align_to(n: i32, align: i32) -> i32 {
