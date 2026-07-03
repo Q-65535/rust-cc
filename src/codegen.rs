@@ -242,8 +242,7 @@ impl Generator {
                 self.gen_addr(var);
                 self.push("%rax");
                 self.expr_gen(val);
-                self.pop("%rdi");
-                store(&var.ty);
+                self.store(&var.ty);
             }
             Neg(expr) => {
                 self.expr_gen(expr);
@@ -341,23 +340,33 @@ impl Generator {
         emit!("  pop {}", reg);
         self.depth.set(self.depth.get() - 1);
     }
+
+    fn store(&self, ty: &Type) {
+        self.pop("%rdi");
+
+        if matches!(ty, Struct(..)|Union(..)) {
+            for i in 0..sizeof(ty) {
+                emit!("  mov {}(%rax), %r8b", i);
+                emit!("  mov %r8b, {}(%rdi)", i);
+            }
+        } else {
+            match sizeof(ty) {
+                1 => emit!("  mov %al, (%rdi)"),
+                _ => emit!("  mov %rax, (%rdi)"),
+            }
+        }
+    }
+
 }
 
 fn load_according_to_type(ty: &Type) {
-    if let ArrayOf(_, _) = ty {
-
+    if matches!(ty, ArrayOf(..) | Struct(..) | Union(..)) {
+        return;
     } else {
         match sizeof(ty) {
             1 => emit!("  movsbq (%rax), %rax"),
             _ => emit!("  mov (%rax), %rax"),
         }
-    }
-}
-
-fn store(ty: &Type) {
-    match sizeof(ty) {
-        1 => emit!("  mov %al, (%rdi)"),
-        _ => emit!("  mov %rax, (%rdi)"),
     }
 }
 
