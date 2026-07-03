@@ -406,15 +406,14 @@ impl ProgramAnalyzer {
         match decl_spec {
             TypeSpec::Int => Type::Int,
             TypeSpec::Char => Type::Char,
-            TypeSpec::Struct(st) => self.analyze_struct(st),
+            TypeSpec::Struct_Union(st) => self.analyze_struct_union(st),
         }
     }
 
-    fn analyze_struct(&mut self, st: &StructSpecifier) -> Type {
+    fn analyze_struct_union(&mut self, st: &Struct_Union_Specifier) -> Type {
         if let Some(name) = &st.name {
             if let Some(members) = &st.members {
-                let the_struct = self.analyze_struct_members(members);
-                let the_type = Struct(the_struct);
+                let the_type = self.analyze_struct_members(members, &st.kind);
                 if let None = self.scope_manager.resolve_tag_at_current_scope(name) {
                     self.scope_manager.add_tag(name, &the_type);
                     return the_type;
@@ -433,8 +432,8 @@ impl ProgramAnalyzer {
             }
         } else {
             if let Some(members) = &st.members {
-                    let the_struct = self.analyze_struct_members(members);
-                    return Struct(the_struct);
+                    let the_type = self.analyze_struct_members(members, &st.kind);
+                    return the_type;
             } else {
                 let err_info = format!("semantic error: analyzing strcut decl: both identifier and decl list are empty.");
                 // @TODO add span info to declaration specifier
@@ -444,26 +443,36 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn analyze_struct_members(&mut self, members: &Vec<Member>) -> ir::Struct {
+    fn analyze_struct_members(&mut self, members: &Vec<Member>, kind: &Struct_Or_Union) -> Type {
+        use Struct_Or_Union::*;
         let mut analyzed_members = Vec::new();
         let mut offset: i32 = 0;
         let mut struct_align: i32 = 1;
         for m in members {
             let mut am = self.analyze_struct_member(m, offset);
             let member_align = am.ty.align();
-            offset = align_to(offset, member_align);
-            am.offset = offset;
-            offset += sizeof(&am.ty);
+            if (kind == &Is_Struct) {
+                offset = align_to(offset, member_align);
+                am.offset = offset;
+                offset += sizeof(&am.ty);
+            }
             if struct_align < member_align {
                 struct_align = member_align;
             }
             analyzed_members.push(am);
         }
-        let struct_size = align_to(offset, struct_align);
-        return ir::Struct{
+        let struct_size = match kind {
+            Is_Struct => align_to(offset, struct_align),
+            Is_Union => struct_align,
+        };
+        let the_struct = ir::Struct {
             members: analyzed_members,
             size: struct_size,
             align: struct_align,
+        };
+        return match kind {
+            Is_Struct => Struct(the_struct),
+            Is_Union => Union(the_struct),
         };
     }
 
@@ -705,7 +714,7 @@ impl ProgramAnalyzer {
 
                 let mut offset: i32 = 0;
                 let mut ty = ty_none;
-                if let Struct(st) = &cur_ty {
+                if let Union(st) | Struct(st) = &cur_ty {
                     match st.get_member(&member_name) {
                         Ok(m) => {
                             let content = ir::ExprType::RequestStructMember(Box::new(struct_expr), m.offset);

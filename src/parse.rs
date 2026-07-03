@@ -92,11 +92,19 @@ pub struct Member {
 pub enum TypeSpec {
     Int,
     Char,
-    Struct(StructSpecifier),
+    Struct_Union(Struct_Union_Specifier),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StructSpecifier {
+pub enum Struct_Or_Union {
+    Is_Struct,
+    Is_Union,
+}
+use Struct_Or_Union::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Struct_Union_Specifier {
+    pub kind: Struct_Or_Union,
     pub name: Option<String>,
     pub members: Option<Vec<Member>>,
 }
@@ -299,9 +307,9 @@ impl Parser {
         match kind {
             TokenKind::Int => Ok(TypeSpec::Int),
             TokenKind::Char => Ok(TypeSpec::Char),
-            TokenKind::Struct => {
-                let struct_spec = self.parse_struct_specifier()?;
-                Ok(TypeSpec::Struct(struct_spec))
+            TokenKind::Struct | TokenKind::Union => {
+                let struct_spec = self.parse_struct_union_specifier()?;
+                Ok(TypeSpec::Struct_Union(struct_spec))
             },
             _ => {
                 let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
@@ -310,9 +318,19 @@ impl Parser {
         }
     }
 
-    fn parse_struct_specifier(&mut self) -> Result<StructSpecifier, String> {
-        self.consume(&TokenKind::Struct);
-        let mut struct_specifier = StructSpecifier{name: None, members: None};
+    fn parse_struct_union_specifier(&mut self) -> Result<Struct_Union_Specifier, String> {
+        let kind = match self.cur_token().kind {
+            Union => Is_Union,
+            Struct => Is_Struct,
+            _ => {
+                println!("Are you kidding me!");
+                exit(1);
+            }
+        };
+        self.next_token();
+        // @Refactor consume() should be able to consume multiple matching kind token.
+        // self.consume(&(TokenKind::Struct))?;
+        let mut struct_specifier = Struct_Union_Specifier{kind, name: None, members: None};
         match &self.cur_token().clone().kind {
             LexIdent(name) => {
                 struct_specifier.name = Some(name.clone());

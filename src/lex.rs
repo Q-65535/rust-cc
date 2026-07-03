@@ -79,7 +79,7 @@ impl Token {
 
     pub fn is_decl_spec(&self) -> bool {
         match self.kind {
-            (Struct | Int | Char) => true,
+            (Struct | Union | Int | Char) => true,
             _ => false,
         }
     }
