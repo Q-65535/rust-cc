@@ -4,6 +4,7 @@ use crate::parse::{self, *};
 use crate::lex::{self, *};
 use crate::ir;
 use ExprType::*;
+use Struct_Or_Union::*;
 use StmtType::*;
 use TokenKind::{Plus, Minus, Mul, Div, Eq, Neq, LT, LE, GT, GE};
 use BlockItem::*;
@@ -411,69 +412,65 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_struct_union(&mut self, st: &Struct_Union_Specifier) -> Type {
+        let mut analyzed_members = Vec::new();
+        let mut offset: i32 = 0;
+        let mut struct_align: i32 = 1;
+        let mut the_type;
+        if let Some(members) = &st.members {
+            for m in members {
+                let mut am = self.analyze_struct_member(m, offset);
+                let member_align = am.ty.align();
+                if (st.kind == Is_Struct) {
+                    offset = align_to(offset, member_align);
+                    am.offset = offset;
+                    offset += sizeof(&am.ty);
+                }
+                if struct_align < member_align {
+                    struct_align = member_align;
+                }
+                analyzed_members.push(am);
+            }
+            let struct_size = match st.kind {
+                Is_Struct => align_to(offset, struct_align),
+                Is_Union => struct_align,
+            };
+            let the_struct = ir::Struct {
+                members: analyzed_members,
+                size: struct_size,
+                align: struct_align,
+            };
+            the_type = match st.kind {
+                Is_Struct => Struct(the_struct),
+                Is_Union => Union(the_struct),
+            };
+        } else {
+            if let Some(name) = &st.name {
+                the_type = if let Some(the_type) = self.scope_manager.resolve_tag(name) {
+                    the_type.clone()
+                } else {
+                    Tag(name.clone())
+                };
+            } else {
+                println!("fatal compiler bug: the strcut_union specifier have nither name nor member list!");
+                exit(1);
+            }
+        }
+
+        // Deal with scope stuff.
         if let Some(name) = &st.name {
             if let Some(members) = &st.members {
-                let the_type = self.analyze_struct_members(members, &st.kind);
-                if let None = self.scope_manager.resolve_tag_at_current_scope(name) {
-                    self.scope_manager.add_tag(name, &the_type);
-                    return the_type;
-                } else {
+                if let Some(_) = self.scope_manager.resolve_tag_at_current_scope(name) {
                     let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
                     exit(1);
-                }
-            } else {
-                if let Some(the_type) = self.scope_manager.resolve_tag(name) {
-                    return the_type.clone();
                 } else {
-                    return Tag(name.clone());
+                    self.scope_manager.add_tag(name, &the_type);
                 }
             }
-        } else {
-            if let Some(members) = &st.members {
-                    let the_type = self.analyze_struct_members(members, &st.kind);
-                    return the_type;
-            } else {
-                let err_info = format!("semantic error: analyzing strcut decl: both identifier and decl list are empty.");
-                // @TODO add span info to declaration specifier
-                print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
-                exit(1);
-            }
         }
-    }
 
-    fn analyze_struct_members(&mut self, members: &Vec<Member>, kind: &Struct_Or_Union) -> Type {
-        use Struct_Or_Union::*;
-        let mut analyzed_members = Vec::new();
-        let mut offset: i32 = 0;
-        let mut struct_align: i32 = 1;
-        for m in members {
-            let mut am = self.analyze_struct_member(m, offset);
-            let member_align = am.ty.align();
-            if (kind == &Is_Struct) {
-                offset = align_to(offset, member_align);
-                am.offset = offset;
-                offset += sizeof(&am.ty);
-            }
-            if struct_align < member_align {
-                struct_align = member_align;
-            }
-            analyzed_members.push(am);
-        }
-        let struct_size = match kind {
-            Is_Struct => align_to(offset, struct_align),
-            Is_Union => struct_align,
-        };
-        let the_struct = ir::Struct {
-            members: analyzed_members,
-            size: struct_size,
-            align: struct_align,
-        };
-        return match kind {
-            Is_Struct => Struct(the_struct),
-            Is_Union => Union(the_struct),
-        };
+        return the_type;
     }
 
     fn analyze_struct_member(&mut self, member: &Member, offset: i32) -> ir::Member {
