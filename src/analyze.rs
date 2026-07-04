@@ -30,7 +30,7 @@ impl Type {
     fn align(&self) -> i32 {
         match self {
             Pointer_To(_) => 8,
-            Type::Int => 8,
+            Type::Int => 4,
             Type::Char => 1,
             ArrayOf(element_ty, len) => element_ty.align(),
             Func(_) => 8,
@@ -45,7 +45,7 @@ impl Type {
 pub fn sizeof(ty: &Type) -> i32 {
     match ty {
         Pointer_To(_) => 8,
-        Type::Int => 8,
+        Type::Int => 4,
         Type::Char => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         Func(_) => 8,
@@ -436,7 +436,7 @@ impl ProgramAnalyzer {
             }
             let struct_size = match st.kind {
                 Is_Struct => align_to(offset, struct_align),
-                Is_Union => max_member_size,
+                Is_Union => align_to(max_member_size, struct_align),
             };
             let the_struct = ir::Struct {
                 members: analyzed_members,
@@ -601,7 +601,7 @@ impl ProgramAnalyzer {
                             match &lhs.ty {
                                 Pointer_To(pointee_type) => scale = sizeof(pointee_type),
                                 ArrayOf(element_type, _) => scale = sizeof(element_type),
-                                _ => scale = 8,
+                                _ => exit(1),
                             }
                             rhs = scale_expr(&rhs, scale, OP::Mul, &rhs.ty);
                         }
@@ -616,7 +616,7 @@ impl ProgramAnalyzer {
                             match &lhs.ty {
                                 Pointer_To(pointee_type) => scale = sizeof(pointee_type),
                                 ArrayOf(element_type, _) => scale = sizeof(element_type),
-                                _ => scale = 8,
+                                _ => exit(1),
                             }
                             rhs = scale_expr(&rhs, scale, OP::Mul, &rhs.ty);
                         } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
