@@ -415,6 +415,7 @@ impl ProgramAnalyzer {
         let mut analyzed_members = Vec::new();
         let mut offset: i32 = 0;
         let mut struct_align: i32 = 1;
+        let mut max_member_size: i32 = 0;
         let mut the_type;
         if let Some(members) = &st.members {
             for m in members {
@@ -428,11 +429,14 @@ impl ProgramAnalyzer {
                 if struct_align < member_align {
                     struct_align = member_align;
                 }
+                if max_member_size < sizeof(&am.ty) {
+                    max_member_size = sizeof(&am.ty);
+                }
                 analyzed_members.push(am);
             }
             let struct_size = match st.kind {
                 Is_Struct => align_to(offset, struct_align),
-                Is_Union => struct_align,
+                Is_Union => max_member_size,
             };
             let the_struct = ir::Struct {
                 members: analyzed_members,
