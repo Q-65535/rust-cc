@@ -13,13 +13,13 @@ use StmtType::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Number(i64),
+    Integer(i64),
     Binary(Box<Expr>, Box<Expr>, OP),
     Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
-    RequestStructMember(Box<Expr>, i32),
+    RequestStructMember(Box<Expr>, usize),
     // SymbolRef(Obj),
     Ident(Obj),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
@@ -51,7 +51,7 @@ pub struct Function {
     pub return_type: Type,
     pub params: Vec<Obj>,
     pub stmts: Vec<StmtType>,
-    pub stack_size: i32,
+    pub stack_size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,8 +63,8 @@ pub struct Declaration {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub members: Vec<Member>,
-    pub size: i32,
-    pub align: i32,
+    pub size: usize,
+    pub align: usize,
 }
 
 impl Struct {
@@ -91,7 +91,7 @@ impl Struct {
 pub struct Member {
     pub ty: Type,
     pub name: String,
-    pub offset: i32,
+    pub offset: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -128,10 +128,10 @@ impl Generator {
         let mut i = 0;
         for param in &self.cur_afun().params {
             match sizeof(&param.ty) {
-                1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[i],  -self.cur_afun().stack_size+param.offset),
-                2 => emit!("  mov {}, {}(%rbp)\n", self.argregs16[i], -self.cur_afun().stack_size+param.offset),
-                4 => emit!("  mov {}, {}(%rbp)\n", self.argregs32[i], -self.cur_afun().stack_size+param.offset),
-                _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[i], -self.cur_afun().stack_size+param.offset),
+                1 => emit!("  mov {}, -{}(%rbp)\n", self.argregs8[i],  self.cur_afun().stack_size-param.offset),
+                2 => emit!("  mov {}, -{}(%rbp)\n", self.argregs16[i], self.cur_afun().stack_size-param.offset),
+                4 => emit!("  mov {}, -{}(%rbp)\n", self.argregs32[i], self.cur_afun().stack_size-param.offset),
+                _ => emit!("  mov {}, -{}(%rbp)\n", self.argregs64[i], self.cur_afun().stack_size-param.offset),
             }
             i += 1;
         }
@@ -205,7 +205,7 @@ impl Generator {
         emit!("  .loc 1 {}", expr.span.get_start_line());
         let content = &expr.content;
         match content {
-            Number(n) => emit!("  mov ${}, %rax", n),
+            Integer(n) => emit!("  mov ${}, %rax", n),
             CommaExpression(lhs, rhs) => {
                 self.expr_gen(lhs);
                 self.expr_gen(rhs);
@@ -314,7 +314,7 @@ impl Generator {
                 if obj.is_global {
                     emit!("  lea {}(%rip), %rax", obj.name);
                 } else {
-                    emit!("  lea {}(%rbp), %rax", -self.cur_afun().stack_size+obj.offset);
+                    emit!("  lea -{}(%rbp), %rax", self.cur_afun().stack_size-obj.offset);
                 }
 
             },

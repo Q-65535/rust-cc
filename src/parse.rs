@@ -41,7 +41,7 @@ use BlockItem::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorSuffix {
-    ArrayLen(Vec<i32>),
+    ArrayLen(Vec<usize>),
     FunParam(Vec<Parameter>),
 }
 use DeclaratorSuffix::*;
@@ -122,7 +122,7 @@ pub struct Declarator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Number(i64),
+    Integer(i64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
@@ -396,12 +396,12 @@ impl Parser {
             match &self.peek_token().kind {
                 // array sizes
                 LSqureBracket => {
-                    let mut lens: Vec<i32> = Vec::new();
+                    let mut lens: Vec<usize> = Vec::new();
                     while &self.peek_token().kind == &LSqureBracket {
                         self.jump_over_next_token(&LSqureBracket);
                         if let Num(n) = self.cur_token().kind {
                             // @Refactor: The data type of array len should be usize.
-                            let cur_array_len: i32 = self.parse_raw_integer()?;
+                            let cur_array_len: usize = self.parse_raw_integer()?;
                             lens.push(cur_array_len);
                         } else {
                             let err_msg = format!("expect a integer after square bracket in array decl");
@@ -758,11 +758,11 @@ impl Parser {
             start_index: self.cur_token().span.start_index,
             end_index: self.cur_token().span.end_index,
         };
-        let expr = Expr::new(Number(n), span);
+        let expr = Expr::new(Integer(n), span);
         return expr;
     }
 
-    fn parse_raw_integer(&self) -> Result<i32, String> {
+    fn parse_raw_integer(&self) -> Result<usize, String> {
         let cur_token = self.cur_token();
         if let Num(n) = cur_token.kind {
             return Ok(n.try_into().unwrap());

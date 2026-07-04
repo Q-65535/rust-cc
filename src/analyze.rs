@@ -18,7 +18,7 @@ pub enum Type {
     Long,
     Short,
     Char,
-    ArrayOf(Box<Type>, i32),
+    ArrayOf(Box<Type>, usize),
     // function return ... type
     Func(Box<Type>),
     Struct(ir::Struct),
@@ -29,7 +29,7 @@ pub enum Type {
 use Type::*;
 
 impl Type {
-    fn align(&self) -> i32 {
+    fn align(&self) -> usize {
         match self {
             Pointer_To(_) => 8,
             Type::Int => 4,
@@ -47,7 +47,7 @@ impl Type {
 }
 
 // @Refactor: sizeof should return usize.
-pub fn sizeof(ty: &Type) -> i32 {
+pub fn sizeof(ty: &Type) -> usize {
     match ty {
         Pointer_To(_) => 8,
         Type::Int => 4,
@@ -74,7 +74,7 @@ pub struct Obj {
     pub name: String,
     pub ty: Type,
     // this offset should be based on %rbp
-    pub offset: i32,
+    pub offset: usize,
     pub is_global: bool,
     // @TODO: Add position info.
     // When a variable is already defined, the compiler should tell where the variable is defined.
@@ -178,8 +178,8 @@ impl ScopeManager {
 pub struct ProgramAnalyzer {
     pub global_decls: Vec<ir::Declaration>,
     pub scope_manager: ScopeManager,
-    pub current_local_var_offset: i32,
-    pub unique_string_name_index: i32,
+    pub current_local_var_offset: usize,
+    pub unique_string_name_index: usize,
 }
 
 impl ProgramAnalyzer {
@@ -248,7 +248,7 @@ impl ProgramAnalyzer {
                 // @Future: Currently, we only support constant number assignment.
                 // We will add array and struct initialization expr assignment in the future.
                 match analyzed_expr.content {
-                    ir::ExprType::Number(n) => {
+                    ir::ExprType::Integer(n) => {
                         if can_assign(&final_type, &analyzed_expr.ty) {
                             let value_in_bytes = n.to_le_bytes();
                             init_value = Some(value_in_bytes.to_vec());
@@ -422,9 +422,9 @@ impl ProgramAnalyzer {
 
     fn analyze_struct_union(&mut self, st: &Struct_Union_Specifier) -> Type {
         let mut analyzed_members = Vec::new();
-        let mut offset: i32 = 0;
-        let mut struct_align: i32 = 1;
-        let mut max_member_size: i32 = 0;
+        let mut offset: usize = 0;
+        let mut struct_align: usize = 1;
+        let mut max_member_size: usize = 0;
         let mut the_type;
         if let Some(members) = &st.members {
             for m in members {
@@ -486,7 +486,7 @@ impl ProgramAnalyzer {
         return the_type;
     }
 
-    fn analyze_struct_member(&mut self, member: &Member, offset: i32) -> ir::Member {
+    fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
         let base_ty = self.analyze_decl_spec(&member.decl_spec);
         // deal with pointers
         let mut cur_type = base_ty.clone();
@@ -519,7 +519,7 @@ impl ProgramAnalyzer {
 
 
     fn create_local_obj(&mut self, ty: &Type, name: &str) -> Obj {
-        let mut size: i32 = sizeof(ty);
+        let mut size: usize = sizeof(ty);
         let aligned_offset = align_to(self.current_local_var_offset, ty.align());
         self.current_local_var_offset = aligned_offset;
         let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.current_local_var_offset, is_global: false};
@@ -586,8 +586,8 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &mut expr.content {
-            Number(n) => {
-                let content = ExprType::Number(*n);
+            Integer(n) => {
+                let content = ir::ExprType::Integer(*n);
                 let ty = Type::Long;
                 ir::Expr {content, ty, span}
             }
@@ -606,7 +606,7 @@ impl ProgramAnalyzer {
                             swap(&mut lhs, &mut rhs);
                         }
                         if lhs.is_pointer_or_array() && rhs.is_integer() {
-                            let mut scale: i32;
+                            let mut scale: usize;
                             match &lhs.ty {
                                 Pointer_To(pointee_type) => scale = sizeof(pointee_type),
                                 ArrayOf(element_type, _) => scale = sizeof(element_type),
@@ -621,7 +621,7 @@ impl ProgramAnalyzer {
                             print_error_at(rhs.span, "error: integer - ptr");
                         }
                         if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
-                            let mut scale: i32;
+                            let mut scale: usize;
                             match &lhs.ty {
                                 Pointer_To(pointee_type) => scale = sizeof(pointee_type),
                                 ArrayOf(element_type, _) => scale = sizeof(element_type),
@@ -805,7 +805,7 @@ impl ProgramAnalyzer {
                 let content = self.analyze_expr(expr_content);
                 let size = sizeof(&content.ty);
                 let ty = content.ty.clone();
-                let content = ExprType::Number(size.into());
+                let content = ir::ExprType::Integer(size.try_into().unwrap());
                 ir::Expr {
                     content,
                     ty,
@@ -857,7 +857,7 @@ fn pointer_to(ty: &Type) -> Type {
     Pointer_To(base)
 }
 
-fn array_of(ty: &Type, len: i32) -> Type {
+fn array_of(ty: &Type, len: usize) -> Type {
     let base = Box::new(ty.clone());
     ArrayOf(base, len)
 }
@@ -938,9 +938,9 @@ pub fn is_array(t: &Type) -> bool {
     }
 }
 
-fn scale_expr(expr: &ir::Expr, factor: i32, op: ir::OP, ty: &Type) -> ir::Expr {
+fn scale_expr(expr: &ir::Expr, factor: usize, op: ir::OP, ty: &Type) -> ir::Expr {
     // expr for scale num
-    let num_expr_content = ir::ExprType::Number(factor.into());
+    let num_expr_content = ir::ExprType::Integer(factor.try_into().unwrap());
     let num_expr = ir::Expr {
         content: num_expr_content,
         ty: ty.clone(),
@@ -1004,7 +1004,7 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
 
 fn create_global_obj(name: &str, base_type: &Type) -> Obj {
     let mut cur_type = base_type.clone();
-    let mut size: i32 = sizeof(base_type);
+    let mut size: usize = sizeof(base_type);
     let obj = Obj{name: name.to_string(), ty: base_type.clone(), offset: 0, is_global: true};
     obj
 }
@@ -1029,7 +1029,7 @@ fn print_error_at(span: Span, info: &str) {
     exit(1);
 }
 
-pub fn align_to(n: i32, align: i32) -> i32 {
+pub fn align_to(n: usize, align: usize) -> usize {
     let extra = n % align;
     let base = n - extra;
     match extra {
