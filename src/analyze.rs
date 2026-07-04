@@ -16,6 +16,7 @@ pub enum Type {
     Pointer_To(Box<Type>),
     Int,
     Long,
+    Short,
     Char,
     ArrayOf(Box<Type>, i32),
     // function return ... type
@@ -33,6 +34,7 @@ impl Type {
             Pointer_To(_) => 8,
             Type::Int => 4,
             Type::Long => 8,
+            Type::Short => 2,
             Type::Char => 1,
             ArrayOf(element_ty, len) => element_ty.align(),
             Func(_) => 8,
@@ -50,6 +52,7 @@ pub fn sizeof(ty: &Type) -> i32 {
         Pointer_To(_) => 8,
         Type::Int => 4,
         Type::Long => 8,
+        Type::Short => 2,
         Type::Char => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         Func(_) => 8,
@@ -411,6 +414,7 @@ impl ProgramAnalyzer {
         match decl_spec {
             TypeSpec::Int => Type::Int,
             TypeSpec::Long => Type::Long,
+            TypeSpec::Short => Type::Short,
             TypeSpec::Char => Type::Char,
             TypeSpec::Struct_Union(st) => self.analyze_struct_union(st),
         }
@@ -876,7 +880,7 @@ fn function_type(ty: &Type) -> Type {
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
 pub fn is_integer(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Long | Type::Char)
+    matches!(ty, Type::Int | Type::Long | Type::Short | Type::Char)
 }
 
 fn can_assign(left: &Type, right: &Type) -> bool {

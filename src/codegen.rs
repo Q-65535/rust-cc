@@ -65,6 +65,7 @@ pub struct Generator {
     cur_afun_r: Option<ir::Function>,
     argregs64: Vec<&'static str>,
     argregs32: Vec<&'static str>,
+    argregs16: Vec<&'static str>,
     argregs8: Vec<&'static str>,
     // Number of 8-byte values currently pushed on the stack within the
     // function being emitted. Used to keep RSP 16-byte aligned at `call`.
@@ -73,10 +74,11 @@ pub struct Generator {
 
 impl Generator {
     pub fn new(aprogram_r: ir::AnalyzedProgram) -> Self {
-        let argregs64 = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+        let argregs64 = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8",  "%r9" ];
         let argregs32 = vec!["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
-        let argregs8  = vec!["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
-        Self {aprogram_r, lable_count: 0.into(), cur_afun_r: None, argregs64, argregs32, argregs8, depth: 0.into()}
+        let argregs16 = vec![ "%di",  "%si",  "%dx",  "%cx", "%r8w", "%r9w"];
+        let argregs8  = vec![ "%dil", "%sil", "%dl",  "%cl", "%r8b", "%r9b"];
+        Self {aprogram_r, lable_count: 0.into(), cur_afun_r: None, argregs64, argregs32, argregs16, argregs8, depth: 0.into()}
     }
 
     // The function currently being emitted. Only set while `gen_code`
@@ -127,6 +129,7 @@ impl Generator {
         for param in &self.cur_afun().params {
             match sizeof(&param.ty) {
                 1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[i],  -self.cur_afun().stack_size+param.offset),
+                2 => emit!("  mov {}, {}(%rbp)\n", self.argregs16[i], -self.cur_afun().stack_size+param.offset),
                 4 => emit!("  mov {}, {}(%rbp)\n", self.argregs32[i], -self.cur_afun().stack_size+param.offset),
                 _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[i], -self.cur_afun().stack_size+param.offset),
             }
@@ -354,7 +357,8 @@ impl Generator {
             }
         } else {
             match sizeof(ty) {
-                1 => emit!("  mov %al, (%rdi)"),
+                1 => emit!("  mov  %al, (%rdi)"),
+                2 => emit!("  mov  %ax, (%rdi)"),
                 4 => emit!("  mov %eax, (%rdi)"),
                 _ => emit!("  mov %rax, (%rdi)"),
             }
@@ -369,8 +373,9 @@ fn load_according_to_type(ty: &Type) {
     } else {
         match sizeof(ty) {
             1 => emit!("  movsbq (%rax), %rax"),
+            2 => emit!("  movswq (%rax), %rax"),
             4 => emit!("  movsxd (%rax), %rax"),
-            _ => emit!("  mov (%rax), %rax"),
+            _ => emit!("  mov    (%rax), %rax"),
         }
     }
 }

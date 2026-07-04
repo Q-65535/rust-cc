@@ -92,6 +92,7 @@ pub struct Member {
 pub enum TypeSpec {
     Int,
     Long,
+    Short,
     Char,
     Struct_Union(Struct_Union_Specifier),
 }
@@ -310,6 +311,7 @@ impl Parser {
         match kind {
             TokenKind::Int => Ok(TypeSpec::Int),
             TokenKind::Long => Ok(TypeSpec::Long),
+            TokenKind::Short => Ok(TypeSpec::Short),
             TokenKind::Char => Ok(TypeSpec::Char),
             TokenKind::Struct | TokenKind::Union => {
                 let struct_spec = self.parse_struct_union_specifier()?;
