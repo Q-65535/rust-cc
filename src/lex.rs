@@ -25,7 +25,7 @@ pub enum TokenKind {
     Ampersand,
     Semicolon,
     Comma,
-    Num(i64),
+    Natural_Num(u64),
     LexIdent(String),
     StringLiteral(Vec<u8>),
     // Keywords
@@ -258,7 +258,7 @@ impl Lexer {
                 '0'..='9' => {
                     let num = self.read_int();
                     let num_str = num.to_string();
-                    tokens.push(Self::gen_token(Num(num), start_index, num_str.len()));
+                    tokens.push(Self::gen_token(Natural_Num(num), start_index, num_str.len()));
                 },
                 '"' => {
                     match self.read_string() {
@@ -327,7 +327,7 @@ impl Lexer {
         tokens
     }
 
-    fn read_int(&mut self) -> i64 {
+    fn read_int(&mut self) -> u64 {
         debug_assert!(matches!(self.cur_char(), '0'..='9'));
         let c = self.cur_char();
         let mut len: usize = 1;

@@ -46,7 +46,6 @@ impl Type {
     }
 }
 
-// @Refactor: sizeof should return usize.
 pub fn sizeof(ty: &Type) -> usize {
     match ty {
         Pointer_To(_) => 8,
@@ -248,7 +247,7 @@ impl ProgramAnalyzer {
                 // @Future: Currently, we only support constant number assignment.
                 // We will add array and struct initialization expr assignment in the future.
                 match analyzed_expr.content {
-                    ir::ExprType::Integer(n) => {
+                    ir::ExprType::Natural_Number(n) => {
                         if can_assign(&final_type, &analyzed_expr.ty) {
                             let value_in_bytes = n.to_le_bytes();
                             init_value = Some(value_in_bytes.to_vec());
@@ -586,8 +585,8 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &mut expr.content {
-            Integer(n) => {
-                let content = ir::ExprType::Integer(*n);
+            Natural_Number(n) => {
+                let content = ir::ExprType::Natural_Number(*n);
                 let ty = Type::Long;
                 ir::Expr {content, ty, span}
             }
@@ -805,7 +804,7 @@ impl ProgramAnalyzer {
                 let content = self.analyze_expr(expr_content);
                 let size = sizeof(&content.ty);
                 let ty = content.ty.clone();
-                let content = ir::ExprType::Integer(size.try_into().unwrap());
+                let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
                 ir::Expr {
                     content,
                     ty,
@@ -819,7 +818,7 @@ impl ProgramAnalyzer {
                 self.unique_string_name_index += 1;
                 // In C, a string ends with an extra \0 character, so the array length +1.
                 let len = s.len() + 1;
-                let ty: Type = ArrayOf(Box::new(Type::Char), len.try_into().unwrap());
+                let ty: Type = ArrayOf(Box::new(Type::Char), len);
 
                 let global_obj = create_global_obj(&unique_name, &ty);
                 // Although the content of this obj is stored in .data section, it can only be accessed
@@ -940,7 +939,7 @@ pub fn is_array(t: &Type) -> bool {
 
 fn scale_expr(expr: &ir::Expr, factor: usize, op: ir::OP, ty: &Type) -> ir::Expr {
     // expr for scale num
-    let num_expr_content = ir::ExprType::Integer(factor.try_into().unwrap());
+    let num_expr_content = ir::ExprType::Natural_Number(factor.try_into().unwrap());
     let num_expr = ir::Expr {
         content: num_expr_content,
         ty: ty.clone(),

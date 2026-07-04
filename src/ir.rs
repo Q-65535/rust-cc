@@ -13,14 +13,14 @@ use StmtType::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Integer(i64),
+    Natural_Number(u64),
     Binary(Box<Expr>, Box<Expr>, OP),
     Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
     RequestStructMember(Box<Expr>, usize),
-    // SymbolRef(Obj),
+    // @Rename: SymbolRef(Obj),
     Ident(Obj),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
     CommaExpression(Box<Expr>, Box<Expr>),

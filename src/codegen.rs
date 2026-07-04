@@ -205,7 +205,7 @@ impl Generator {
         emit!("  .loc 1 {}", expr.span.get_start_line());
         let content = &expr.content;
         match content {
-            Integer(n) => emit!("  mov ${}, %rax", n),
+            Natural_Number(n) => emit!("  mov ${}, %rax", n),
             CommaExpression(lhs, rhs) => {
                 self.expr_gen(lhs);
                 self.expr_gen(rhs);
