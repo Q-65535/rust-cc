@@ -50,6 +50,8 @@ int main() {
   ASSERT(4, ({ int x; int y; char z; char *a=&y; char *b=&z; b-a; }));
   ASSERT(2, ({ int x; char q1; char q2; char y; int z; char *a=&y; char *b=&z; b-a; }));
 
+  ASSERT(8, ({ long x; sizeof(x); }));
+
   printf("OK\n");
   return 0;
 }

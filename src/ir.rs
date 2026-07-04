@@ -13,7 +13,7 @@ use StmtType::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Number(i32),
+    Number(i64),
     Binary(Box<Expr>, Box<Expr>, OP),
     Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
@@ -36,18 +36,12 @@ pub struct Expr {
 }
 
 impl Expr {
+    // @Refactor: duplicate functions
     pub fn is_integer(&self) -> bool {
-        if let Type::Int = &self.ty {
-            true
-        } else {
-            false
-        }
+        return analyze::is_integer(&self.ty);
     }
     pub fn is_pointer_or_array(&self) -> bool {
-        match &self.ty {
-            Pointer_To(_) | ArrayOf(_, _) => true,
-            _ => false
-        }
+        return analyze::is_pointer_or_array(&self.ty);
     }
 }
 

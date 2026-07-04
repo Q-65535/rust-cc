@@ -25,12 +25,13 @@ pub enum TokenKind {
     Ampersand,
     Semicolon,
     Comma,
-    Num(i32),
+    Num(i64),
     LexIdent(String),
     StringLiteral(Vec<u8>),
     // Keywords
     Ret, If, Else, For, While,
     Sizeof, Struct, Int, Char, Union,
+    Long, Short,
 
     Eof,
 }
@@ -79,7 +80,7 @@ impl Token {
 
     pub fn is_decl_spec(&self) -> bool {
         match self.kind {
-            (Struct | Union | Int | Char) => true,
+            (Struct | Union | Int | Long | Char) => true,
             _ => false,
         }
     }
@@ -119,6 +120,8 @@ impl Lexer {
             ("struct".to_string(), Struct),
             ("union".to_string(), Union),
             ("char".to_string(), Char),
+            ("long".to_string(), Long),
+            ("short".to_string(), Short),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),
@@ -324,7 +327,7 @@ impl Lexer {
         tokens
     }
 
-    fn read_int(&mut self) -> i32 {
+    fn read_int(&mut self) -> i64 {
         debug_assert!(matches!(self.cur_char(), '0'..='9'));
         let c = self.cur_char();
         let mut len: usize = 1;

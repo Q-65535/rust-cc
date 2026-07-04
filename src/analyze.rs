@@ -15,6 +15,7 @@ use crate::common::{self, *};
 pub enum Type {
     Pointer_To(Box<Type>),
     Int,
+    Long,
     Char,
     ArrayOf(Box<Type>, i32),
     // function return ... type
@@ -31,6 +32,7 @@ impl Type {
         match self {
             Pointer_To(_) => 8,
             Type::Int => 4,
+            Type::Long => 8,
             Type::Char => 1,
             ArrayOf(element_ty, len) => element_ty.align(),
             Func(_) => 8,
@@ -42,10 +44,12 @@ impl Type {
     }
 }
 
+// @Refactor: sizeof should return usize.
 pub fn sizeof(ty: &Type) -> i32 {
     match ty {
         Pointer_To(_) => 8,
         Type::Int => 4,
+        Type::Long => 8,
         Type::Char => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         Func(_) => 8,
@@ -406,6 +410,7 @@ impl ProgramAnalyzer {
     fn analyze_decl_spec(&mut self, decl_spec: &TypeSpec) -> Type {
         match decl_spec {
             TypeSpec::Int => Type::Int,
+            TypeSpec::Long => Type::Long,
             TypeSpec::Char => Type::Char,
             TypeSpec::Struct_Union(st) => self.analyze_struct_union(st),
         }
@@ -579,7 +584,7 @@ impl ProgramAnalyzer {
         match &mut expr.content {
             Number(n) => {
                 let content = ExprType::Number(*n);
-                let ty = Type::Int;
+                let ty = Type::Long;
                 ir::Expr {content, ty, span}
             }
             Binary(lhs, rhs, tokenKind) => {
@@ -796,7 +801,7 @@ impl ProgramAnalyzer {
                 let content = self.analyze_expr(expr_content);
                 let size = sizeof(&content.ty);
                 let ty = content.ty.clone();
-                let content = ExprType::Number(size);
+                let content = ExprType::Number(size.into());
                 ir::Expr {
                     content,
                     ty,
@@ -870,8 +875,8 @@ fn function_type(ty: &Type) -> Type {
 
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
-fn is_integer(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Char)
+pub fn is_integer(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::Long | Type::Char)
 }
 
 fn can_assign(left: &Type, right: &Type) -> bool {
@@ -931,10 +936,10 @@ pub fn is_array(t: &Type) -> bool {
 
 fn scale_expr(expr: &ir::Expr, factor: i32, op: ir::OP, ty: &Type) -> ir::Expr {
     // expr for scale num
-    let num_expr_content = ir::ExprType::Number(factor);
+    let num_expr_content = ir::ExprType::Number(factor.into());
     let num_expr = ir::Expr {
         content: num_expr_content,
-        ty: Type::Int,
+        ty: ty.clone(),
         span: expr.span,
     };
 

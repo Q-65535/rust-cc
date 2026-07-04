@@ -91,6 +91,7 @@ pub struct Member {
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
 pub enum TypeSpec {
     Int,
+    Long,
     Char,
     Struct_Union(Struct_Union_Specifier),
 }
@@ -120,7 +121,7 @@ pub struct Declarator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Number(i32),
+    Number(i64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
@@ -227,6 +228,8 @@ impl Parser {
         }
     }
 
+    // @Fix: While parsing a function definition, if the data type of params is unknown,
+    // the program will trap into a infinite loop.
     pub fn sync_parse_point(&mut self) {
         while self.cur_token().kind != Eof {
             if (matches!(self.cur_token().kind, Semicolon | RBrace | RParen | RSqureBracket)) {
@@ -306,6 +309,7 @@ impl Parser {
         let decl_spec: TypeSpec;
         match kind {
             TokenKind::Int => Ok(TypeSpec::Int),
+            TokenKind::Long => Ok(TypeSpec::Long),
             TokenKind::Char => Ok(TypeSpec::Char),
             TokenKind::Struct | TokenKind::Union => {
                 let struct_spec = self.parse_struct_union_specifier()?;
@@ -394,6 +398,7 @@ impl Parser {
                     while &self.peek_token().kind == &LSqureBracket {
                         self.jump_over_next_token(&LSqureBracket);
                         if let Num(n) = self.cur_token().kind {
+                            // @Refactor: The data type of array len should be usize.
                             let cur_array_len: i32 = self.parse_raw_integer()?;
                             lens.push(cur_array_len);
                         } else {
@@ -745,7 +750,7 @@ impl Parser {
         }
     }
 
-    fn parse_integer(&self, n: i32) -> Expr {
+    fn parse_integer(&self, n: i64) -> Expr {
         debug_assert!(matches!(self.cur_token().kind, Num(_)));
         let span = Span {
             start_index: self.cur_token().span.start_index,
@@ -758,7 +763,7 @@ impl Parser {
     fn parse_raw_integer(&self) -> Result<i32, String> {
         let cur_token = self.cur_token();
         if let Num(n) = cur_token.kind {
-            return Ok(n);
+            return Ok(n.try_into().unwrap());
         } else {
             return Err(error_token(self.cur_token(), "expect a number"));
         }
