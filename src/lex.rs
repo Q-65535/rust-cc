@@ -25,7 +25,7 @@ pub enum TokenKind {
     Ampersand,
     Semicolon,
     Comma,
-    Natural_Num(u64),
+    Lex_Natural_Num(u64),
     LexIdent(String),
     StringLiteral(Vec<u8>),
     // Keywords
@@ -258,7 +258,7 @@ impl Lexer {
                 '0'..='9' => {
                     let num = self.read_int();
                     let num_str = num.to_string();
-                    tokens.push(Self::gen_token(Natural_Num(num), start_index, num_str.len()));
+                    tokens.push(Self::gen_token(Lex_Natural_Num(num), start_index, num_str.len()));
                 },
                 '"' => {
                     match self.read_string() {

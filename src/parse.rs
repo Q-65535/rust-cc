@@ -399,7 +399,7 @@ impl Parser {
                     let mut lens: Vec<usize> = Vec::new();
                     while &self.peek_token().kind == &LSqureBracket {
                         self.jump_over_next_token(&LSqureBracket);
-                        if let Natural_Num(n) = self.cur_token().kind {
+                        if let Lex_Natural_Num(n) = self.cur_token().kind {
                             let cur_array_len: usize = self.parse_raw_usize()?;
                             lens.push(cur_array_len);
                         } else {
@@ -626,7 +626,7 @@ impl Parser {
                         Eof | RParen => {
                             break;
                         },
-                        Natural_Num(_) => {
+                        Lex_Natural_Num(_) => {
                             let err_msg = error_token(self.cur_token(), "expect an operator");
                             return Err(err_msg);
                         },
@@ -663,7 +663,7 @@ impl Parser {
                     return self.parse_paren();
                 }
             },
-            Natural_Num(n) => Ok(self.parse_natural_number(n)),
+            Lex_Natural_Num(n) => Ok(self.parse_natural_number(n)),
             Plus => {
                 self.next_token();
                 self.parse_prefix()
@@ -752,7 +752,7 @@ impl Parser {
     }
 
     fn parse_natural_number(&self, n: u64) -> Expr {
-        debug_assert!(matches!(self.cur_token().kind, Natural_Num(_)));
+        debug_assert!(matches!(self.cur_token().kind, Lex_Natural_Num(_)));
         let span = Span {
             start_index: self.cur_token().span.start_index,
             end_index: self.cur_token().span.end_index,
@@ -763,7 +763,7 @@ impl Parser {
 
     fn parse_raw_usize(&self) -> Result<usize, String> {
         let cur_token = self.cur_token();
-        if let Natural_Num(n) = cur_token.kind {
+        if let Lex_Natural_Num(n) = cur_token.kind {
             return Ok(n.try_into().unwrap());
         } else {
             return Err(error_token(self.cur_token(), "expect a number"));

@@ -61,8 +61,8 @@ macro_rules! emit_raw {
 
 pub struct Generator {
     aprogram_r: ir::AnalyzedProgram,
-    lable_count: Cell<i32>,
-    cur_afun_r: Option<ir::Function>,
+    jump_label_count: Cell<usize>,
+    cur_function_index: usize,
     argregs64: Vec<&'static str>,
     argregs32: Vec<&'static str>,
     argregs16: Vec<&'static str>,
@@ -78,13 +78,11 @@ impl Generator {
         let argregs32 = vec!["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
         let argregs16 = vec![ "%di",  "%si",  "%dx",  "%cx", "%r8w", "%r9w"];
         let argregs8  = vec![ "%dil", "%sil", "%dl",  "%cl", "%r8b", "%r9b"];
-        Self {aprogram_r, lable_count: 0.into(), cur_afun_r: None, argregs64, argregs32, argregs16, argregs8, depth: 0.into()}
+        Self {aprogram_r, jump_label_count: 0.into(), cur_function_index: 0, argregs64, argregs32, argregs16, argregs8, depth: 0.into()}
     }
 
-    // The function currently being emitted. Only set while `gen_code`
-    // iterates `afuns`, which is the only context these reads happen in.
     fn cur_afun(&self) -> &ir::Function {
-        self.cur_afun_r.as_ref().unwrap()
+        return &self.aprogram_r.afuns[self.cur_function_index];
     }
 
     pub fn gen_code(&mut self) {
@@ -103,9 +101,8 @@ impl Generator {
                 emit!("  .zero {}", sizeof(&global_decl.obj.ty));
             }
         }
-        for afun in &self.aprogram_r.afuns {
-            // @Space: clone() wastes memory
-            self.cur_afun_r = Some(afun.clone());
+        for function_index in 0..self.aprogram_r.afuns.len() {
+            self.cur_function_index = function_index;
             self.fun_gen();
         }
         emit!("  .section .note.GNU-stack,\"\",@progbits");
@@ -294,7 +291,6 @@ impl Generator {
                             emit!("  add $8, %rsp");
                         }
                     }
-                    // @Robustness: improve error message
                     _ => eprintln!("currently only support function name as call reference"),
                 }
             }
@@ -303,9 +299,9 @@ impl Generator {
         }
     }
 
-    fn count(&self) -> i32 {
-        self.lable_count.set(self.lable_count.get()+1);
-        self.lable_count.get()
+    fn count(&self) -> usize {
+        self.jump_label_count.set(self.jump_label_count.get()+1);
+        self.jump_label_count.get()
     }
 
     fn gen_addr(&self, expr: &Expr) {

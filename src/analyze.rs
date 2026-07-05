@@ -518,11 +518,13 @@ impl ProgramAnalyzer {
 
 
     fn create_local_obj(&mut self, ty: &Type, name: &str) -> Obj {
+        let resolve_result = self.scope_manager.resolve_symbol_at_current_scope(name);
+        debug_assert!(matches!(resolve_result, None));
+
         let mut size: usize = sizeof(ty);
         let aligned_offset = align_to(self.current_local_var_offset, ty.align());
         self.current_local_var_offset = aligned_offset;
         let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.current_local_var_offset, is_global: false};
-        // @Smell: This line should be executed outside of this function.
         self.current_local_var_offset += size;
         obj
     }
@@ -661,8 +663,7 @@ impl ProgramAnalyzer {
                 let rhs = self.analyze_expr(rhs);
                 let lhs = self.analyze_expr(lhs);
                 if !can_be_lvalue(&lhs) {
-                    // @Incomplete: more precise error report: the reason why lhs cannot be lvalue
-                    let err_info = format!("lhs cannot be lvalue: {:?}", &lhs.ty);
+                    let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
                     print_error_at(lhs.span, &err_info);
                 }
                 if !can_assign(&lhs.ty, &rhs.ty) {
