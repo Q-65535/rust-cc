@@ -273,6 +273,20 @@ impl ProgramAnalyzer {
         decls
     }
 
+    fn resolve_type_with_suffix(&self, base_type: &Type, suffix: &DeclaratorSuffix) -> Type {
+        match suffix {
+            DeclaratorSuffix::ArrayLen(len, inner_suffix) => {
+                if let Some(inner_suffix) = inner_suffix {
+                    let cur_type = self.resolve_type_with_suffix(base_type, inner_suffix);
+                    return array_of(&cur_type, *len);
+                } else {
+                    return array_of(base_type, *len);
+                }
+            }
+            DeclaratorSuffix::FunParam(_) => todo!(),
+        }
+    }
+
     fn resolve_final_type(&self, base_type: &Type, declarator: &Declarator) -> Type {
         // deal with pointers
         let mut cur_type = base_type.clone();
@@ -281,14 +295,7 @@ impl ProgramAnalyzer {
         }
         // deal with suffix
         if let Some(suffix) = &declarator.suffix {
-            match suffix {
-                DeclaratorSuffix::ArrayLen(lens) => {
-                    for len in lens.iter().rev() {
-                        cur_type = array_of(&cur_type, *len);
-                    }
-                }
-                DeclaratorSuffix::FunParam(_) => todo!(),
-            }
+            cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
         }
 
         // For global declaration, resolve_tag should give a concrete strcut even if
@@ -494,14 +501,7 @@ impl ProgramAnalyzer {
         }
         // deal with suffix
         if let Some(suffix) = &member.declarator.suffix {
-            match suffix {
-                DeclaratorSuffix::ArrayLen(lens) => {
-                    for len in lens.iter().rev() {
-                        cur_type = array_of(&cur_type, *len);
-                    }
-                }
-                DeclaratorSuffix::FunParam(_) => todo!(),
-            }
+            cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
         }
         ir::Member{
             ty: cur_type,

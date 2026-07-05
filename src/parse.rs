@@ -41,7 +41,7 @@ use BlockItem::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorSuffix {
-    ArrayLen(Vec<usize>),
+    ArrayLen(usize, Option<Box<DeclaratorSuffix>>),
     FunParam(Vec<Parameter>),
 }
 use DeclaratorSuffix::*;
@@ -114,10 +114,16 @@ pub struct Struct_Union_Specifier {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
     pub star_count: i32,
+    // pub direct_declarator Box<Direct_Declarator>,
     pub name: String,
     pub suffix: Option<DeclaratorSuffix>,
     pub init_expr: Option<Expr>,
     pub span: Span,
+}
+
+pub enum Direct_Declarator {
+    Identifier(String),
+    Paren_Enclosed_Declarator(Declarator),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -388,54 +394,19 @@ impl Parser {
         }
         if let LexIdent(ident) = &self.cur_token().kind {
             let start_index = self.cur_token().span.start_index;
-            let mut end_index = self.cur_token().span.end_index;
             name = ident.clone();
 
             // parse suffix of a declarator
             let mut suffix = None;
-            match &self.peek_token().kind {
-                // array sizes
-                LSqureBracket => {
-                    let mut lens: Vec<usize> = Vec::new();
-                    while &self.peek_token().kind == &LSqureBracket {
-                        self.jump_over_next_token(&LSqureBracket);
-                        if let Lex_Natural_Num(n) = self.cur_token().kind {
-                            let cur_array_len: usize = self.parse_raw_usize()?;
-                            lens.push(cur_array_len);
-                        } else {
-                            let err_msg = format!("expect a unsigned integer after square bracket in array decl");
-                            return Err(error_token(self.cur_token(), &err_msg));
-                        }
-                        // parsing array declaration error
-                        // let syntax_error_type = "while parsing array declaration: "
-                        self.jump_to_next_token(&RSqureBracket);
-                    }
-                    end_index = self.cur_token().span.end_index;
-                    suffix = Some(ArrayLen(lens));
-                }
-                // function parameters
-                LParen => {
-                    let mut params: Vec<Parameter> = Vec::new();
-                    self.jump_over_next_token(&LParen);
-                    while self.cur_token().kind != RParen {
-                        if &self.cur_token().kind == &Comma {
-                            self.next_token();
-                        }
-                        let decl_spec = self.parse_decl_spec()?;
-                        self.next_token();
-                        let declarator = self.parse_declarator()?;
-                        self.next_token();
-                        let param = Parameter{decl_spec, declarator};
-                        params.push(param);
-                    }
-                    end_index = self.cur_token().span.end_index;
-                    suffix = Some(FunParam(params));
-                }
-                _ => {},
+            if let LSqureBracket | LParen = &self.peek_token().kind {
+                self.next_token();
+                suffix = Some(self.parse_declarator_suffix()?);
             }
             // This span doesn't include init_expr, just the declarator itself!
             // The init expr has its own span.
+            let mut end_index = self.cur_token().span.end_index;
             let span = Span{start_index, end_index};
+
             let mut init_expr = None;
             if let Assignment = self.peek_token().kind {
                 self.jump_to_next_token(&Assignment);
@@ -448,6 +419,52 @@ impl Parser {
         } else {
             let err_msg = error_token(self.cur_token(), "not an identifier");
             return Err(err_msg);
+        }
+    }
+
+    fn parse_declarator_suffix(&mut self) -> Result<DeclaratorSuffix, String> {
+        debug_assert!(matches!(self.cur_token().kind, LSqureBracket | LParen));
+
+        match self.cur_token().kind {
+            // array sizes
+            LSqureBracket => {
+                self.consume(&LSqureBracket);
+                if let Lex_Natural_Num(n) = self.cur_token().kind {
+                    let cur_array_len: usize = self.parse_raw_usize()?;
+                    self.jump_to_next_token(&RSqureBracket);
+                    if matches!(self.peek_token().kind, LSqureBracket | LParen) {
+                        self.next_token();
+                        let inner_suffix = self.parse_declarator_suffix()?;
+                        return Ok(ArrayLen(cur_array_len, Some(Box::new(inner_suffix))));
+                    } else {
+                        return Ok(ArrayLen(cur_array_len, None));
+                    }
+                } else {
+                    let err_msg = format!("expect a unsigned integer after square bracket in array decl");
+                    return Err(error_token(self.cur_token(), &err_msg));
+                }
+            },
+            // function parameters
+            LParen => {
+                self.consume(&LParen);
+                let mut params: Vec<Parameter> = Vec::new();
+                while self.cur_token().kind != RParen {
+                    if &self.cur_token().kind == &Comma {
+                        self.next_token();
+                    }
+                    let decl_spec = self.parse_decl_spec()?;
+                    self.next_token();
+                    let declarator = self.parse_declarator()?;
+                    self.next_token();
+                    let param = Parameter{decl_spec, declarator};
+                    params.push(param);
+                }
+                return Ok(FunParam(params));
+            },
+            _ => {
+                let err_msg = format!("Can't parse declarator suffix here!");
+                return Err(error_token(self.cur_token(), &err_msg));
+            },
         }
     }
 
