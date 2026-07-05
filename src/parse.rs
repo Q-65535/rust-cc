@@ -114,13 +114,13 @@ pub struct Struct_Union_Specifier {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
     pub star_count: i32,
-    // pub direct_declarator Box<Direct_Declarator>,
-    pub name: String,
+    pub direct_declarator: Box<Direct_Declarator>,
     pub suffix: Option<DeclaratorSuffix>,
     pub init_expr: Option<Expr>,
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Direct_Declarator {
     Identifier(String),
     Paren_Enclosed_Declarator(Declarator),
@@ -386,16 +386,25 @@ impl Parser {
 
     fn parse_declarator(&mut self) -> Result<Declarator, String> {
         let mut star_count = 0;
-        let name: String;
+        let mut name: String = "empty_declarator_name".to_string();
         // here, Mul is the pointer mark "*"
         while let Mul = self.cur_token().kind {
             star_count += 1;
             self.next_token();
         }
-        if let LexIdent(ident) = &self.cur_token().kind {
+        if matches!(self.cur_token().kind, LexIdent(..) | LParen) {
             let start_index = self.cur_token().span.start_index;
-            name = ident.clone();
-
+            let direct_declarator = match &self.cur_token().kind {
+                LexIdent(ident) => Box::new(Direct_Declarator::Identifier(ident.clone())),
+                LParen => {
+                    self.next_token();
+                    let paren_enclosed_declarator = self.parse_declarator()?;
+                    debug_assert!(matches!(self.peek_token().kind, RParen));
+                    self.jump_to_next_token(&RParen);
+                    Box::new(Direct_Declarator::Paren_Enclosed_Declarator(paren_enclosed_declarator))
+                },
+                _ => todo!(),
+            };
             // parse suffix of a declarator
             let mut suffix = None;
             if let LSqureBracket | LParen = &self.peek_token().kind {
@@ -415,9 +424,9 @@ impl Parser {
                 let expr = self.parse_expr(assignment_precedence)?;
                 init_expr = Some(expr);
             }
-            Ok(Declarator{star_count, name, suffix, init_expr, span})
+            Ok(Declarator{star_count, direct_declarator, suffix, init_expr, span})
         } else {
-            let err_msg = error_token(self.cur_token(), "not an identifier");
+            let err_msg = error_token(self.cur_token(), "unable to parse declarator here: not an identifier or a LParen.");
             return Err(err_msg);
         }
     }
@@ -912,7 +921,13 @@ impl Parser {
         if let Some(FunParam(params)) = &declarator.suffix {
             self.jump_to_next_token(&LBrace);
             let items = self.parse_block();
-            Ok(Function{name: declarator.name, name_span: declarator.span, return_type,
+            let function_name: String;
+            if let Direct_Declarator::Identifier(name) = *declarator.direct_declarator {
+                function_name = name.clone();
+            } else {
+                return Err(error_token(self.cur_token(), "unable to read the function name!"));
+            }
+            Ok(Function{name: function_name, name_span: declarator.span, return_type,
                 star_count: declarator.star_count, params: params.clone(), items})
         } else {
             Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))

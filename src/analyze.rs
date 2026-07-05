@@ -233,14 +233,14 @@ impl ProgramAnalyzer {
         let mut decls: Vec<ir::Declaration> = Vec::new();
         let base_type = self.analyze_decl_spec(&decl.decl_spec);
         for declarator in &mut decl.declarators {
-            if let Some(_) = self.scope_manager.resolve_symbol(&declarator.name) {
-                let err_info = format!("global variable {} already defined", declarator.name);
+            let (final_type, name) = self.resolve_final_type_and_name(&base_type, declarator);
+
+            if let Some(_) = self.scope_manager.resolve_symbol(&name) {
+                let err_info = format!("global variable {} already defined", name);
                 // TODO: error handling
                 print_error_at(declarator.span, &err_info);
                 exit(1);
             }
-            let final_type = self.resolve_final_type(&base_type, declarator);
-
             let mut init_value = None;
             if let Some(expr) = &mut declarator.init_expr {
                 let analyzed_expr = self.analyze_expr(expr);
@@ -253,7 +253,7 @@ impl ProgramAnalyzer {
                             init_value = Some(value_in_bytes.to_vec());
                         } else {
                             let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                            declarator.name, &final_type, &analyzed_expr.ty);
+                            name, &final_type, &analyzed_expr.ty);
                             print_error_at(declarator.span, &err_info);
                             exit(1);
                         }
@@ -265,7 +265,7 @@ impl ProgramAnalyzer {
                     }
                 }
             }
-            let object = create_global_obj(&declarator.name, &final_type);
+            let object = create_global_obj(&name, &final_type);
             let analyzed_decl = ir::Declaration{obj: object.clone(), init_value};
             decls.push(analyzed_decl);
             self.scope_manager.add_obj(object);
@@ -287,9 +287,10 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn resolve_final_type(&self, base_type: &Type, declarator: &Declarator) -> Type {
+    fn resolve_final_type_and_name(&self, base_type: &Type, declarator: &Declarator) -> (Type, String) {
         // deal with pointers
         let mut cur_type = base_type.clone();
+        let mut name = "empty_declarator_name".to_string();
         for i in 0..declarator.star_count {
             cur_type = pointer_to(&cur_type);
         }
@@ -297,27 +298,27 @@ impl ProgramAnalyzer {
         if let Some(suffix) = &declarator.suffix {
             cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
         }
-
-        // For global declaration, resolve_tag should give a concrete strcut even if
-        // the definition of the struct is written after the usage of it.
-        // For example:
-        // struct Stuff abc;
-        // struct Stuff {
-        //     int a;
-        // };
-        // The above code doesn't have any problem in global scope.
-        // But, in a function body, this will cause a compile error saying that
-        // storage of abc is unknown.
+        match &*declarator.direct_declarator {
+            Direct_Declarator::Identifier(ident) => {
+                name = ident.clone();
+            },
+            Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
+                (cur_type, name) = self.resolve_final_type_and_name(&cur_type, &inner_declarator);
+            },
+        }
+        // If the final type is a tag, We want to make sure that
+        // it can resove to a concrete struct, and do the Resolvation.
         if let Tag(tag_name) = cur_type.clone() {
             match self.scope_manager.resolve_tag(&tag_name) {
                 Some(the_type) => cur_type = the_type.clone(),
                 None => {
-                    let err_info = format!("storage size of {} is unkonwn", &declarator.name);
+                    let err_info = format!("storage size of {} is unkonwn", &tag_name);
                     print_error_at(declarator.span, &err_info);
+                    exit(1);
                 },
             }
         }
-        return cur_type;
+        return (cur_type, name);
     }
 
     pub fn analyze_function(&mut self, fun: &mut Function) -> ir::Function {
@@ -367,16 +368,13 @@ impl ProgramAnalyzer {
 
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
         let base_type = self.analyze_decl_spec(&param.decl_spec);
-        let mut cur_type = base_type.clone();
-        for _ in 0..param.declarator.star_count {
-            cur_type = pointer_to(&cur_type);
-        }
-        if self.scope_manager.resolve_symbol(&param.declarator.name) == None {
-            let obj = self.create_local_obj(&cur_type, &param.declarator.name);
+        let (final_type, name) = self.resolve_final_type_and_name(&base_type, &param.declarator);
+        if self.scope_manager.resolve_symbol(&name) == None {
+            let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_obj(obj.clone());
             return obj;
         } else {
-            let err_info = format!("fatal error: parameter variable {} already defined", &param.declarator.name);
+            let err_info = format!("fatal error: parameter variable {} already defined", &name);
             print_error_at(param.declarator.span, &err_info);
             exit(1);
         }
@@ -388,14 +386,13 @@ impl ProgramAnalyzer {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         let base_type = self.analyze_decl_spec(&decl.decl_spec);
         for declarator in &mut decl.declarators {
-            if let Some(_) = self.scope_manager.resolve_symbol_at_current_scope(&declarator.name) {
-                let err_info = format!("variable {} already defined", declarator.name);
+            let (final_type, name) = self.resolve_final_type_and_name(&base_type, declarator);
+            if let Some(_) = self.scope_manager.resolve_symbol_at_current_scope(&name) {
+                let err_info = format!("variable {} already defined", name);
                 print_error_at(declarator.span, &err_info);
                 exit(1);
             }
-            let final_type = self.resolve_final_type(&base_type, declarator);
-
-            let obj = self.create_local_obj(&final_type, &declarator.name);
+            let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_obj(obj.clone());
             if let Some(expr) = &mut declarator.init_expr {
                 let analyzed_expr = self.analyze_expr(expr);
@@ -493,19 +490,11 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
-        let base_ty = self.analyze_decl_spec(&member.decl_spec);
-        // deal with pointers
-        let mut cur_type = base_ty.clone();
-        for i in 0..member.declarator.star_count {
-            cur_type = pointer_to(&cur_type);
-        }
-        // deal with suffix
-        if let Some(suffix) = &member.declarator.suffix {
-            cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
-        }
+        let base_type = self.analyze_decl_spec(&member.decl_spec);
+        let (final_type, name) = self.resolve_final_type_and_name(&base_type, &member.declarator);
         ir::Member{
-            ty: cur_type,
-            name: member.declarator.name.clone(),
+            ty: final_type,
+            name: name.clone(),
             offset,
         }
     }

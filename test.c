@@ -4,6 +4,7 @@
 // We don't need to declare a function before calling it.
 // int foo();
 int main() {
+    struct zxc (*zxcp);
     struct coord {
         int x;
         int y;
