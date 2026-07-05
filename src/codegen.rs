@@ -60,34 +60,36 @@ macro_rules! emit_raw {
 }
 
 pub struct Generator {
-    aprogram_r: ir::AnalyzedProgram,
-    jump_label_count: Cell<usize>,
-    cur_function_index: usize,
+    cur_function_stack_size: usize,
+    cur_function_name: String,
     argregs64: Vec<&'static str>,
     argregs32: Vec<&'static str>,
     argregs16: Vec<&'static str>,
     argregs8: Vec<&'static str>,
     // Number of 8-byte values currently pushed on the stack within the
     // function being emitted. Used to keep RSP 16-byte aligned at `call`.
-    depth: Cell<i32>,
+    depth: usize,
+    jump_label_count: usize,
 }
 
 impl Generator {
-    pub fn new(aprogram_r: ir::AnalyzedProgram) -> Self {
+    pub fn new() -> Self {
         let argregs64 = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8",  "%r9" ];
         let argregs32 = vec!["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
         let argregs16 = vec![ "%di",  "%si",  "%dx",  "%cx", "%r8w", "%r9w"];
         let argregs8  = vec![ "%dil", "%sil", "%dl",  "%cl", "%r8b", "%r9b"];
-        Self {aprogram_r, jump_label_count: 0.into(), cur_function_index: 0, argregs64, argregs32, argregs16, argregs8, depth: 0.into()}
+        Self {
+            jump_label_count: 0,
+            cur_function_stack_size: 0,
+            cur_function_name: "".to_string(),
+            argregs64, argregs32, argregs16, argregs8,
+            depth: 0,
+        }
     }
 
-    fn cur_afun(&self) -> &ir::Function {
-        return &self.aprogram_r.afuns[self.cur_function_index];
-    }
-
-    pub fn gen_code(&mut self) {
+    pub fn gen_code(&mut self, program: AnalyzedProgram) {
         emit!(".file 1 \"{}\"", INPUT_PATH.lock().unwrap());
-        for global_decl in &self.aprogram_r.global_decls {
+        for global_decl in &program.global_decls {
             emit!("  .data");
             emit!("  .globl {}", global_decl.obj.name);
             emit!("{}:", global_decl.obj.name);
@@ -101,17 +103,17 @@ impl Generator {
                 emit!("  .zero {}", sizeof(&global_decl.obj.ty));
             }
         }
-        for function_index in 0..self.aprogram_r.afuns.len() {
-            self.cur_function_index = function_index;
-            self.fun_gen();
+        for fun in program.afuns {
+            self.cur_function_stack_size = fun.stack_size;
+            self.cur_function_name = fun.name.clone();
+            self.depth = 0;
+            self.fun_gen(fun);
         }
         emit!("  .section .note.GNU-stack,\"\",@progbits");
     }
 
-    pub fn fun_gen(&self) {
-        self.depth.set(0);
-        let stack_size = self.cur_afun().stack_size;
-        let fun = self.cur_afun();
+    pub fn fun_gen(&mut self, fun: ir::Function) {
+        let stack_size = fun.stack_size;
         let aligned_stack_size = align_to(stack_size, 16);
         // prologue
         emit!();
@@ -123,16 +125,16 @@ impl Generator {
         emit!("  sub ${}, %rsp", aligned_stack_size);
         emit!();
         let mut i = 0;
-        for param in &self.cur_afun().params {
+        for param in &fun.params {
             match sizeof(&param.ty) {
-                1 => emit!("  mov {}, -{}(%rbp)\n", self.argregs8[i],  self.cur_afun().stack_size-param.offset),
-                2 => emit!("  mov {}, -{}(%rbp)\n", self.argregs16[i], self.cur_afun().stack_size-param.offset),
-                4 => emit!("  mov {}, -{}(%rbp)\n", self.argregs32[i], self.cur_afun().stack_size-param.offset),
-                _ => emit!("  mov {}, -{}(%rbp)\n", self.argregs64[i], self.cur_afun().stack_size-param.offset),
+                1 => emit!("  mov {}, -{}(%rbp)\n", self.argregs8[i],  fun.stack_size-param.offset),
+                2 => emit!("  mov {}, -{}(%rbp)\n", self.argregs16[i], fun.stack_size-param.offset),
+                4 => emit!("  mov {}, -{}(%rbp)\n", self.argregs32[i], fun.stack_size-param.offset),
+                _ => emit!("  mov {}, -{}(%rbp)\n", self.argregs64[i], fun.stack_size-param.offset),
             }
             i += 1;
         }
-        self.block_gen(&self.cur_afun().stmts);
+        self.block_gen(&fun.stmts);
 
         // end
         emit!(".L.return.{}:",fun.name);
@@ -141,7 +143,7 @@ impl Generator {
         emit!("  ret");
     }
 
-    fn block_gen(&self, stmts: &Vec<ir::StmtType>) {
+    fn block_gen(&mut self, stmts: &Vec<ir::StmtType>) {
         for stmt in stmts {
             emit!(";;;;;;;;;;;;;;;;;;;;;;;;");
             self.stmt_gen(stmt);
@@ -150,7 +152,7 @@ impl Generator {
         emit!();
     }
 
-    fn stmt_gen(&self, stmt: &ir::StmtType) {
+    fn stmt_gen(&mut self, stmt: &ir::StmtType) {
         match stmt {
             ir::StmtType::Ex(expr) => self.expr_gen(&expr),
             ir::StmtType::Return(expr) =>self.ret_gen(&expr),
@@ -160,13 +162,13 @@ impl Generator {
         }
     }
 
-    fn ret_gen(&self, expr: &ir::Expr) {
+    fn ret_gen(&mut self, expr: &ir::Expr) {
         self.expr_gen(expr);
-        emit!("  jmp .L.return.{}\n", self.cur_afun().name);
+        emit!("  jmp .L.return.{}\n", self.cur_function_name);
     }
 
-    fn if_gen(&self, cond: &ir::Expr, then: &ir::StmtType, otherwise: &Option<Box<ir::StmtType>>) {
-        let c = self.count();
+    fn if_gen(&mut self, cond: &ir::Expr, then: &ir::StmtType, otherwise: &Option<Box<ir::StmtType>>) {
+        let c = self.next_jump_label_count();
         self.expr_gen(&cond);
         emit!("  cmp $0, %rax");
         emit!("  je  .L.else.{}", c);
@@ -179,8 +181,8 @@ impl Generator {
         emit!(".L.end.{}:", c);
     }
 
-    fn for_gen(&self, init: &Option<ir::Expr>, cond: &Option<ir::Expr>, inc: &Option<ir::Expr>, then: &Box<ir::StmtType>) {
-        let c = self.count();
+    fn for_gen(&mut self, init: &Option<ir::Expr>, cond: &Option<ir::Expr>, inc: &Option<ir::Expr>, then: &Box<ir::StmtType>) {
+        let c = self.next_jump_label_count();
         if let Some(expr) = init {
             self.expr_gen(expr);
         }
@@ -198,7 +200,7 @@ impl Generator {
         emit!(".L.end.{}:", c);
     }
 
-    fn expr_gen(&self, expr: &ir::Expr) {
+    fn expr_gen(&mut self, expr: &ir::Expr) {
         emit!("  .loc 1 {}", expr.span.get_start_line());
         let content = &expr.content;
         match content {
@@ -245,7 +247,7 @@ impl Generator {
                 self.gen_addr(var);
                 self.push("%rax");
                 self.expr_gen(val);
-                self.store(&var.ty);
+                self.store_according_to_type(&var.ty);
             }
             Neg(expr) => {
                 self.expr_gen(expr);
@@ -281,7 +283,7 @@ impl Generator {
                         // The x86-64 ABI requires RSP to be 16-byte aligned
                         // at the point of a `call`. If an odd number of
                         // 8-byte values are live on the stack, realign first.
-                        let needs_align = self.depth.get() % 2 == 1;
+                        let needs_align = self.depth % 2 == 1;
                         if needs_align {
                             emit!("  sub $8, %rsp");
                         }
@@ -299,18 +301,18 @@ impl Generator {
         }
     }
 
-    fn count(&self) -> usize {
-        self.jump_label_count.set(self.jump_label_count.get()+1);
-        self.jump_label_count.get()
+    fn next_jump_label_count(&mut self) -> usize {
+        self.jump_label_count += 1;
+        return self.jump_label_count;
     }
 
-    fn gen_addr(&self, expr: &Expr) {
+    fn gen_addr(&mut self, expr: &Expr) {
         match &expr.content {
             Ident(obj) => {
                 if obj.is_global {
                     emit!("  lea {}(%rip), %rax", obj.name);
                 } else {
-                    emit!("  lea -{}(%rbp), %rax", self.cur_afun().stack_size-obj.offset);
+                    emit!("  lea -{}(%rbp), %rax", self.cur_function_stack_size-obj.offset);
                 }
 
             },
@@ -333,17 +335,17 @@ impl Generator {
         }
     }
 
-    fn push(&self, reg: &str) {
+    fn push(&mut self, reg: &str) {
         emit!("  push {}", reg);
-        self.depth.set(self.depth.get() + 1);
+        self.depth += 1;
     }
 
-    fn pop(&self, reg: &str) {
+    fn pop(&mut self, reg: &str) {
         emit!("  pop {}", reg);
-        self.depth.set(self.depth.get() - 1);
+        self.depth -= 1;
     }
 
-    fn store(&self, ty: &Type) {
+    fn store_according_to_type(&mut self, ty: &Type) {
         self.pop("%rdi");
 
         if matches!(ty, Struct(..)|Union(..)) {

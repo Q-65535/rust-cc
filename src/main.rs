@@ -122,8 +122,8 @@ fn main() {
         let analyzed_program = analyzer.analyze(program);
         // codegen
         set_output(&opt_o);
-        let mut gen = Generator::new(analyzed_program);
-        gen.gen_code();
+        let mut gen = Generator::new();
+        gen.gen_code(analyzed_program);
     } else {
         for e in syntax_errors {
             println!("{}", e);

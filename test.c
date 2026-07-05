@@ -14,7 +14,6 @@ int main() {
     location.x = 11;
     location.y = 22;
     // When we have a strcut pointer, we don't need to use '->' to access its struct members, all just use '.'.
-    // location_pointer->x = 12345;
     location_pointer.x = 12345;
     printf("location.x=%d\n", location.x);
     printf("location.y=%d\n", location.y);
