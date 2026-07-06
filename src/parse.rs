@@ -61,6 +61,7 @@ pub struct Program {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
+    // @Refactor: use declarator to include name and star_count and params
     pub name: String,
     pub name_span: Span,
     pub return_type: TypeSpec,

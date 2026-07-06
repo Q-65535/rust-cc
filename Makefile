@@ -70,9 +70,13 @@ test: $(TESTS)
 
 # `make clean`: remove cargo artifacts, generated .s/.exe, temp + backup files.
 clean:
-	cargo clean
+	# cargo clean
 	rm -rf tmp* $(TESTS) test/*.s test/*.exe
-	find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
+	# find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
+
+clean_test:
+	rm -rf tmp* $(TESTS) test/*.s test/*.exe
+	test
 
 fulltest: clean test
 

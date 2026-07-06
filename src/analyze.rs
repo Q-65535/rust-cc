@@ -20,7 +20,7 @@ pub enum Type {
     Char,
     ArrayOf(Box<Type>, usize),
     // function return ... type
-    Func(Box<Type>),
+    Func{return_type: Box<Type>, param_types: Vec<Type>},
     Struct(ir::Struct),
     Union(ir::Struct),
     Tag(String),
@@ -37,7 +37,7 @@ impl Type {
             Type::Short => 2,
             Type::Char => 1,
             ArrayOf(element_ty, len) => element_ty.align(),
-            Func(_) => 8,
+            Func{..} => 8,
             Struct(st) => st.align,
             Union(st) => st.align,
             Tag(_) => 0,
@@ -54,7 +54,7 @@ pub fn sizeof(ty: &Type) -> usize {
         Type::Short => 2,
         Type::Char => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
-        Func(_) => 8,
+        Func{..} => 8,
         Struct(st) => st.size,
         Union(st) => st.size,
         Tag(tag_name) => {
@@ -199,9 +199,21 @@ impl ProgramAnalyzer {
         for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
+                    // @Refactor: Use resolve_final_type_and_name() to resolve declarator in FunctionDef.
                     if self.scope_manager.resolve_symbol(&fun.name) == None {
-                        let ty = self.analyze_decl_spec(&fun.return_type);
-                        let o = create_global_obj(&fun.name, &ty);
+                        let mut cur_type = self.analyze_decl_spec(&fun.return_type);
+                        for i in 0..fun.star_count {
+                            cur_type = pointer_to(&cur_type);
+                        }
+                        let mut param_types = Vec::new();
+                        for param in &fun.params {
+                            let param_base_type = self.analyze_decl_spec(&param.decl_spec);
+                            let (param_final_type, _) = self.resolve_final_type_and_name(&param_base_type, &param.declarator);
+                            param_types.push(param_final_type);
+                        }
+                        let return_type = Box::new(cur_type);
+                        let function_type = Type::Func{return_type, param_types};
+                        let o = create_global_obj(&fun.name, &function_type);
                         self.scope_manager.add_obj(o);
                     // It is not allowed that function and variable have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering its is a function or a variable.
@@ -266,14 +278,21 @@ impl ProgramAnalyzer {
                 }
             }
             let object = create_global_obj(&name, &final_type);
+            self.scope_manager.add_obj(object.clone());
+            // A function declarator with no body (e.g. `int printf();`) is a
+            // prototype, not a variable definition. Register it in scope so
+            // calls resolve, but do NOT emit a data object for it — doing so
+            // would define a bogus symbol that overrides the real function.
+            if let Type::Func{..} = final_type {
+                continue;
+            }
             let analyzed_decl = ir::Declaration{obj: object.clone(), init_value};
             decls.push(analyzed_decl);
-            self.scope_manager.add_obj(object);
         }
         decls
     }
 
-    fn resolve_type_with_suffix(&self, base_type: &Type, suffix: &DeclaratorSuffix) -> Type {
+    fn resolve_type_with_suffix(&mut self, base_type: &Type, suffix: &DeclaratorSuffix) -> Type {
         match suffix {
             DeclaratorSuffix::ArrayLen(len, inner_suffix) => {
                 if let Some(inner_suffix) = inner_suffix {
@@ -282,12 +301,22 @@ impl ProgramAnalyzer {
                 } else {
                     return array_of(base_type, *len);
                 }
-            }
-            DeclaratorSuffix::FunParam(_) => todo!(),
+            },
+            DeclaratorSuffix::FunParam(params) => {
+                let return_type = base_type.clone();
+                let mut param_types = Vec::new();
+                for param in params {
+                    let param_base_type = self.analyze_decl_spec(&param.decl_spec);
+                    let (param_final_type, _) = self.resolve_final_type_and_name(&param_base_type, &param.declarator);
+                    param_types.push(param_final_type);
+                }
+                let return_type = Box::new(return_type);
+                return Type::Func{return_type, param_types};
+            },
         }
     }
 
-    fn resolve_final_type_and_name(&self, base_type: &Type, declarator: &Declarator) -> (Type, String) {
+    fn resolve_final_type_and_name(&mut self, base_type: &Type, declarator: &Declarator) -> (Type, String) {
         // deal with pointers
         let mut cur_type = base_type.clone();
         let mut name = "empty_declarator_name".to_string();
@@ -859,11 +888,6 @@ fn dimension_of(ty: &Type) -> i32 {
         cur_ty = inner;
     }
     res
-}
-
-fn function_type(ty: &Type) -> Type {
-    let return_type = Box::new(ty.clone());
-    Func(return_type)
 }
 
 // evaluate whether a expression of right type can be assigned to a "stuff"
