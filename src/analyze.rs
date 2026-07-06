@@ -199,29 +199,17 @@ impl ProgramAnalyzer {
         for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
-                    // @Refactor: Use resolve_final_type_and_name() to resolve declarator in FunctionDef.
-                    if self.scope_manager.resolve_symbol(&fun.name) == None {
-                        let mut cur_type = self.analyze_decl_spec(&fun.return_type);
-                        for i in 0..fun.star_count {
-                            cur_type = pointer_to(&cur_type);
-                        }
-                        let mut param_types = Vec::new();
-                        for param in &fun.params {
-                            let param_base_type = self.analyze_decl_spec(&param.decl_spec);
-                            let (param_final_type, _) = self.resolve_final_type_and_name(&param_base_type, &param.declarator);
-                            param_types.push(param_final_type);
-                        }
-                        let return_type = Box::new(cur_type);
-                        let function_type = Type::Func{return_type, param_types};
-                        let o = create_global_obj(&fun.name, &function_type);
-                        self.scope_manager.add_obj(o);
+                    let mut base_type = self.analyze_decl_spec(&fun.return_type_specifier);
+                    let (function_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
                     // It is not allowed that function and variable have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering its is a function or a variable.
-                    } else {
-                        let err_info = format!("semantic error: redefinition of {}", fun.name);
-                        print_error_at(fun.name_span, &err_info);
+                    if let Some(..) = self.scope_manager.resolve_symbol(&name) {
+                        let err_info = format!("semantic error: redefinition of {}", name);
+                        print_error_at(fun.declarator.span, &err_info);
                         exit(1);
                     }
+                    let o = create_global_obj(&name, &function_type);
+                    self.scope_manager.add_obj(o);
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
                     let mut batch_global_decls = self.analyze_global_decl(decl);
@@ -356,15 +344,18 @@ impl ProgramAnalyzer {
         // to-be-analyzed function.
         self.current_local_var_offset = 0;
 
-        let base_type = self.analyze_decl_spec(&fun.return_type);
-        let mut return_type = base_type;
-        for i in 0..fun.star_count {
-            return_type = pointer_to(&return_type);
-        }
+        let base_type = self.analyze_decl_spec(&fun.return_type_specifier);
+        let (final_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
         let mut analyzed_params: Vec<Obj> = Vec::new();
-        for param in &fun.params {
-            let p = self.analyze_param(param);
-            analyzed_params.push(p);
+        if let Some(DeclaratorSuffix::FunParam(params)) = &fun.declarator.suffix {
+            for param in params {
+                let p = self.analyze_param(param);
+                analyzed_params.push(p);
+            }
+        } else {
+            let err_info = format!("compiler bug: the function doesn't have parameter filed.");
+            print_error_at(fun.declarator.span, &err_info);
+            exit(1);
         }
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in &mut fun.items {
@@ -380,7 +371,7 @@ impl ProgramAnalyzer {
             }
         }
         let stack_size = self.current_local_var_offset;
-        ir::Function{name: fun.name.clone(), return_type, params: analyzed_params, stmts, stack_size}
+        ir::Function{name, function_type: final_type, params: analyzed_params, stmts, stack_size}
     }
 
     fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {

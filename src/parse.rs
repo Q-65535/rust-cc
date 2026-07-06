@@ -61,12 +61,8 @@ pub struct Program {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
-    // @Refactor: use declarator to include name and star_count and params
-    pub name: String,
-    pub name_span: Span,
-    pub return_type: TypeSpec,
-    pub star_count: i32,
-    pub params: Vec<Parameter>,
+    pub return_type_specifier: TypeSpec,
+    pub declarator: Declarator,
     pub items: Vec<BlockItem>,
 }
 
@@ -916,25 +912,17 @@ impl Parser {
     }
 
     fn parse_fun_def(&mut self) -> Result<Function, String> {
-        let return_type = self.parse_decl_spec()?;
+        let return_type_specifier = self.parse_decl_spec()?;
         self.next_token();
         let declarator = self.parse_declarator()?;
         if let Some(FunParam(params)) = &declarator.suffix {
             self.jump_to_next_token(&LBrace);
             let items = self.parse_block();
-            let function_name: String;
-            if let Direct_Declarator::Identifier(name) = *declarator.direct_declarator {
-                function_name = name.clone();
-            } else {
-                return Err(error_token(self.cur_token(), "unable to read the function name!"));
-            }
-            Ok(Function{name: function_name, name_span: declarator.span, return_type,
-                star_count: declarator.star_count, params: params.clone(), items})
+            Ok(Function{return_type_specifier, declarator, items})
         } else {
             Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
     }
-
 }
 
 fn syntax_error(span: Span, err_msg: &str) -> String {

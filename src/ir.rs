@@ -48,7 +48,7 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
-    pub return_type: Type,
+    pub function_type: Type,
     pub params: Vec<Obj>,
     pub stmts: Vec<StmtType>,
     pub stack_size: usize,
