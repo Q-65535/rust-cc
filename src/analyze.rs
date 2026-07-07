@@ -939,7 +939,11 @@ pub fn is_integer(ty: &Type) -> bool {
     matches!(ty, Type::Int | Type::Long | Type::Short | Type::Char)
 }
 
-fn can_assign(left: &Type, right: &Type) -> bool {
+fn can_assign(left: &Type, mut right: &Type) -> bool {
+    // If the right is a function call, we only consdier its return type.
+    if let Func {return_type, ..} = right {
+        right = return_type;
+    }
     // array can be assigned to a pointer type, BUT not the other way around!
     if is_pointer(left) && is_pointer_or_array(right) {
         return true
