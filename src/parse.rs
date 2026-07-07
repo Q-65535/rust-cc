@@ -310,6 +310,7 @@ impl Parser {
     }
 
     fn parse_decl_spec(&mut self) -> Result<Vec<Decl_Spec>, String> {
+        debug_assert!(self.cur_token().is_decl_spec());
         let mut decl_specs = Vec::new();
         loop {
             let cur_decl_spec = match self.cur_token().kind {
