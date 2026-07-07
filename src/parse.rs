@@ -87,12 +87,19 @@ pub struct Member {
 #[derive(Debug, Clone, PartialEq)]
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
 pub enum Decl_Spec {
+    Typedef,
+    // @TODO: Typedef_name(String),
     Int,
     Long,
     Short,
     Char,
     Void,
     Struct_Union(Struct_Union_Specifier),
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Symbol_Attribute {
+    pub is_typedef: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -314,6 +321,7 @@ impl Parser {
         let mut decl_specs = Vec::new();
         loop {
             let cur_decl_spec = match self.cur_token().kind {
+                TokenKind::Typedef => Decl_Spec::Typedef,
                 TokenKind::Int => Decl_Spec::Int,
                 TokenKind::Long => Decl_Spec::Long,
                 TokenKind::Short => Decl_Spec::Short,

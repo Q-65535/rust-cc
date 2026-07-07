@@ -83,7 +83,15 @@ pub struct Obj {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Typedef_Alias {
+    pub name: String,
+    pub ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
+    // @TODO: Refactor this to Vec<Symbol>
+    // and Symbol is a enum that includes Typedef_Alias and Obj
     pub objects: Vec<Obj>,
     pub tags: HashMap<String, Type>,
 }
@@ -202,7 +210,7 @@ impl ProgramAnalyzer {
         for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
-                    let mut base_type = self.analyze_decl_spec(&fun.return_type_specifier);
+                    let (mut base_type, mut symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
                     let (function_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
                     // It is not allowed that function and variable have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering its is a function or a variable.
@@ -232,9 +240,20 @@ impl ProgramAnalyzer {
         ir::AnalyzedProgram{afuns, global_decls: self.global_decls}
     }
 
+    pub fn analyze_typedef(&mut self, base_type: &Type, declarator: &Declarator) {
+        let (final_type, name) = self.resolve_final_type_and_name(base_type, declarator);
+        todo!();
+    }
+
     pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<ir::Declaration> {
         let mut decls: Vec<ir::Declaration> = Vec::new();
-        let base_type = self.analyze_decl_spec(&decl.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
+        if symbol_attribute.is_typedef {
+            for declarator in &mut decl.declarators {
+                self.analyze_typedef(&base_type, declarator);
+            }
+            return decls;
+        }
         for declarator in &mut decl.declarators {
             let (final_type, name) = self.resolve_final_type_and_name(&base_type, declarator);
 
@@ -297,7 +316,7 @@ impl ProgramAnalyzer {
                 let return_type = base_type.clone();
                 let mut param_types = Vec::new();
                 for param in params {
-                    let param_base_type = self.analyze_decl_spec(&param.decl_spec);
+                    let (param_base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
                     let (param_final_type, _) = self.resolve_final_type_and_name(&param_base_type, &param.declarator);
                     param_types.push(param_final_type);
                 }
@@ -339,6 +358,8 @@ impl ProgramAnalyzer {
             }
         }
 
+        // @TODO: Remove this because "typdef void x;" is valid c code,
+        // but analyze_typedef calls current function.
         if cur_type == Void {
             let err_info = format!("variable declared void!");
             print_error_at(declarator.span, &err_info);
@@ -353,7 +374,7 @@ impl ProgramAnalyzer {
         // to-be-analyzed function.
         self.current_local_var_offset = 0;
 
-        let base_type = self.analyze_decl_spec(&fun.return_type_specifier);
+        let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
         let (final_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
         let mut analyzed_params: Vec<Obj> = Vec::new();
         if let Some(DeclaratorSuffix::FunParam(params)) = &fun.declarator.suffix {
@@ -396,7 +417,7 @@ impl ProgramAnalyzer {
 
 
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
-        let base_type = self.analyze_decl_spec(&param.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
         let (final_type, name) = self.resolve_final_type_and_name(&base_type, &param.declarator);
         if self.scope_manager.resolve_symbol(&name) == None {
             let obj = self.create_local_obj(&final_type, &name);
@@ -413,7 +434,13 @@ impl ProgramAnalyzer {
     // After analyzation, declarations are all resolved to creating obj and assignment statement.
     fn analyze_decl(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
-        let base_type = self.analyze_decl_spec(&decl.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
+        if symbol_attribute.is_typedef {
+            for declarator in &mut decl.declarators {
+                self.analyze_typedef(&base_type, declarator);
+            }
+            return stmts;
+        }
         for declarator in &mut decl.declarators {
             let (final_type, name) = self.resolve_final_type_and_name(&base_type, declarator);
             if let Some(_) = self.scope_manager.resolve_symbol_at_current_scope(&name) {
@@ -432,6 +459,7 @@ impl ProgramAnalyzer {
                     let generated_stmt = ir::StmtType::Ex(generated_expr);
                     stmts.push(generated_stmt);
                 } else {
+                    // @Smell: Provide better error message explaining who wants what type of expr but what wrong type of expr is provided.
                     let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                     obj.name, &obj.ty, &analyzed_expr.ty);
                     print_error_at(declarator.span, &err_info);
@@ -442,7 +470,7 @@ impl ProgramAnalyzer {
         stmts
     }
 
-    fn analyze_decl_spec(&mut self, decl_specs: &Vec<Decl_Spec>) -> Type {
+    fn analyze_decl_spec(&mut self, decl_specs: &Vec<Decl_Spec>) -> (Type, Symbol_Attribute) {
         const VOID:  u32 = 1 << 0;
         const CHAR:  u32 = 1 << 2;
         const SHORT: u32 = 1 << 4;
@@ -450,14 +478,13 @@ impl ProgramAnalyzer {
         const LONG:  u32 = 1 << 8;
         const OTHER: u32 = 1 << 10;
 
+        let mut var_attribute = Symbol_Attribute::default();
         let mut count: u32 = 0;
         let mut cur_type: Type = ty_none;
         for spec in decl_specs {
             match spec {
-                Decl_Spec::Struct_Union(st) => {
-                    cur_type = self.analyze_struct_union(st);
-                    count += OTHER;
-                    continue;
+                Decl_Spec::Typedef => {
+                    var_attribute.is_typedef = true;
                 },
                 Decl_Spec::Int => {
                     count += INT;
@@ -473,6 +500,11 @@ impl ProgramAnalyzer {
                 },
                 Decl_Spec::Void => {
                     count += VOID;
+                },
+                Decl_Spec::Struct_Union(st) => {
+                    cur_type = self.analyze_struct_union(st);
+                    count += OTHER;
+                    continue;
                 },
             }
 
@@ -492,7 +524,7 @@ impl ProgramAnalyzer {
                 }
             };
         }
-        return cur_type;
+        return (cur_type, var_attribute);
     }
 
     fn analyze_struct_union(&mut self, st: &Struct_Union_Specifier) -> Type {
@@ -562,7 +594,7 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
-        let base_type = self.analyze_decl_spec(&member.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_spec(&member.decl_spec);
         let (final_type, name) = self.resolve_final_type_and_name(&base_type, &member.declarator);
         ir::Member{
             ty: final_type,

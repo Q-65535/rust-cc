@@ -30,7 +30,7 @@ pub enum TokenKind {
     StringLiteral(Vec<u8>),
     // Keywords
     Ret, If, Else, For, While,
-    Sizeof, Struct, Int, Char, Union,
+    Sizeof, Typedef, Struct, Int, Char, Union,
     Long, Short, Void,
 
     Eof,
@@ -117,6 +117,7 @@ impl Lexer {
             ("while".to_string(), While),
             ("int".to_string(), Int),
             ("sizeof".to_string(), Sizeof),
+            ("typedef".to_string(), Typedef),
             ("struct".to_string(), Struct),
             ("union".to_string(), Union),
             ("char".to_string(), Char),
