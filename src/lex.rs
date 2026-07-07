@@ -31,7 +31,7 @@ pub enum TokenKind {
     // Keywords
     Ret, If, Else, For, While,
     Sizeof, Struct, Int, Char, Union,
-    Long, Short,
+    Long, Short, Void,
 
     Eof,
 }
@@ -80,7 +80,7 @@ impl Token {
 
     pub fn is_decl_spec(&self) -> bool {
         match self.kind {
-            (Struct | Union | Int | Long | Short | Char) => true,
+            (Struct | Union | Int | Long | Short | Char | Void) => true,
             _ => false,
         }
     }
@@ -122,6 +122,7 @@ impl Lexer {
             ("char".to_string(), Char),
             ("long".to_string(), Long),
             ("short".to_string(), Short),
+            ("void".to_string(), Void),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

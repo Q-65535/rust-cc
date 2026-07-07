@@ -91,6 +91,7 @@ pub enum TypeSpec {
     Long,
     Short,
     Char,
+    Void,
     Struct_Union(Struct_Union_Specifier),
 }
 
@@ -316,6 +317,7 @@ impl Parser {
             TokenKind::Long => Ok(TypeSpec::Long),
             TokenKind::Short => Ok(TypeSpec::Short),
             TokenKind::Char => Ok(TypeSpec::Char),
+            TokenKind::Void => Ok(TypeSpec::Void),
             TokenKind::Struct | TokenKind::Union => {
                 let struct_spec = self.parse_struct_union_specifier()?;
                 Ok(TypeSpec::Struct_Union(struct_spec))

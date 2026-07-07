@@ -18,6 +18,7 @@ pub enum Type {
     Long,
     Short,
     Char,
+    Void,
     ArrayOf(Box<Type>, usize),
     // function return ... type
     Func{return_type: Box<Type>, param_types: Vec<Type>},
@@ -36,6 +37,7 @@ impl Type {
             Type::Long => 8,
             Type::Short => 2,
             Type::Char => 1,
+            Type::Void => 1,
             ArrayOf(element_ty, len) => element_ty.align(),
             Func{..} => 8,
             Struct(st) => st.align,
@@ -53,6 +55,7 @@ pub fn sizeof(ty: &Type) -> usize {
         Type::Long => 8,
         Type::Short => 2,
         Type::Char => 1,
+        Type::Void => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         Func{..} => 8,
         Struct(st) => st.size,
@@ -335,6 +338,12 @@ impl ProgramAnalyzer {
                 },
             }
         }
+
+        if cur_type == Void {
+            let err_info = format!("variable declared void!");
+            print_error_at(declarator.span, &err_info);
+            exit(1);
+        }
         return (cur_type, name);
     }
 
@@ -439,6 +448,7 @@ impl ProgramAnalyzer {
             TypeSpec::Long => Type::Long,
             TypeSpec::Short => Type::Short,
             TypeSpec::Char => Type::Char,
+            TypeSpec::Void => Type::Void,
             TypeSpec::Struct_Union(st) => self.analyze_struct_union(st),
         }
     }
@@ -972,7 +982,13 @@ fn gen_binary_expr_from_2_expr(lhs: &ir::Expr, rhs: &ir::Expr, op: ir::OP, ty: &
 fn gen_deref_expr(expr: &ir::Expr) -> ir::Expr {
     let new_expr_content = ir::ExprType::Deref(Box::new(expr.clone()));
     let dereferenced_type = match &expr.ty {
-        Pointer_To(pointee_type) => *pointee_type.clone(),
+        Pointer_To(pointee_type) => {
+            if **pointee_type == Void {
+                print_error_at(expr.span, "Hey bro no, you are trying to dereference a void pointer!");
+                exit(1);
+            }
+            *pointee_type.clone()
+        },
         ArrayOf(element_type, _) => *element_type.clone(),
         _ => {
             print_error_at(expr.span, "unable to generate deference of this expression, because it is
