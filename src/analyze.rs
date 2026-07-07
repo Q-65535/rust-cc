@@ -442,15 +442,57 @@ impl ProgramAnalyzer {
         stmts
     }
 
-    fn analyze_decl_spec(&mut self, decl_spec: &TypeSpec) -> Type {
-        match decl_spec {
-            TypeSpec::Int => Type::Int,
-            TypeSpec::Long => Type::Long,
-            TypeSpec::Short => Type::Short,
-            TypeSpec::Char => Type::Char,
-            TypeSpec::Void => Type::Void,
-            TypeSpec::Struct_Union(st) => self.analyze_struct_union(st),
+    fn analyze_decl_spec(&mut self, decl_specs: &Vec<Decl_Spec>) -> Type {
+        const VOID:  u32 = 1 << 0;
+        const CHAR:  u32 = 1 << 2;
+        const SHORT: u32 = 1 << 4;
+        const INT:   u32 = 1 << 6;
+        const LONG:  u32 = 1 << 8;
+        const OTHER: u32 = 1 << 10;
+
+        let mut count: u32 = 0;
+        let mut cur_type: Type = ty_none;
+        for spec in decl_specs {
+            match spec {
+                Decl_Spec::Struct_Union(st) => {
+                    cur_type = self.analyze_struct_union(st);
+                    count += OTHER;
+                    continue;
+                },
+                Decl_Spec::Int => {
+                    count += INT;
+                },
+                Decl_Spec::Long => {
+                    count += LONG;
+                },
+                Decl_Spec::Short => {
+                    count += SHORT;
+                },
+                Decl_Spec::Char => {
+                    count += CHAR;
+                },
+                Decl_Spec::Void => {
+                    count += VOID;
+                },
+            }
+
+            cur_type = match count {
+                _ if count == VOID              => Type::Void,
+                _ if count == CHAR              => Type::Char,
+                _ if count == SHORT             => Type::Short,
+                _ if count == SHORT + INT       => Type::Short,
+                _ if count == INT               => Type::Int,
+                _ if count == LONG              => Type::Long,
+                _ if count == LONG + INT        => Type::Long,
+                _ if count == LONG + LONG       => Type::Long,
+                _ if count == LONG + LONG + INT => Type::Long,
+                _ => {
+                    println!("invalid type");
+                    exit(1);
+                }
+            };
         }
+        return cur_type;
     }
 
     fn analyze_struct_union(&mut self, st: &Struct_Union_Specifier) -> Type {

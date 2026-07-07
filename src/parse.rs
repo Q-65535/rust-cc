@@ -61,32 +61,32 @@ pub struct Program {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
-    pub return_type_specifier: TypeSpec,
+    pub return_type_specifier: Vec<Decl_Spec>,
     pub declarator: Declarator,
     pub items: Vec<BlockItem>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
-    pub decl_spec: TypeSpec,
+    pub decl_spec: Vec<Decl_Spec>,
     pub declarator: Declarator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
-    pub decl_spec: TypeSpec,
+    pub decl_spec: Vec<Decl_Spec>,
     pub declarators: Vec<Declarator>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
-    pub decl_spec: TypeSpec,
+    pub decl_spec: Vec<Decl_Spec>,
     pub declarator: Declarator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
-pub enum TypeSpec {
+pub enum Decl_Spec {
     Int,
     Long,
     Short,
@@ -309,24 +309,32 @@ impl Parser {
         return Ok(Declaration{decl_spec, declarators});
     }
 
-    fn parse_decl_spec(&mut self) -> Result<TypeSpec, String> {
-        let kind = &self.cur_token().kind;
-        let decl_spec: TypeSpec;
-        match kind {
-            TokenKind::Int => Ok(TypeSpec::Int),
-            TokenKind::Long => Ok(TypeSpec::Long),
-            TokenKind::Short => Ok(TypeSpec::Short),
-            TokenKind::Char => Ok(TypeSpec::Char),
-            TokenKind::Void => Ok(TypeSpec::Void),
-            TokenKind::Struct | TokenKind::Union => {
-                let struct_spec = self.parse_struct_union_specifier()?;
-                Ok(TypeSpec::Struct_Union(struct_spec))
-            },
-            _ => {
-                let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
-                return Err(err_msg);
+    fn parse_decl_spec(&mut self) -> Result<Vec<Decl_Spec>, String> {
+        let mut decl_specs = Vec::new();
+        loop {
+            let cur_decl_spec = match self.cur_token().kind {
+                TokenKind::Int => Decl_Spec::Int,
+                TokenKind::Long => Decl_Spec::Long,
+                TokenKind::Short => Decl_Spec::Short,
+                TokenKind::Char => Decl_Spec::Char,
+                TokenKind::Void => Decl_Spec::Void,
+                TokenKind::Struct | TokenKind::Union => {
+                    let struct_spec = self.parse_struct_union_specifier()?;
+                    Decl_Spec::Struct_Union(struct_spec)
+                },
+                _ => {
+                    let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
+                    return Err(err_msg);
+                }
+            };
+            decl_specs.push(cur_decl_spec);
+            if self.peek_token().is_decl_spec() {
+                self.next_token();
+            } else {
+                break;
             }
         }
+        return Ok(decl_specs);
     }
 
     fn parse_struct_union_specifier(&mut self) -> Result<Struct_Union_Specifier, String> {
