@@ -77,13 +77,6 @@ impl Token {
     pub fn precedence(&self) -> Precedence {
         return precedence(&self.kind);
     }
-
-    pub fn is_decl_spec(&self) -> bool {
-        match self.kind {
-            (Struct | Union | Int | Long | Short | Char | Void) => true,
-            _ => false,
-        }
-    }
 }
 
 pub fn precedence(kind: &TokenKind) -> Precedence {
@@ -211,7 +204,7 @@ impl Lexer {
                         _ => tokens.push(Self::gen_token(Minus, start_index, 1)),
                     }
                 },
-                'a'..='z' | '_' => {
+                'A'..='Z' | 'a'..='z' | '_' => {
                     let name = self.read_ident();
                     let tok_kind = if self.is_keyword(&name) {
                         self.get_keyword_kind(&name)
@@ -443,13 +436,13 @@ impl Lexer {
     }
 
     fn read_ident(&mut self) -> String {
-        debug_assert!(matches!(self.cur_char(), 'a'..='z' | '_'));
+        debug_assert!(matches!(self.cur_char(), 'A'..='Z' | 'a'..='z' | '_'));
         let mut len = 1;
         let i = self.index;
         loop {
             match self.peek_char() {
                 Some(c) => {
-                    if (c <= '9' && c >= '0') | (c >= 'a' && c <= 'z') | (c == '_') {
+                    if (c <= '9' && c >= '0') | (c >= 'a' && c <= 'z') | (c >= 'A' && c <= 'Z') | (c == '_') {
                         len += 1;
                         self.next_char();
                     } else {

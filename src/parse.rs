@@ -88,18 +88,13 @@ pub struct Member {
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
 pub enum Decl_Spec {
     Typedef,
-    // @TODO: Typedef_name(String),
+    Typedef_Name(String),
     Int,
     Long,
     Short,
     Char,
     Void,
     Struct_Union(Struct_Union_Specifier),
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Symbol_Attribute {
-    pub is_typedef: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -166,10 +161,82 @@ impl Expr {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Scope {
+    pub typedef_names: Vec<String>,
+}
+
+impl Scope {
+    pub fn new() -> Self {
+        Scope{
+            typedef_names: Vec::new(),
+        }
+    }
+
+    pub fn add_typedef_name(&mut self, name: &str) {
+        self.typedef_names.push(name.to_string());
+    }
+
+    pub fn is_typedef_name(&self, name: &str) -> bool {
+        for typedef_name in &self.typedef_names {
+            if typedef_name == name {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScopeManager {
+    pub scopes: Vec<Scope>,
+    pub current_scope_index: usize,
+}
+
+impl ScopeManager {
+    pub fn new() -> Self {
+        let mut scopes: Vec<Scope> = Vec::new();
+        scopes.push(Scope::new());
+        ScopeManager{scopes, current_scope_index: 0}
+    }
+
+    pub fn enter_new_scope(&mut self) {
+        self.scopes.push(Scope::new());
+        self.current_scope_index += 1;
+    }
+
+    pub fn exit_current_scope(&mut self) {
+        self.scopes.pop();
+        self.current_scope_index -= 1;
+    }
+
+    pub fn is_typedef_name(&self, name: &str) -> bool {
+        let index = self.current_scope_index;
+        for i in (0..=index).rev() {
+            let current_scope = &self.scopes[i];
+            if current_scope.is_typedef_name(name) == true {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn is_typedef_name_in_current_scope(&self, name: &str) -> bool {
+        let current_scope = &self.scopes[self.current_scope_index];
+        return current_scope.is_typedef_name(name);
+    }
+
+    pub fn add_typedef_name(&mut self, name: &str) {
+        let current_scope = &mut self.scopes[self.current_scope_index];
+        current_scope.add_typedef_name(name);
+    }
+}
+
 
 pub struct Parser {
     tokens: Vec<Token>,
     cur_index: usize,
+    scope_manager: ScopeManager,
     syntax_errors: Vec<String>,
 }
 
@@ -178,6 +245,7 @@ impl Parser {
         Parser {
             tokens,
             cur_index: 0,
+            scope_manager: ScopeManager::new(),
             syntax_errors: Vec::new(),
         }
     }
@@ -296,9 +364,21 @@ impl Parser {
     fn parse_decl(&mut self) -> Result<Declaration, String> {
         let mut declarators: Vec<Declarator> = Vec::new();
         let decl_spec = self.parse_decl_spec()?;
+        let mut this_is_typdef_declaration = false;
+        if decl_spec[0] == Decl_Spec::Typedef {
+            this_is_typdef_declaration = true;
+        }
         self.next_token();
         while self.cur_token().kind != Semicolon {
             let declarator = self.parse_declarator()?;
+            if (this_is_typdef_declaration) {
+                let name = get_declarator_name(&declarator);
+                if self.scope_manager.is_typedef_name_in_current_scope(name) {
+                    let err_msg = error_span(declarator.span, "typedef name is already being used!");
+                    return Err(err_msg);
+                }
+                self.scope_manager.add_typedef_name(name);
+            }
             declarators.push(declarator);
             self.next_token();
             match self.cur_token().kind {
@@ -316,12 +396,21 @@ impl Parser {
         return Ok(Declaration{decl_spec, declarators});
     }
 
+    fn is_decl_spec(&self, token: &Token) -> bool {
+        match &token.kind {
+            (Struct | Union | Int | Long | Short | Char | Void | Typedef) => true,
+            LexIdent(name) => self.scope_manager.is_typedef_name(name),
+            _ => false,
+        }
+    }
+
     fn parse_decl_spec(&mut self) -> Result<Vec<Decl_Spec>, String> {
-        debug_assert!(self.cur_token().is_decl_spec());
+        debug_assert!(self.is_decl_spec(self.cur_token()));
         let mut decl_specs = Vec::new();
         loop {
-            let cur_decl_spec = match self.cur_token().kind {
+            let cur_decl_spec = match &self.cur_token().kind {
                 TokenKind::Typedef => Decl_Spec::Typedef,
+                TokenKind::LexIdent(name) => Decl_Spec::Typedef_Name(name.to_string()),
                 TokenKind::Int => Decl_Spec::Int,
                 TokenKind::Long => Decl_Spec::Long,
                 TokenKind::Short => Decl_Spec::Short,
@@ -337,7 +426,7 @@ impl Parser {
                 }
             };
             decl_specs.push(cur_decl_spec);
-            if self.peek_token().is_decl_spec() {
+            if self.is_decl_spec(self.peek_token()) {
                 self.next_token();
             } else {
                 break;
@@ -524,13 +613,14 @@ impl Parser {
     }
 
     fn parse_block(&mut self) -> Vec<BlockItem> {
+        self.scope_manager.enter_new_scope();
         let mut items: Vec<BlockItem> = Vec::new();
         self.next_token(); // skip '{'
         while self.cur_token().kind != RBrace {
             let item: BlockItem;
             // @Future: if the token kind is a declaration-specifier (i.e., storage-class-specifier,
             // type-specifier or function-specifier), we parse decl.
-            if self.cur_token().is_decl_spec() {
+            if self.is_decl_spec(self.cur_token()) {
                 match self.parse_decl() {
                     Err(error_message) => {
                         self.syntax_errors.push(error_message);
@@ -551,6 +641,7 @@ impl Parser {
             }
             self.next_token(); // skip ';' or '}', ready to parse next BlockItem.
         }
+        self.scope_manager.exit_current_scope();
         items
     }
 
@@ -940,6 +1031,15 @@ impl Parser {
             Ok(Function{return_type_specifier, declarator, items})
         } else {
             Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
+        }
+    }
+}
+
+fn get_declarator_name(declarator: &Declarator) -> &str {
+    match &*declarator.direct_declarator {
+        Direct_Declarator::Identifier(name) => {return name;}
+        Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
+            return get_declarator_name(inner_declarator);
         }
     }
 }
