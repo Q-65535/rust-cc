@@ -5,13 +5,14 @@
 // int foo();
 int main() {
     struct zxc (*zxcp);
-    struct coord {
+    typedef struct coord {
         int x;
         int y;
         char identifier;
-    };
-    struct coord location;
-    struct coord *location_pointer = &location;
+    } coord;
+
+    coord location;
+    coord *location_pointer = &location;
     location.x = 11;
     location.y = 22;
     // When we have a strcut pointer, we don't need to use '->' to access its struct members, all just use '.'.

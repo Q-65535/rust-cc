@@ -64,7 +64,7 @@ local_test:
 # then run the CLI-level driver.
 # $^ = all prerequisites (the .exe list). `|| exit 1` stops at the first
 # failing test. `$$i` escapes `$i` so the shell expands it, not make.
-test: $(TESTS)
+old_test: $(TESTS)
 	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
 	test/driver.sh
 
@@ -78,7 +78,7 @@ clean_test:
 	rm -rf tmp* $(TESTS) test/*.s test/*.exe
 	test
 
-fulltest: clean test
+test: clean old_test
 
 # These are command names, not files to produce, so always run them even if a
 # file of the same name happens to exist in the directory.
