@@ -11,6 +11,11 @@ use BlockItem::*;
 use crate::SRC;
 use crate::common::{self, *};
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Symbol_Attribute {
+    pub is_typedef: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Pointer_To(Box<Type>),
@@ -20,7 +25,6 @@ pub enum Type {
     Char,
     Void,
     ArrayOf(Box<Type>, usize),
-    // function return ... type
     Func{return_type: Box<Type>, param_types: Vec<Type>},
     Struct(ir::Struct),
     Union(ir::Struct),
@@ -83,38 +87,23 @@ pub struct Obj {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Typedef_Alias {
-    pub name: String,
-    pub ty: Type,
+pub enum Symbol {
+    Object(Obj),
+    Typedef(Type),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
-    // @TODO: Refactor this to Vec<Symbol>
-    // and Symbol is a enum that includes Typedef_Alias and Obj
-    pub objects: Vec<Obj>,
-    pub tags: HashMap<String, Type>,
+    pub symbols: HashMap<String, Symbol>,
+    pub tags:    HashMap<String, Type>,
 }
 
 impl Scope {
     pub fn new() -> Self {
         Scope{
-            objects: Vec::new(),
-            tags: HashMap::new(),
+            symbols: HashMap::new(),
+            tags:    HashMap::new(),
         }
-    }
-
-    pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
-        for o in &self.objects {
-            if o.name == s {
-                return Some(o);
-            }
-        }
-        None
-    }
-
-    pub fn add_obj(&mut self, o: Obj) {
-        self.objects.push(o);
     }
 }
 
@@ -141,25 +130,63 @@ impl ScopeManager {
         self.current_scope_index -= 1;
     }
 
-    pub fn resolve_symbol(&self, s: &str) -> Option<&Obj> {
+    pub fn resolve_typedef_alias(&self, name: &str) -> Option<&Type> {
         let index = self.current_scope_index;
         for i in (0..=index).rev() {
             let current_scope = &self.scopes[i];
-            if let Some(o) = current_scope.resolve_symbol(s) {
-                return Some(o)
+            if let Some(symbol) = current_scope.symbols.get(name) {
+                if let Symbol::Typedef(ty) = symbol {
+                    return Some(ty);
+                }
             }
         }
         return None
     }
 
-    pub fn resolve_symbol_at_current_scope(&self, s: &str) -> Option<&Obj> {
+    pub fn resolve_typedef_at_current_scope(&self, name: &str) -> Option<&Type> {
         let current_scope = &self.scopes[self.current_scope_index];
-        return current_scope.resolve_symbol(s);
+        if let Some(symbol) = current_scope.symbols.get(name) {
+            if let Symbol::Typedef(ty) = symbol {
+                return Some(ty);
+            }
+        }
+        return None;
     }
 
-    pub fn add_obj(&mut self, o: Obj) {
+    pub fn add_typedef_alias(&mut self, name: &str, the_type: Type) {
+        debug_assert!(self.resolve_typedef_at_current_scope(name) == None);
         let current_scope = &mut self.scopes[self.current_scope_index];
-        current_scope.add_obj(o);
+        current_scope.symbols.insert(name.to_string(), Symbol::Typedef(the_type));
+    }
+
+    pub fn resolve_object(&self, name: &str) -> Option<&Obj> {
+        let index = self.current_scope_index;
+        for i in (0..=index).rev() {
+            let current_scope = &self.scopes[i];
+            if let Some(symbol) = current_scope.symbols.get(name) {
+                if let Symbol::Object(obj) = symbol {
+                    return Some(obj);
+                }
+            }
+        }
+        return None
+    }
+
+    pub fn resolve_object_at_current_scope(&self, name: &str) -> Option<&Obj> {
+        let current_scope = &self.scopes[self.current_scope_index];
+        if let Some(symbol) = current_scope.symbols.get(name) {
+            if let Symbol::Object(obj) = symbol {
+                return Some(obj);
+            }
+        }
+        return None;
+    }
+
+    pub fn add_object(&mut self, obj: Obj) {
+        let name = &obj.name;
+        debug_assert!(self.resolve_object_at_current_scope(name) == None);
+        let current_scope = &mut self.scopes[self.current_scope_index];
+        current_scope.symbols.insert(name.to_string(), Symbol::Object(obj));
     }
 
     pub fn resolve_tag(&self, name: &str) -> Option<&Type> {
@@ -214,13 +241,13 @@ impl ProgramAnalyzer {
                     let (function_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
                     // It is not allowed that function and variable have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering its is a function or a variable.
-                    if let Some(..) = self.scope_manager.resolve_symbol(&name) {
+                    if let Some(..) = self.scope_manager.resolve_object(&name) {
                         let err_info = format!("semantic error: redefinition of {}", name);
                         print_error_at(fun.declarator.span, &err_info);
                         exit(1);
                     }
                     let o = create_global_obj(&name, &function_type);
-                    self.scope_manager.add_obj(o);
+                    self.scope_manager.add_object(o);
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
                     let mut batch_global_decls = self.analyze_global_decl(decl);
@@ -231,9 +258,7 @@ impl ProgramAnalyzer {
         // Analyze function bodies at second pass.
         for unit in &mut program.translation_units {
             if let parse::TranslationUnit::FunctionDef(fun) = unit {
-                self.scope_manager.enter_new_scope();
                 let afun = self.analyze_function(fun);
-                self.scope_manager.exit_current_scope();
                 afuns.push(afun);
             }
         }
@@ -242,7 +267,7 @@ impl ProgramAnalyzer {
 
     pub fn analyze_typedef(&mut self, base_type: &Type, declarator: &Declarator) {
         let (final_type, name) = self.resolve_final_type_and_name(base_type, declarator);
-        todo!();
+        self.scope_manager.add_typedef_alias(&name, final_type);
     }
 
     pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<ir::Declaration> {
@@ -257,7 +282,7 @@ impl ProgramAnalyzer {
         for declarator in &mut decl.declarators {
             let (final_type, name) = self.resolve_final_type_and_name(&base_type, declarator);
 
-            if let Some(_) = self.scope_manager.resolve_symbol(&name) {
+            if let Some(_) = self.scope_manager.resolve_object(&name) {
                 let err_info = format!("global variable {} already defined", name);
                 // TODO: error handling
                 print_error_at(declarator.span, &err_info);
@@ -288,7 +313,7 @@ impl ProgramAnalyzer {
                 }
             }
             let object = create_global_obj(&name, &final_type);
-            self.scope_manager.add_obj(object.clone());
+            self.scope_manager.add_object(object.clone());
             // A function declarator with no body (e.g. `int printf();`) is a
             // prototype, not a variable definition. Register it in scope so
             // calls resolve, but do NOT emit a data object for it — doing so
@@ -377,6 +402,12 @@ impl ProgramAnalyzer {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
         let (final_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
         let mut analyzed_params: Vec<Obj> = Vec::new();
+        // @Smell: This is awkward, currently we are not able to just
+        // call analyze_block to analyze the function body block, 
+        // because we must enter scope
+        // before analyzing function parameters since function
+        // parameters are also in the function body scope.
+        self.scope_manager.enter_new_scope();
         if let Some(DeclaratorSuffix::FunParam(params)) = &fun.declarator.suffix {
             for param in params {
                 let p = self.analyze_param(param);
@@ -401,10 +432,12 @@ impl ProgramAnalyzer {
             }
         }
         let stack_size = self.current_local_var_offset;
+        self.scope_manager.exit_current_scope();
         ir::Function{name, function_type: final_type, params: analyzed_params, stmts, stack_size}
     }
 
-    fn analyze_items(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
+    fn analyze_block(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
+        self.scope_manager.enter_new_scope();
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in items {
             match item {
@@ -412,6 +445,7 @@ impl ProgramAnalyzer {
                 Decl(decl) => stmts.append(&mut self.analyze_decl(decl)),
             }
         }
+        self.scope_manager.exit_current_scope();
         stmts
     }
 
@@ -419,9 +453,9 @@ impl ProgramAnalyzer {
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
         let (final_type, name) = self.resolve_final_type_and_name(&base_type, &param.declarator);
-        if self.scope_manager.resolve_symbol(&name) == None {
+        if self.scope_manager.resolve_object(&name) == None {
             let obj = self.create_local_obj(&final_type, &name);
-            self.scope_manager.add_obj(obj.clone());
+            self.scope_manager.add_object(obj.clone());
             return obj;
         } else {
             let err_info = format!("fatal error: parameter variable {} already defined", &name);
@@ -443,13 +477,16 @@ impl ProgramAnalyzer {
         }
         for declarator in &mut decl.declarators {
             let (final_type, name) = self.resolve_final_type_and_name(&base_type, declarator);
-            if let Some(_) = self.scope_manager.resolve_symbol_at_current_scope(&name) {
+            if let Some(_) = self.scope_manager.resolve_object_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
                 print_error_at(declarator.span, &err_info);
                 exit(1);
             }
+            // @Fix: If it is a function declaration, we shouldn't allocate
+            // stack space to it? But currently create_local_obj() will definitely
+            // allocate space accroding to the size of the given type.
             let obj = self.create_local_obj(&final_type, &name);
-            self.scope_manager.add_obj(obj.clone());
+            self.scope_manager.add_object(obj.clone());
             if let Some(expr) = &mut declarator.init_expr {
                 let analyzed_expr = self.analyze_expr(expr);
                 if can_assign(&obj.ty, &analyzed_expr.ty) {
@@ -480,11 +517,23 @@ impl ProgramAnalyzer {
 
         let mut var_attribute = Symbol_Attribute::default();
         let mut count: u32 = 0;
-        let mut cur_type: Type = ty_none;
+        let mut cur_type = Type::Int;
         for spec in decl_specs {
             match spec {
                 Decl_Spec::Typedef => {
                     var_attribute.is_typedef = true;
+                    continue;
+                },
+                Decl_Spec::Typedef_Name(name) => {
+                    let result = self.scope_manager.resolve_typedef_alias(name);
+                    if let Some(ty) = result {
+                        cur_type = ty.clone();
+                    } else {
+                        println!("unknown typedef name :{}", name);
+                        exit(1);
+                    }
+                    count += OTHER;
+                    continue;
                 },
                 Decl_Spec::Int => {
                     count += INT;
@@ -611,7 +660,7 @@ impl ProgramAnalyzer {
 
 
     fn create_local_obj(&mut self, ty: &Type, name: &str) -> Obj {
-        let resolve_result = self.scope_manager.resolve_symbol_at_current_scope(name);
+        let resolve_result = self.scope_manager.resolve_object_at_current_scope(name);
         debug_assert!(matches!(resolve_result, None));
 
         let mut size: usize = sizeof(ty);
@@ -634,9 +683,7 @@ impl ProgramAnalyzer {
                 StmtType::Return(expr)
             },
             Block(items) => {
-                self.scope_manager.enter_new_scope();
-                let stmts = self.analyze_items(items);
-                self.scope_manager.exit_current_scope();
+                let stmts = self.analyze_block(items);
                 StmtType::Block(stmts)
             }
             If(parse::IfStmt{cond, then, otherwise}) => {
@@ -785,7 +832,7 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             }
             Ident(s) => {
-                let obj = if let Some(o) = self.scope_manager.resolve_symbol(s) {
+                let obj = if let Some(o) = self.scope_manager.resolve_object(s) {
                     o.clone()
                 } else {
                     let err_info = format!("semantic error: symbol '{}' not found", s);
@@ -871,9 +918,9 @@ impl ProgramAnalyzer {
                 // dealt with the corresponding declaration).
                 match &ident.content {
                     Ident(s) => {
-                        if self.scope_manager.resolve_symbol(s) == None {
+                        if self.scope_manager.resolve_object(s) == None {
                             let obj = self.create_local_obj(&ty_none, &s);
-                            self.scope_manager.add_obj(obj.clone());
+                            self.scope_manager.add_object(obj.clone());
                         }
                     }
                     _ => println!("currently only support function name as call reference"),
@@ -917,7 +964,7 @@ impl ProgramAnalyzer {
                 let global_obj = create_global_obj(&unique_name, &ty);
                 // Although the content of this obj is stored in .data section, it can only be accessed
                 // at current scope. So we add the obj in current scope.
-                self.scope_manager.add_obj(global_obj.clone());
+                self.scope_manager.add_object(global_obj.clone());
                 let mut value_in_bytes = s.clone();
                 value_in_bytes.push(b'\0');
                 let global_decl = ir::Declaration{obj: global_obj.clone(), init_value: Some(value_in_bytes)};
@@ -928,9 +975,7 @@ impl ProgramAnalyzer {
             }
             Paren(inner) => self.analyze_expr(inner),
             StmtExpr(items) => {
-                self.scope_manager.enter_new_scope();
-                let stmts = self.analyze_items(items);
-                self.scope_manager.exit_current_scope();
+                let stmts = self.analyze_block(items);
                 let ty = match stmts.last() {
                     Some(ir::StmtType::Ex(e)) => e.ty.clone(),
                     _ => {
