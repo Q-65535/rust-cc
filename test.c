@@ -4,6 +4,9 @@
 // We don't need to declare a function before calling it.
 // int foo();
 int main() {
+    int foofoo = foo();
+    printf("returned_value=%d\n", foofoo);
+
     struct zxc (*zxcp);
     typedef struct coord {
         int x;
@@ -20,8 +23,10 @@ int main() {
     printf("location.x=%d\n", location.x);
     printf("location.y=%d\n", location.y);
 
-    int returned_value = foo();
-    printf("returned_value=%d\n", returned_value);
+    typedef int t;
+    t var;
+    printf("sizeof var is %ld\n", sizeof(var));
+
     int i = 0;
     while (1) {
         printf("i=%d\n", i);

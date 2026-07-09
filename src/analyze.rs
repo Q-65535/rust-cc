@@ -394,20 +394,17 @@ impl ProgramAnalyzer {
     }
 
     pub fn analyze_function(&mut self, fun: &mut Function) -> ir::Function {
-        // At the start of each function analyzation, cur_offset is reset to 0
-        // and will be used to determine the position of all local variables in current
-        // to-be-analyzed function.
+        // current_local_var_offset will be used to determine the position of all local variables in current
+        // to-be-analyzed function. Thus, at the start of each function analyzation, we must reset it.
         self.current_local_var_offset = 0;
 
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
         let (final_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
-        let mut analyzed_params: Vec<Obj> = Vec::new();
-        // @Smell: This is awkward, currently we are not able to just
-        // call analyze_block to analyze the function body block, 
-        // because we must enter scope
-        // before analyzing function parameters since function
-        // parameters are also in the function body scope.
+        // We must enter scope before analyzing function
+        // parameters since function parameters are also in
+        // the function body scope.
         self.scope_manager.enter_new_scope();
+        let mut analyzed_params: Vec<Obj> = Vec::new();
         if let Some(DeclaratorSuffix::FunParam(params)) = &fun.declarator.suffix {
             for param in params {
                 let p = self.analyze_param(param);
@@ -418,26 +415,13 @@ impl ProgramAnalyzer {
             print_error_at(fun.declarator.span, &err_info);
             exit(1);
         }
-        let mut stmts: Vec<ir::StmtType> = Vec::new();
-        for item in &mut fun.items {
-            match item {
-                Stmt(stmt) => {
-                    let ir_stmt = self.analyze_stmt(stmt);
-                    stmts.push(ir_stmt);
-                }
-                Decl(decl) => {
-                    let mut ir_stmts = self.analyze_decl(decl);
-                    stmts.append(&mut ir_stmts);
-                }
-            }
-        }
+        let mut stmts = self.analyze_block(&mut fun.items);
         let stack_size = self.current_local_var_offset;
         self.scope_manager.exit_current_scope();
         ir::Function{name, function_type: final_type, params: analyzed_params, stmts, stack_size}
     }
 
     fn analyze_block(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
-        self.scope_manager.enter_new_scope();
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in items {
             match item {
@@ -445,10 +429,15 @@ impl ProgramAnalyzer {
                 Decl(decl) => stmts.append(&mut self.analyze_decl(decl)),
             }
         }
-        self.scope_manager.exit_current_scope();
         stmts
     }
 
+    fn analyze_block_in_new_scope(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
+        self.scope_manager.enter_new_scope();
+        let stmts = self.analyze_block(items);
+        self.scope_manager.exit_current_scope();
+        stmts
+    }
 
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
@@ -683,7 +672,7 @@ impl ProgramAnalyzer {
                 StmtType::Return(expr)
             },
             Block(items) => {
-                let stmts = self.analyze_block(items);
+                let stmts = self.analyze_block_in_new_scope(items);
                 StmtType::Block(stmts)
             }
             If(parse::IfStmt{cond, then, otherwise}) => {
@@ -698,6 +687,9 @@ impl ProgramAnalyzer {
                 StmtType::If{cond, then, otherwise}
             }
             For(parse::ForStmt{init, cond, inc, then}) => {
+                // The init might be a declaration (not implemented yet!).
+                // The declared symbol must be in a new scope.
+                self.scope_manager.enter_new_scope();
                 let init = if let Some(init) = init {
                     let init = self.analyze_expr(init);
                     Some(init)
@@ -717,6 +709,7 @@ impl ProgramAnalyzer {
                     None
                 };
                 let then = Box::new(self.analyze_stmt(then));
+                self.scope_manager.exit_current_scope();
                 StmtType::For{init, cond, inc, then}
             }
         }
@@ -975,7 +968,7 @@ impl ProgramAnalyzer {
             }
             Paren(inner) => self.analyze_expr(inner),
             StmtExpr(items) => {
-                let stmts = self.analyze_block(items);
+                let stmts = self.analyze_block_in_new_scope(items);
                 let ty = match stmts.last() {
                     Some(ir::StmtType::Ex(e)) => e.ty.clone(),
                     _ => {
