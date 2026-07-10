@@ -351,6 +351,35 @@ impl ProgramAnalyzer {
         }
     }
 
+    fn resolve_final_type(&mut self, base_type: &Type, declarator: &Abstract_Declarator) -> Type {
+        // deal with pointers
+        let mut cur_type = base_type.clone();
+        for i in 0..declarator.star_count {
+            cur_type = pointer_to(&cur_type);
+        }
+        // deal with suffix
+        if let Some(suffix) = &declarator.suffix {
+            cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
+        }
+        if let Some(inner_declarator) = &declarator.direct_abstract_declarator {
+            cur_type = self.resolve_final_type(&cur_type, &*inner_declarator);
+        }
+
+        // If the final type is a tag, We want to make sure that
+        // it can resove to a concrete struct, and do the Resolvation.
+        if let Tag(tag_name) = cur_type.clone() {
+            match self.scope_manager.resolve_tag(&tag_name) {
+                Some(the_type) => cur_type = the_type.clone(),
+                None => {
+                    let err_info = format!("storage size of {} is unkonwn", &tag_name);
+                    print_error_at(declarator.span, &err_info);
+                    exit(1);
+                },
+            }
+        }
+        return cur_type;
+    }
+
     fn resolve_final_type_and_name(&mut self, base_type: &Type, declarator: &Declarator) -> (Type, String) {
         // deal with pointers
         let mut cur_type = base_type.clone();
@@ -934,10 +963,23 @@ impl ProgramAnalyzer {
                 }
             }
             // @Temp: We only consider compile time sizeof for now
-            Sizeof(expr_content) => {
+            Sizeof_Expr(expr_content) => {
                 let content = self.analyze_expr(expr_content);
                 let size = sizeof(&content.ty);
-                let ty = content.ty.clone();
+                // @Future: The data type of sizeof expression is u64.
+                let ty = Type::Int;
+                let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
+                ir::Expr {
+                    content,
+                    ty,
+                    span,
+                }
+            }
+            Sizeof_Type_Name(type_name) => {
+                let (base_type, _) = self.analyze_decl_spec(&type_name.decl_specs);
+                let final_type = self.resolve_final_type(&base_type, &type_name.declarator);
+                let size = sizeof(&final_type);
+                let ty = Type::Int;
                 let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
                 ir::Expr {
                     content,

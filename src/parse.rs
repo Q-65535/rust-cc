@@ -112,6 +112,19 @@ pub struct Struct_Union_Specifier {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Abstract_Declarator {
+    pub star_count: i32,
+    pub direct_abstract_declarator: Option<Box<Abstract_Declarator>>,
+    pub suffix: Option<DeclaratorSuffix>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Abstract_Direct_Declarator {
+    Paren_Enclosed_Abstract_Declarator(Abstract_Declarator),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
     pub star_count: i32,
     pub direct_declarator: Box<Direct_Declarator>,
@@ -139,7 +152,8 @@ pub enum ExprType {
     RequestStructMember(Box<Expr>, String),
     CommaExpression(Box<Expr>, Box<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
-    Sizeof(Box<Expr>),
+    Sizeof_Expr(Box<Expr>),
+    Sizeof_Type_Name(Type_Name),
     Str(Vec<u8>),
     // Parenthesized expression: a transparent wrapper that records the span of
     // the enclosing parens for diagnostics while leaving the inner expression's
@@ -147,6 +161,13 @@ pub enum ExprType {
     // should unwrap it.
     Paren(Box<Expr>),
     StmtExpr(Vec<BlockItem>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Type_Name {
+    pub decl_specs: Vec<Decl_Spec>,
+    // @TODO:     The type should be Option<Abstract_Declarator>.
+    pub declarator: Abstract_Declarator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -363,7 +384,7 @@ impl Parser {
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
         let mut declarators: Vec<Declarator> = Vec::new();
-        let decl_spec = self.parse_decl_spec()?;
+        let decl_spec = self.parse_decl_specs()?;
         let mut this_is_typdef_declaration = false;
         if decl_spec[0] == Decl_Spec::Typedef {
             this_is_typdef_declaration = true;
@@ -404,7 +425,15 @@ impl Parser {
         }
     }
 
-    fn parse_decl_spec(&mut self) -> Result<Vec<Decl_Spec>, String> {
+    fn is_type_spec(&self, token: &Token) -> bool {
+        match &token.kind {
+            (Struct | Union | Int | Long | Short | Char | Void) => true,
+            LexIdent(name) => self.scope_manager.is_typedef_name(name),
+            _ => false,
+        }
+    }
+
+    fn parse_decl_specs(&mut self) -> Result<Vec<Decl_Spec>, String> {
         debug_assert!(self.is_decl_spec(self.cur_token()));
         let mut decl_specs = Vec::new();
         loop {
@@ -471,7 +500,7 @@ impl Parser {
         self.consume(&LBrace);
         let mut members = Vec::new();
         while self.cur_token().kind != RBrace {
-            let decl_spec = self.parse_decl_spec()?;
+            let decl_spec = self.parse_decl_specs()?;
             self.next_token();
             // parse declarators separated by ','
             loop {
@@ -566,7 +595,7 @@ impl Parser {
                     if &self.cur_token().kind == &Comma {
                         self.next_token();
                     }
-                    let decl_spec = self.parse_decl_spec()?;
+                    let decl_spec = self.parse_decl_specs()?;
                     self.next_token();
                     let declarator = self.parse_declarator()?;
                     self.next_token();
@@ -832,19 +861,69 @@ impl Parser {
                 Ok(expr)
             },
             TokenKind::Sizeof => {
-                self.next_token(); // skip "sizeof"
-                let operand = self.parse_prefix()?;
-                let operand = Box::new(operand);
+                self.consume(&Sizeof); // skip "sizeof"
+                let peek_token = &self.peek_token();
+                let expr_content: ExprType;
+                if self.is_type_spec(peek_token) {
+                    self.consume(&LParen);
+                    let decl_specs = self.parse_decl_specs()?;
+                    // @TODO: there should be a next_token();
+                    let declarator = self.parse_abstract_declarator()?;
+                    let type_name = Type_Name{decl_specs, declarator};
+                    self.jump_to_next_token(&RParen);
+                    expr_content = Sizeof_Type_Name(type_name);
+                } else {
+                    let operand = self.parse_prefix()?;
+                    let operand = Box::new(operand);
+                    expr_content = Sizeof_Expr(operand);
+                }
                 let start_index = cur_token_snapshot.span.start_index;
                 let end_index = self.cur_token().span.end_index;
                 let span = Span{start_index, end_index};
-                let expr = Expr::new(ExprType::Sizeof(operand), span);
+                let expr = Expr::new(expr_content, span);
                 Ok(expr)
+
             },
             LexIdent(_) => self.parse_ident(),
             StringLiteral(s) => self.parse_string(),
             _ => Err(error_token(&cur_token_snapshot, "can't parse prefix expression here"))
         }
+    }
+
+    fn parse_abstract_declarator(&mut self) -> Result<Abstract_Declarator, String> {
+        let start_index = self.cur_token().span.start_index;
+        let mut star_count = 0;
+        // here, Mul is the pointer mark "*"
+        loop {
+            if self.cur_token().kind == Mul {
+                star_count += 1;
+            }
+            if self.peek_token().kind == Mul {
+                self.next_token();
+            } else {
+                break;
+            }
+        }
+        let mut direct_abstract_declarator = None;
+        if let LParen = self.peek_token().kind {
+            self.next_token();
+            let inner_declarator = self.parse_abstract_declarator()?;
+            debug_assert!(matches!(self.peek_token().kind, RParen));
+            self.jump_to_next_token(&RParen);
+            direct_abstract_declarator = Some(Box::new(inner_declarator));
+        }
+        // parse suffix of a declarator
+        let mut suffix = None;
+        if let LSqureBracket | LParen = &self.peek_token().kind {
+            self.next_token();
+            suffix = Some(self.parse_declarator_suffix()?);
+        }
+        // This span doesn't include init_expr, just the declarator itself!
+        // The init expr has its own span.
+        let mut end_index = self.cur_token().span.end_index;
+        let span = Span{start_index, end_index};
+
+        Ok(Abstract_Declarator{star_count, direct_abstract_declarator, suffix, span})
     }
 
     fn parse_stmt_expr(&mut self) -> Result<Expr, String> {
@@ -1022,7 +1101,7 @@ impl Parser {
     }
 
     fn parse_fun_def(&mut self) -> Result<Function, String> {
-        let return_type_specifier = self.parse_decl_spec()?;
+        let return_type_specifier = self.parse_decl_specs()?;
         self.next_token();
         let declarator = self.parse_declarator()?;
         if let Some(FunParam(params)) = &declarator.suffix {
