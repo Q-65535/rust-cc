@@ -166,8 +166,8 @@ pub enum ExprType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Type_Name {
     pub decl_specs: Vec<Decl_Spec>,
-    // @TODO:     The type should be Option<Abstract_Declarator>.
-    pub declarator: Abstract_Declarator,
+    // @TODO: rename to abstract_declarator
+    pub declarator: Option<Abstract_Declarator>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -259,15 +259,20 @@ pub struct Parser {
     cur_index: usize,
     scope_manager: ScopeManager,
     syntax_errors: Vec<String>,
+    // This is just for the convenience for debugging.
+    // It just shows where we are parsing now.
+    cur_parsing_context: String,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
+        let starting_context = token_to_context(&tokens[0]);
         Parser {
             tokens,
             cur_index: 0,
             scope_manager: ScopeManager::new(),
             syntax_errors: Vec::new(),
+            cur_parsing_context: starting_context,
         }
     }
 
@@ -277,6 +282,7 @@ impl Parser {
 
     fn next_token(&mut self) {
         self.cur_index += 1;
+        self.cur_parsing_context = token_to_context(self.cur_token());
     }
 
     fn advance(&mut self, n: usize) {
@@ -866,10 +872,7 @@ impl Parser {
                 let expr_content: ExprType;
                 if self.is_type_spec(peek_token) {
                     self.consume(&LParen);
-                    let decl_specs = self.parse_decl_specs()?;
-                    // @TODO: there should be a next_token();
-                    let declarator = self.parse_abstract_declarator()?;
-                    let type_name = Type_Name{decl_specs, declarator};
+                    let type_name = self.parse_type_name()?;
                     self.jump_to_next_token(&RParen);
                     expr_content = Sizeof_Type_Name(type_name);
                 } else {
@@ -888,6 +891,20 @@ impl Parser {
             StringLiteral(s) => self.parse_string(),
             _ => Err(error_token(&cur_token_snapshot, "can't parse prefix expression here"))
         }
+    }
+
+    fn parse_type_name(&mut self) -> Result<Type_Name, String> {
+        let decl_specs = self.parse_decl_specs()?;
+        // @TODO: should there be a next_token(); here?
+        // parse_abstract_declarator() is special in that when it is called,
+        // current token index is 1 token before the starting
+        // point of abstract declarator.
+        let mut declarator = None;
+        if let Mul | LSqureBracket | LParen = &self.peek_token().kind {
+            declarator = Some(self.parse_abstract_declarator()?);
+        }
+        let type_name = Type_Name{decl_specs, declarator};
+        return Ok(type_name);
     }
 
     fn parse_abstract_declarator(&mut self) -> Result<Abstract_Declarator, String> {
@@ -918,8 +935,6 @@ impl Parser {
             self.next_token();
             suffix = Some(self.parse_declarator_suffix()?);
         }
-        // This span doesn't include init_expr, just the declarator itself!
-        // The init expr has its own span.
         let mut end_index = self.cur_token().span.end_index;
         let span = Span{start_index, end_index};
 
@@ -1148,4 +1163,25 @@ fn error_span(span: Span, info: &str) -> String {
 
 fn error_token(tok: &Token, info: &str) -> String {
     syntax_error(tok.span, info)
+}
+
+// This is just a utility function used to visually show where the given token is in
+// the source code.
+fn token_to_context(tok: &Token) -> String {
+    let span = tok.span;
+    let mut context_info = String::new();
+    let (start_line, start_column, end_line, end_column) = span.locate();
+    let location_info = format!(":{}:{}:\n", start_line, start_column);
+    context_info.push_str(&location_info);
+    let start_line_content = get_src_content_at_line(start_line);
+    context_info.push_str(&start_line_content);
+    context_info.push_str("\n");
+    let spaces = " ".repeat(start_column - 1);
+    let arrows = if start_line == end_line {
+        "^".repeat(span.end_index - span.start_index + 1)
+    } else {
+        "^".to_string()
+    };
+    context_info.push_str(&format!("{}{}", spaces, arrows));
+    context_info
 }

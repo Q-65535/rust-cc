@@ -977,7 +977,10 @@ impl ProgramAnalyzer {
             }
             Sizeof_Type_Name(type_name) => {
                 let (base_type, _) = self.analyze_decl_spec(&type_name.decl_specs);
-                let final_type = self.resolve_final_type(&base_type, &type_name.declarator);
+                let mut final_type = base_type;
+                if let Some(abstract_declarator) = &type_name.declarator {
+                    final_type = self.resolve_final_type(&final_type, &abstract_declarator);
+                }
                 let size = sizeof(&final_type);
                 let ty = Type::Int;
                 let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
