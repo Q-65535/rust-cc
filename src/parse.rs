@@ -539,7 +539,6 @@ impl Parser {
                 LParen => {
                     self.next_token();
                     let paren_enclosed_declarator = self.parse_declarator()?;
-                    debug_assert!(matches!(self.peek_token().kind, RParen));
                     self.jump_to_next_token(&RParen);
                     Box::new(Direct_Declarator::Paren_Enclosed_Declarator(paren_enclosed_declarator))
                 },
@@ -998,15 +997,15 @@ impl Parser {
     }
 
     fn parse_infix(&mut self, lhs: Expr) -> Result<Expr, String> {
-        let tok = self.cur_token().clone();
-        let p = tok.precedence();
+        let infix_operator = self.cur_token().kind.clone();
+        let p = precedence(&infix_operator);
         self.next_token();
         let rhs = self.parse_expr(p)?;
         let span = Span {
             start_index: lhs.span.start_index,
             end_index: rhs.span.end_index,
                     };
-        let content = Binary(Box::new(lhs), Box::new(rhs), tok.kind.clone());
+        let content = Binary(Box::new(lhs), Box::new(rhs), infix_operator);
         Ok(Expr::new(content, span))
     }
 
