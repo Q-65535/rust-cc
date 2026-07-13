@@ -214,16 +214,25 @@ impl Generator {
                 self.push("%rax");
                 self.expr_gen(lhs);
                 self.pop("%rdi");
+                let (ax, di) = if matches!(lhs.ty, Long | Pointer_To(..) | ArrayOf(..)) {
+                    ("%rax", "%rdi")
+                } else {
+                    ("%eax", "%edi")
+                };
                 match kind {
-                    Plus => emit!("  add %rdi, %rax"),
-                    Minus => emit!("  sub %rdi, %rax"),
-                    Mul => emit!("  imul %rdi, %rax"),
+                    Plus =>  emit!("  add {}, {}", di, ax),
+                    Minus => emit!("  sub {}, {}", di, ax),
+                    Mul =>   emit!("  imul {}, {}", di, ax),
                     Div => {
-                        emit!("  cqo");
-                        emit!("  idiv %rdi");
+                        if sizeof(&lhs.ty) == 8 {
+                            emit!("  cqo");
+                        } else {
+                            emit!("  cdq");
+                        }
+                        emit!("  idiv {}", di);
                     },
                     Compare(c) => {
-                        emit!("  cmp %rdi, %rax");
+                        emit!("  cmp {}, {}", di, ax);
                         match c {
                             Eq => emit!("  sete %al"),
                             Neq => emit!("  setne %al"),

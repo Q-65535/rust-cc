@@ -801,8 +801,9 @@ impl ProgramAnalyzer {
 							if lhs.ty != rhs.ty {
 								print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
 							}
-                            // The result of "pointer - pointer" is the number of elements between them.
-                            let expr = gen_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &lhs.ty, span);
+                            // The result of "pointer - pointer" is the gap (in terms of number of elements) between them.
+                            // The result is a singed number.
+                            let expr = gen_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &Type::Int, span);
                             let scale = sizeof(&basic_ty);
                             return scale_expr(&expr, scale, OP::Div, &Type::Int);
                         }

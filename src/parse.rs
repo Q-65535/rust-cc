@@ -294,7 +294,9 @@ impl Parser {
         let token = self.cur_token().clone();
         if token.kind != Eof {
             self.cur_index += 1;
-            self.cur_parsing_context = token_to_context(self.cur_token());
+            // Uncomment this when you want to see where we are
+            // parsing now while using a debugger by examine self.cur_parsing_context.
+            // self.cur_parsing_context = token_to_context(self.cur_token());
         }
         token
     }
