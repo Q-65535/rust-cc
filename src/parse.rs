@@ -153,6 +153,7 @@ pub enum ExprType {
     FunCall(Box<Expr>, Vec<Expr>),
     Sizeof_Expr(Box<Expr>),
     Sizeof_Type_Name(Type_Name),
+    Cast(Box<Expr>, Type_Name),
     Str(Vec<u8>),
     // Parenthesized expression: a transparent wrapper that records the span of
     // the enclosing parens for diagnostics while leaving the inner expression's
@@ -825,12 +826,14 @@ impl Parser {
     }
 
     fn parse_prefix(&mut self) -> Result<Expr, String> {
-        // @Rename: prefix_start_token
-        let cur_token_snapshot = self.cur_token().clone();
-        match cur_token_snapshot.kind {
+        let prefix_starting_token = self.cur_token().clone();
+        match prefix_starting_token.kind {
             LParen => {
-                if self.peek_token().kind == LBrace {
+                let peek_token = self.peek_token();
+                if peek_token.kind == LBrace {
                     return self.parse_stmt_expr();
+                }else if self.is_type_spec(peek_token) || is_type_qualifier(peek_token) {
+                    return self.parse_cast_expr();
                 } else {
                     return self.parse_paren();
                 }
@@ -844,7 +847,7 @@ impl Parser {
                 self.bump();
                 let operand = self.parse_prefix()?;
                 let span = Span{
-                    start_index: cur_token_snapshot.span.start_index,
+                    start_index: prefix_starting_token.span.start_index,
                     end_index: operand.span.end_index,
                 };
                 let expr = Expr::new(Neg(Box::new(operand)), span);
@@ -854,7 +857,7 @@ impl Parser {
                 self.bump();
                 let operand = self.parse_prefix()?;
                 let span = Span{
-                    start_index: cur_token_snapshot.span.start_index,
+                    start_index: prefix_starting_token.span.start_index,
                     end_index: operand.span.end_index,
                 };
                 let expr = Expr::new(Deref(Box::new(operand)), span);
@@ -864,7 +867,7 @@ impl Parser {
                 self.bump();
                 let operand = self.parse_prefix()?;
                 let span = Span{
-                    start_index: cur_token_snapshot.span.start_index,
+                    start_index: prefix_starting_token.span.start_index,
                     end_index: operand.span.end_index,
                 };
                 let expr = Expr::new(AddrOf(Box::new(operand)), span);
@@ -884,7 +887,7 @@ impl Parser {
                     (Sizeof_Expr(Box::new(operand)), end_index)
                 };
                 let span = Span{
-                    start_index: cur_token_snapshot.span.start_index,
+                    start_index: prefix_starting_token.span.start_index,
                     end_index,
                 };
                 let expr = Expr::new(expr_content, span);
@@ -892,8 +895,21 @@ impl Parser {
             },
             LexIdent(_) => self.parse_ident(),
             StringLiteral(s) => self.parse_string(),
-            _ => Err(error_token(&cur_token_snapshot, "can't parse prefix expression here"))
+            _ => Err(error_token(&prefix_starting_token, "can't parse prefix expression here"))
         }
+    }
+
+    fn parse_cast_expr(&mut self) -> Result<Expr, String> {
+        debug_assert!(matches!(self.cur_token().kind, LParen));
+        let starting_token = self.bump();
+        let type_name = self.parse_type_name()?;
+        self.expect(&RParen)?;
+        let expr = self.parse_expr(precedence(&TokenKind::LexCast))?;
+        let span = Span{
+            start_index: starting_token.span.start_index,
+            end_index: expr.span.end_index,
+        };
+        Ok(Expr::new(Cast(Box::new(expr), type_name), span))
     }
 
     fn parse_type_name(&mut self) -> Result<Type_Name, String> {
@@ -1127,6 +1143,13 @@ fn get_declarator_name(declarator: &Declarator) -> &str {
         Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
             return get_declarator_name(inner_declarator);
         }
+    }
+}
+
+fn is_type_qualifier(token: &Token) -> bool {
+    match &token.kind {
+        (TokenKind::_Atomic) => true,
+        _ => false,
     }
 }
 

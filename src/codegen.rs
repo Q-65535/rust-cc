@@ -59,6 +59,12 @@ macro_rules! emit_raw {
     }};
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Fundemental_Type {
+    I8, I16, I32, I64,
+}
+use Fundemental_Type::*;
+
 pub struct Generator {
     cur_function_stack_size: usize,
     cur_function_name: String,
@@ -275,6 +281,10 @@ impl Generator {
                 self.gen_addr(expr);
                 load_according_to_type(&expr.ty);
             }
+            Cast(inner_expr, ty) => {
+                self.expr_gen(inner_expr);
+                cast(&inner_expr.ty, ty);
+            }
             FunCall(func_ref, args) => {
                 match &func_ref.content {
                     Ident(obj) => {
@@ -372,6 +382,52 @@ impl Generator {
         }
     }
 
+}
+
+fn cast(from: &Type, to: &Type) {
+    if to == &Void {return;}
+    let from_fundemental_type = get_fundemental_type(from);
+    let to_fundemental_type   = get_fundemental_type(to);
+    gen_cast_operation(from_fundemental_type, to_fundemental_type);
+}
+
+fn get_fundemental_type(ty: &Type) -> Fundemental_Type {
+    match ty {
+        Char => I8,
+        Short => I16,
+        Int => I32,
+        Long | Pointer_To(..) | ArrayOf(..) => I64,
+        Func{return_type, ..} => get_fundemental_type(return_type),
+        _ => {
+            println!("cannot get the fundemental type of this type: {:?}", ty);
+            exit(1);
+        }
+    }
+}
+
+fn gen_cast_operation(from: Fundemental_Type, to: Fundemental_Type) {
+    match from {
+        I8 => match to {
+                I32 => emit!("movsxd %eax, %rax"),
+                _ => (),
+            }
+        I16 => match to {
+                I8 => emit!("movsbl %al, %eax"),
+                I64 => emit!("movsxd %eax, %rax"),
+                _ => (),
+        }
+        I32 => match to {
+                I8 => emit!("movsbl %al, %eax"),
+                I16 => emit!("movswl %ax, %eax"),
+                I64 => emit!("movsxd %eax, %rax"),
+                _ => (),
+        }
+        I64 => match to {
+                I8 => emit!("movsbl %al, %eax"),
+                I16 => emit!("movswl %ax, %eax"),
+                _ => (),
+        }
+    }
 }
 
 fn load_according_to_type(ty: &Type) {

@@ -26,6 +26,7 @@ pub enum ExprType {
     CommaExpression(Box<Expr>, Box<Expr>),
     FunCall(Box<Expr>, Vec<Expr>),
     StmtExpr(Vec<StmtType>),
+    Cast(Box<Expr>, Type),
 }
 
 #[derive(Debug, Clone, PartialEq)]

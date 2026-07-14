@@ -28,10 +28,11 @@ pub enum TokenKind {
     Lex_Natural_Num(u64),
     LexIdent(String),
     StringLiteral(Vec<u8>),
+    LexCast, // This is just a fake token for the convenicence of getting the precedence of cast expression.
     // Keywords
     Ret, If, Else, For, While,
     Sizeof, Typedef, Struct, Int, Char, Union,
-    Long, Short, Void,
+    Long, Short, Void, _Atomic,
 
     Eof,
 }
@@ -87,8 +88,8 @@ pub fn precedence(kind: &TokenKind) -> Precedence {
         Eq | Neq | LT | LE | GT | GE => LV3,
         Plus | Minus => LV4,
         Mul | Div => LV5,
-        LParen | LSqureBracket => LV6,
-        Period | Arrow => LV7,
+        LexCast => LV6,
+        Period | Arrow | LParen | LSqureBracket => LV7,
         _ => Lowest,
     }
 }
@@ -117,6 +118,7 @@ impl Lexer {
             ("long".to_string(), Long),
             ("short".to_string(), Short),
             ("void".to_string(), Void),
+            ("_Atomic".to_string(), _Atomic),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

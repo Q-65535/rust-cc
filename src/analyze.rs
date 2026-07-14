@@ -238,7 +238,7 @@ impl ProgramAnalyzer {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
                     let (mut base_type, mut symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
-                    let (function_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
+                    let (function_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
                     // It is not allowed that function and variable have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering its is a function or a variable.
                     if let Some(..) = self.scope_manager.resolve_object(&name) {
@@ -266,7 +266,7 @@ impl ProgramAnalyzer {
     }
 
     pub fn analyze_typedef(&mut self, base_type: &Type, declarator: &Declarator) {
-        let (final_type, name) = self.resolve_final_type_and_name(base_type, declarator);
+        let (final_type, name) = self.resolve_declarator(base_type, declarator);
         self.scope_manager.add_typedef_alias(&name, final_type);
     }
 
@@ -280,7 +280,7 @@ impl ProgramAnalyzer {
             return decls;
         }
         for declarator in &mut decl.declarators {
-            let (final_type, name) = self.resolve_final_type_and_name(&base_type, declarator);
+            let (final_type, name) = self.resolve_declarator(&base_type, declarator);
 
             if let Some(_) = self.scope_manager.resolve_object(&name) {
                 let err_info = format!("global variable {} already defined", name);
@@ -342,7 +342,7 @@ impl ProgramAnalyzer {
                 let mut param_types = Vec::new();
                 for param in params {
                     let (param_base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
-                    let (param_final_type, _) = self.resolve_final_type_and_name(&param_base_type, &param.declarator);
+                    let (param_final_type, _) = self.resolve_declarator(&param_base_type, &param.declarator);
                     param_types.push(param_final_type);
                 }
                 let return_type = Box::new(return_type);
@@ -351,7 +351,7 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn resolve_final_type(&mut self, base_type: &Type, declarator: &Abstract_Declarator) -> Type {
+    fn resolve_abstract_declarator(&mut self, base_type: &Type, declarator: &Abstract_Declarator) -> Type {
         // deal with pointers
         let mut cur_type = base_type.clone();
         for i in 0..declarator.star_count {
@@ -362,7 +362,7 @@ impl ProgramAnalyzer {
             cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
         }
         if let Some(inner_declarator) = &declarator.direct_abstract_declarator {
-            cur_type = self.resolve_final_type(&cur_type, &*inner_declarator);
+            cur_type = self.resolve_abstract_declarator(&cur_type, &*inner_declarator);
         }
 
         // If the final type is a tag, We want to make sure that
@@ -380,7 +380,7 @@ impl ProgramAnalyzer {
         return cur_type;
     }
 
-    fn resolve_final_type_and_name(&mut self, base_type: &Type, declarator: &Declarator) -> (Type, String) {
+    fn resolve_declarator(&mut self, base_type: &Type, declarator: &Declarator) -> (Type, String) {
         // deal with pointers
         let mut cur_type = base_type.clone();
         let mut name = "empty_declarator_name".to_string();
@@ -396,7 +396,7 @@ impl ProgramAnalyzer {
                 name = ident.clone();
             },
             Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
-                (cur_type, name) = self.resolve_final_type_and_name(&cur_type, &inner_declarator);
+                (cur_type, name) = self.resolve_declarator(&cur_type, &inner_declarator);
             },
         }
         // If the final type is a tag, We want to make sure that
@@ -428,7 +428,7 @@ impl ProgramAnalyzer {
         self.current_local_var_offset = 0;
 
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
-        let (final_type, name) = self.resolve_final_type_and_name(&base_type, &fun.declarator);
+        let (final_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
         // We must enter scope before analyzing function
         // parameters since function parameters are also in
         // the function body scope.
@@ -470,7 +470,7 @@ impl ProgramAnalyzer {
 
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
-        let (final_type, name) = self.resolve_final_type_and_name(&base_type, &param.declarator);
+        let (final_type, name) = self.resolve_declarator(&base_type, &param.declarator);
         if self.scope_manager.resolve_object(&name) == None {
             let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_object(obj.clone());
@@ -494,7 +494,7 @@ impl ProgramAnalyzer {
             return stmts;
         }
         for declarator in &mut decl.declarators {
-            let (final_type, name) = self.resolve_final_type_and_name(&base_type, declarator);
+            let (final_type, name) = self.resolve_declarator(&base_type, declarator);
             if let Some(_) = self.scope_manager.resolve_object_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
                 print_error_at(declarator.span, &err_info);
@@ -662,7 +662,7 @@ impl ProgramAnalyzer {
 
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&member.decl_spec);
-        let (final_type, name) = self.resolve_final_type_and_name(&base_type, &member.declarator);
+        let (final_type, name) = self.resolve_declarator(&base_type, &member.declarator);
         ir::Member{
             ty: final_type,
             name: name.clone(),
@@ -957,11 +957,7 @@ impl ProgramAnalyzer {
                 // The function name may be in another elf file, we don't check its validaity. (@Future: Not true after we add function declaration)
                 let ty = ident.ty.clone();
                 let content = ExprType::FunCall(Box::new(ident), analyzed_args);
-                ir::Expr {
-                    content,
-                    ty,
-                    span,
-                }
+                ir::Expr {content, ty, span}
             }
             // @Temp: We only consider compile time sizeof for now
             Sizeof_Expr(expr_content) => {
@@ -970,25 +966,31 @@ impl ProgramAnalyzer {
                 // @Future: The data type of sizeof expression is u64.
                 let ty = Type::Int;
                 let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
-                ir::Expr {
-                    content,
-                    ty,
-                    span,
-                }
+                ir::Expr {content, ty, span}
             }
             Sizeof_Type_Name(type_name) => {
-                let (base_type, _) = self.analyze_decl_spec(&type_name.decl_specs);
-                let mut final_type = base_type;
-                if let Some(abstract_declarator) = &type_name.declarator {
-                    final_type = self.resolve_final_type(&final_type, &abstract_declarator);
-                }
-                let size = sizeof(&final_type);
+                let the_type = self.resolve_type_name(type_name);
+                let size = sizeof(&the_type);
                 let ty = Type::Int;
                 let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
-                ir::Expr {
-                    content,
-                    ty,
-                    span,
+                ir::Expr {content, ty, span}
+            }
+            Cast(casted_expr, type_name) => {
+                let mut analyzed_expr = self.analyze_expr(casted_expr);
+                let from_type = analyzed_expr.ty.clone();
+                let to_type = self.resolve_type_name(type_name);
+                let content = ir::ExprType::Cast(Box::new(analyzed_expr), to_type.clone());
+                let expr = ir::Expr {content, ty: to_type.clone(), span};
+                if to_type == Void {
+                    return expr;
+                }
+                if !is_scalar_type(&from_type) || !is_scalar_type(&to_type) {
+                    println!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
+                    when doing type casting! Don't blame me, ChatGPT told me that.");
+                    println!("from_type is {:?}, to_type_is {:?}", from_type, to_type);
+                    exit(1);
+                } else {
+                    return expr;
                 }
             }
             Str(s) => {
@@ -1027,6 +1029,21 @@ impl ProgramAnalyzer {
             },
         }
     }
+
+    fn resolve_type_name(&mut self, type_name: &Type_Name) -> Type {
+        let (base_type, _) = self.analyze_decl_spec(&type_name.decl_specs);
+        let mut final_type = base_type;
+        if let Some(abstract_declarator) = &type_name.declarator {
+            final_type = self.resolve_abstract_declarator(&final_type, &abstract_declarator);
+        }
+        return final_type;
+    }
+}
+
+fn is_scalar_type(ty: &Type) -> bool {
+    matches!(ty, 
+        Char | Short | Int | Long | Pointer_To(..)
+    )
 }
 
 fn pointer_to(ty: &Type) -> Type {
