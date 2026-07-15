@@ -1,11 +1,15 @@
 // Demo
+int printf();
+int sleep(int a);
 
 
-// We don't need to declare a function before calling it.
+// We can just call any function in the same file without forward declaring it.
 // int foo();
 int main() {
     int foofoo = foo();
     printf("returned_value=%d\n", foofoo);
+
+    foofoo();
 
     struct zxc (*zxcp);
     typedef struct coord {
@@ -35,7 +39,6 @@ int main() {
             return 0;
         }
         sleep(1);
-    // @CompilerBug: If without the RBrace, compiler will trap in an infinite loop.
     }
     return 0;
 }

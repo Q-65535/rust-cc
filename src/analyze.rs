@@ -949,33 +949,36 @@ impl ProgramAnalyzer {
                 return gen_deref_expr(&pointer_arithmatic_expr);
             },
             FunCall(ident, args) => {
-                // @Fix: The problem is that analyze_expr(ident) will check whether ident is declared and if not declared,
-                // that's an error, but the function name is intentionally left undeclared (currently). 
-                // @Future: The above problem will be solved when we add function declaration. At that time every valid function call can
-                // find its declaration without adding obj at here in the following code (because the obj is added after the compiler
-                // dealt with the corresponding declaration).
                 match &ident.content {
-                    Ident(s) => {
-                        if self.scope_manager.resolve_object(s) == None {
-                            let obj = self.create_local_obj(&ty_none, &s);
-                            self.scope_manager.add_object(obj.clone());
+                    Ident(name) => {
+                        if let Some(obj) = self.scope_manager.resolve_object(name) {
+                            if let Func{return_type, param_types} = &obj.ty {
+                                let ty = *return_type.clone();
+                                let ident = self.analyze_expr(ident);
+                                let mut analyzed_args = Vec::new();
+                                for arg in args {
+                                    let analyzed_arg = self.analyze_expr(arg);
+                                    analyzed_args.push(analyzed_arg);
+                                }
+                                // @Incomplete: Check whether these analyzed args is matching the param_types of the function.
+                                let content = ExprType::FunCall(Box::new(ident), analyzed_args);
+                                ir::Expr {content, ty, span}
+                            }
+                            else {
+                                let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &obj.ty);
+                                print_error_at(ident.span, &error_message);
+                                exit(1);
+                            }
+                        } else {
+                            print_error_at(ident.span, "This function name is unknown!");
+                            exit(1);
                         }
                     }
-                    _ => println!("currently only support function name as call reference"),
+                    _ => {
+                        print_error_at(ident.span, "currently only support function name as call reference");
+                        exit(1);
+                    }
                 }
-                let ident = self.analyze_expr(ident);
-                let mut analyzed_args = Vec::new();
-                for arg in args {
-                    let analyzed_arg = self.analyze_expr(arg);
-                    analyzed_args.push(analyzed_arg);
-                }
-                // The function name may be in another elf file, we don't check its validaity. (@Future: Not true after we add function declaration)
-                let mut ty = ident.ty.clone();
-                if let Func { return_type, ..} = &ty {
-                    ty = *return_type.clone();
-                }
-                let content = ExprType::FunCall(Box::new(ident), analyzed_args);
-                ir::Expr {content, ty, span}
             }
             // @Temp: We only consider compile time sizeof for now
             Sizeof_Expr(expr_content) => {
