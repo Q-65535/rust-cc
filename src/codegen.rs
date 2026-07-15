@@ -435,8 +435,8 @@ fn load_according_to_type(ty: &Type) {
         return;
     } else {
         match sizeof(ty) {
-            1 => emit!("  movsbq (%rax), %rax"),
-            2 => emit!("  movswq (%rax), %rax"),
+            1 => emit!("  movsbl (%rax), %eax"),
+            2 => emit!("  movswl (%rax), %eax"),
             4 => emit!("  movsxd (%rax), %rax"),
             _ => emit!("  mov    (%rax), %rax"),
         }

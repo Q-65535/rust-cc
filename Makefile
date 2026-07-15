@@ -46,11 +46,12 @@ test/%.exe: build test/%.c
 # 	$(CC) -o test/struct.exe test/struct.s -xc test/common
 
 # `make struct`: build and run just the struct.c test.
-struct_test:
-	$(CC) -E -P -C test/struct.c -o test/struct.i
-	$(RUST_CC) -o test/struct.s test/struct.i
-	$(CC) -o struct.exe test/struct.s -xc test/common
-	echo struct.exe; ./struct.exe || exit 1; echo;
+single_test:
+	cargo build
+	$(CC) -E -P -C test/pointer.c -o test/pointer.i
+	$(RUST_CC) -o test/pointer.s test/pointer.i
+	$(CC) -o pointer.exe test/pointer.s -xc test/common
+	echo pointer.exe; ./pointer.exe || exit 1; echo;
 
 local_test:
 	rm -f test.s
@@ -83,3 +84,5 @@ test: clean old_test
 # These are command names, not files to produce, so always run them even if a
 # file of the same name happens to exist in the directory.
 .PHONY: build rebuild test clean
+
+#   gcc -E -P -C test/pointer.c -o test/pointer.i

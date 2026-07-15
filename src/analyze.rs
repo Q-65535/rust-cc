@@ -750,8 +750,13 @@ impl ProgramAnalyzer {
         let span = expr.span;
         match &mut expr.content {
             Natural_Number(n) => {
-                let content = ir::ExprType::Natural_Number(*n);
-                let ty = Type::Long;
+                let n = *n;
+                let content = ir::ExprType::Natural_Number(n);
+                let ty = if n > i32::MAX as u64 {
+                    Type::Long
+                } else {
+                    Type::Int
+                };
                 ir::Expr {content, ty, span}
             }
             Binary(lhs, rhs, tokenKind) => {
@@ -775,9 +780,9 @@ impl ProgramAnalyzer {
                                 ArrayOf(element_type, _) => scale = sizeof(element_type),
                                 _ => exit(1),
                             }
-                            rhs = scale_expr(&rhs, scale, OP::Mul, &rhs.ty);
+                            rhs = scale_expr(rhs, scale, OP::Mul);
                         }
-                        return gen_binary_expr_from_2_expr(&lhs, &rhs, OP::Plus, &lhs.ty, span);
+                        return gen_new_binary_expr(lhs, rhs, OP::Plus);
                     }
                     Minus => {
                         if lhs.is_integer() && rhs.is_pointer_or_array() {
@@ -790,7 +795,7 @@ impl ProgramAnalyzer {
                                 ArrayOf(element_type, _) => scale = sizeof(element_type),
                                 _ => exit(1),
                             }
-                            rhs = scale_expr(&rhs, scale, OP::Mul, &rhs.ty);
+                            rhs = scale_expr(rhs, scale, OP::Mul);
                         } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
                             let mut basic_ty = lhs.ty.clone();
 							if let ArrayOf(basic, _) = &lhs.ty {
@@ -803,15 +808,18 @@ impl ProgramAnalyzer {
 							}
                             // The result of "pointer - pointer" is the gap (in terms of number of elements) between them.
                             // The result is a singed number.
-                            let expr = gen_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &Type::Int, span);
+                            let expr = gen_new_binary_expr(lhs, rhs, OP::Minus);
                             let scale = sizeof(&basic_ty);
-                            return scale_expr(&expr, scale, OP::Div, &Type::Int);
+                            let mut scaled_expr = scale_expr(expr, scale, OP::Div);
+                            // @Important: Set the data type properly.
+                            scaled_expr.ty = Type::Long;
+                            return scaled_expr;
                         }
-                        return gen_binary_expr_from_2_expr(&lhs, &rhs, OP::Minus, &lhs.ty, span);
+                        return gen_new_binary_expr(lhs, rhs, OP::Minus);
                     }
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
-                        return gen_binary_expr_from_2_expr(&lhs, &rhs, op, &lhs.ty, span);
+                        return gen_new_binary_expr(lhs, rhs, op);
                     }
                 }
             }
@@ -823,7 +831,7 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             },
             Assign(lhs, rhs) => {
-                let rhs = self.analyze_expr(rhs);
+                let mut rhs = self.analyze_expr(rhs);
                 let lhs = self.analyze_expr(lhs);
                 if !can_be_lvalue(&lhs) {
                     let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
@@ -834,15 +842,21 @@ impl ProgramAnalyzer {
                     &rhs.ty, &lhs.ty);
                     print_error_at(lhs.span, &err_info);
                 }
+                // Cast rhs to match lhs when they are not struct type.
+                if !matches!(lhs.ty, Struct(..) | Union(..) | Tag(..) ) {
+                    rhs = cast(rhs, &lhs.ty);
+                }
                 let ty = lhs.ty.clone();
                 let content = ExprType::Assign(Box::new(lhs), Box::new(rhs));
                 ir::Expr{content, ty, span}
             }
             Neg(val) => {
                 let val = self.analyze_expr(val);
+                let common_type = get_common_type(&Type::Int, &val.ty);
                 let ty = val.ty.clone();
                 let content = ExprType::Neg(Box::new(val));
-                ir::Expr{content, ty, span}
+                let neg_expr = ir::Expr{content, ty, span};
+                return cast(neg_expr, &common_type);
             }
             Deref(val) => {
                 let val = self.analyze_expr(val);
@@ -929,8 +943,8 @@ impl ProgramAnalyzer {
                     },
                 };
                 let element_size = sizeof(&element_type);
-                let scaled = scale_expr(&index, element_size, OP::Mul, &index.ty);
-                let pointer_arithmatic_expr = gen_binary_expr_from_2_expr(&base_position, &scaled, OP::Plus, &pointer_to(&element_type), span);
+                let scaled = scale_expr(index, element_size, OP::Mul);
+                let pointer_arithmatic_expr = gen_new_binary_expr(base_position, scaled, OP::Plus);
                 return gen_deref_expr(&pointer_arithmatic_expr);
             },
             FunCall(ident, args) => {
@@ -955,7 +969,10 @@ impl ProgramAnalyzer {
                     analyzed_args.push(analyzed_arg);
                 }
                 // The function name may be in another elf file, we don't check its validaity. (@Future: Not true after we add function declaration)
-                let ty = ident.ty.clone();
+                let mut ty = ident.ty.clone();
+                if let Func { return_type, ..} = &ty {
+                    ty = *return_type.clone();
+                }
                 let content = ExprType::FunCall(Box::new(ident), analyzed_args);
                 ir::Expr {content, ty, span}
             }
@@ -975,23 +992,11 @@ impl ProgramAnalyzer {
                 let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
-            Cast(casted_expr, type_name) => {
-                let mut analyzed_expr = self.analyze_expr(casted_expr);
-                let from_type = analyzed_expr.ty.clone();
+            Cast(to_be_casted_expr, type_name) => {
+                let mut analyzed_expr = self.analyze_expr(to_be_casted_expr);
                 let to_type = self.resolve_type_name(type_name);
-                let content = ir::ExprType::Cast(Box::new(analyzed_expr), to_type.clone());
-                let expr = ir::Expr {content, ty: to_type.clone(), span};
-                if to_type == Void {
-                    return expr;
-                }
-                if !is_scalar_type(&from_type) || !is_scalar_type(&to_type) {
-                    println!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
-                    when doing type casting! Don't blame me, ChatGPT told me that.");
-                    println!("from_type is {:?}, to_type_is {:?}", from_type, to_type);
-                    exit(1);
-                } else {
-                    return expr;
-                }
+                let casted_expr = cast(analyzed_expr, &to_type);
+                return casted_expr;
             }
             Str(s) => {
                 // We use a unique identifier as a reference to replace the original string literal.
@@ -1040,9 +1045,31 @@ impl ProgramAnalyzer {
     }
 }
 
+fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
+    let from_type = expr.ty.clone();
+    let span = expr.span;
+    let content = ir::ExprType::Cast(Box::new(expr), to_type.clone());
+    let expr = ir::Expr {content, ty: to_type.clone(), span};
+    if *to_type == Void {
+        return expr;
+    }
+    if matches!(to_type, ArrayOf(..)) {
+        print_error_at(span, "the cast-to type must not be array type!");
+    }
+    if !is_scalar_type(&from_type) || !is_scalar_type(&to_type) {
+        println!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
+        when doing type casting! Don't blame me, ChatGPT told me that.");
+        println!("from_type is: {:?}, to_type is: {:?}", from_type, to_type);
+        exit(1);
+    } else {
+        return expr;
+    }
+}
+
+
 fn is_scalar_type(ty: &Type) -> bool {
     matches!(ty, 
-        Char | Short | Int | Long | Pointer_To(..)
+        Char | Short | Int | Long | Pointer_To(..) | ArrayOf(..)
     )
 }
 
@@ -1131,29 +1158,52 @@ pub fn is_array(t: &Type) -> bool {
     }
 }
 
-fn scale_expr(expr: &ir::Expr, factor: usize, op: ir::OP, ty: &Type) -> ir::Expr {
+fn scale_expr(expr: ir::Expr, factor: usize, op: ir::OP) -> ir::Expr {
     // expr for scale num
-    let num_expr_content = ir::ExprType::Natural_Number(factor.try_into().unwrap());
-    let num_expr = ir::Expr {
-        content: num_expr_content,
-        ty: ty.clone(),
+    let span = expr.span;
+    let factor_expr_content = ir::ExprType::Natural_Number(factor.try_into().unwrap());
+    let factor_expr = ir::Expr {
+        content: factor_expr_content,
+        ty: Type::Long,
         span: expr.span,
     };
-
-    // scalled expr
-    let new_expr_content = ir::ExprType::Binary(Box::new(expr.clone()), Box::new(num_expr), op);
-    ir::Expr {
-        content: new_expr_content,
-        ty: ty.clone(),
-        span: expr.span,
-    }
+    return gen_new_binary_expr(expr, factor_expr, op);
 }
 
-fn gen_binary_expr_from_2_expr(lhs: &ir::Expr, rhs: &ir::Expr, op: ir::OP, ty: &Type, span: Span) -> ir::Expr {
-    let new_expr_content = ir::ExprType::Binary(Box::new(lhs.clone()), Box::new(rhs.clone()), op);
+fn usual_arithmatic_conversion(lhs: ir::Expr, rhs: ir::Expr) -> (ir::Expr, ir::Expr) {
+    let common_type = get_common_type(&lhs.ty, &rhs.ty);
+    let casted_lhs = cast(lhs, &common_type);
+    let casted_rhs = cast(rhs, &common_type);
+    return (casted_lhs, casted_rhs);
+}
+
+fn get_common_type(lhs_type: &Type, rhs_type: &Type) -> Type {
+    match lhs_type {
+        Pointer_To(pointee_type) => return (pointer_to(pointee_type)),
+        ArrayOf(element_type, _) => return (pointer_to(element_type)),
+        _ => (),
+    }
+
+    if sizeof(lhs_type) == 8 || sizeof(rhs_type) == 8 {
+        return Type::Long;
+    }
+    return Type::Int;
+}
+
+fn gen_new_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Expr {
+    let span = Span{
+        start_index: lhs.span.start_index,
+        end_index: rhs.span.end_index,
+    };
+    let (lhs, rhs) = usual_arithmatic_conversion(lhs, rhs);
+    let mut the_type = lhs.ty.clone();
+    if matches!(op, ir::OP::Compare(..)) {
+        the_type = Type::Int;
+    }
+    let new_expr_content = ir::ExprType::Binary(Box::new(lhs), Box::new(rhs), op);
     ir::Expr {
         content: new_expr_content,
-        ty: ty.clone(),
+        ty: the_type,
         span,
     }
 }
