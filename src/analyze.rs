@@ -762,8 +762,9 @@ impl ProgramAnalyzer {
             Binary(lhs, rhs, tokenKind) => {
                 let mut lhs = self.analyze_expr(lhs);
                 let mut rhs = self.analyze_expr(rhs);
+                // All the stuff in the following match branche cases are all about dealing with pointer arithmatic.
+                // @Smell?: Maybe we can move all the pointer arithmatic stuff to gen_new_binary_expr()?
                 match tokenKind {
-                    // deal with pointer arithmatic
                     Plus => {
                         if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
                             println!();
@@ -796,6 +797,7 @@ impl ProgramAnalyzer {
                                 _ => exit(1),
                             }
                             rhs = scale_expr(rhs, scale, OP::Mul);
+                            return gen_new_binary_expr(lhs, rhs, OP::Minus);
                         } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
                             let mut basic_ty = lhs.ty.clone();
 							if let ArrayOf(basic, _) = &lhs.ty {
@@ -811,17 +813,16 @@ impl ProgramAnalyzer {
                             let expr = gen_new_binary_expr(lhs, rhs, OP::Minus);
                             let scale = sizeof(&basic_ty);
                             let mut scaled_expr = scale_expr(expr, scale, OP::Div);
-                            // @Important: Set the data type properly.
+                            // @Note: In reality, the data type of the result is implementation dependent.
+                            // We intentionally hardcode it to be long for convenience.
                             scaled_expr.ty = Type::Long;
                             return scaled_expr;
                         }
-                        return gen_new_binary_expr(lhs, rhs, OP::Minus);
                     }
-                    _ => {
-                        let op = tokenkind_to_op(tokenKind);
-                        return gen_new_binary_expr(lhs, rhs, op);
-                    }
+                    _ => (),
                 }
+                let op = tokenkind_to_op(tokenKind);
+                return gen_new_binary_expr(lhs, rhs, op);
             }
             CommaExpression(lhs, rhs) => {
                 let rhs = self.analyze_expr(rhs);

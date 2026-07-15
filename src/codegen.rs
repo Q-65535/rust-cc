@@ -386,18 +386,18 @@ impl Generator {
 
 fn cast(from: &Type, to: &Type) {
     if to == &Void {return;}
-    let from_fundemental_type = get_fundemental_type(from);
-    let to_fundemental_type   = get_fundemental_type(to);
+    let from_fundemental_type = get_assembly_type(from);
+    let to_fundemental_type   = get_assembly_type(to);
     gen_cast_operation(from_fundemental_type, to_fundemental_type);
 }
 
-fn get_fundemental_type(ty: &Type) -> Fundemental_Type {
+fn get_assembly_type(ty: &Type) -> Fundemental_Type {
     match ty {
         Char => I8,
         Short => I16,
         Int => I32,
         Long | Pointer_To(..) | ArrayOf(..) => I64,
-        Func{return_type, ..} => get_fundemental_type(return_type),
+        Func{return_type, ..} => get_assembly_type(return_type),
         _ => {
             println!("cannot get the fundemental type of this type: {:?}", ty);
             exit(1);
