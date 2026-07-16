@@ -855,7 +855,7 @@ impl Parser {
             },
             Mul => {
                 self.bump();
-                let operand = self.parse_prefix()?;
+                let operand = self.parse_expr(precedence(&TokenKind::Asterisk))?;
                 let span = Span{
                     start_index: prefix_starting_token.span.start_index,
                     end_index: operand.span.end_index,

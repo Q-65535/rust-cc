@@ -28,8 +28,10 @@ pub enum TokenKind {
     Lex_Natural_Num(u64),
     LexIdent(String),
     StringLiteral(Vec<u8>),
+    Asterisk, // Specifically represents pointer and dereference operator.
     LexCast, // This is just a fake token for the convenicence of getting the precedence of cast expression.
-    // Keywords
+
+    // Keywords:
     Ret, If, Else, For, While,
     Sizeof, Typedef, Struct, Int, Char, Union,
     Long, Short, Void, _Atomic,
@@ -49,6 +51,7 @@ pub enum Precedence {
     LV5,
     LV6,
     LV7,
+    LV8,
 }
 
 impl std::ops::Sub<u8> for Precedence {
@@ -63,6 +66,7 @@ impl std::ops::Sub<u8> for Precedence {
             5 => Precedence::LV5,
             6 => Precedence::LV6,
             7 => Precedence::LV7,
+            8 => Precedence::LV8,
             _ => todo!(),
         }
     }
@@ -89,7 +93,8 @@ pub fn precedence(kind: &TokenKind) -> Precedence {
         Plus | Minus => LV4,
         Mul | Div => LV5,
         LexCast => LV6,
-        Period | Arrow | LParen | LSqureBracket => LV7,
+        Asterisk => LV7,
+        Period | Arrow | LParen | LSqureBracket => LV8,
         _ => Lowest,
     }
 }

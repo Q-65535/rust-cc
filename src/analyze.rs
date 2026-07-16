@@ -216,6 +216,7 @@ pub struct ProgramAnalyzer {
     pub global_decls: Vec<ir::Declaration>,
     pub scope_manager: ScopeManager,
     pub current_local_var_offset: usize,
+    pub current_function_return_type: Type,
     pub unique_string_name_index: usize,
 }
 
@@ -226,6 +227,7 @@ impl ProgramAnalyzer {
                         global_decls: Vec::new(),
                         scope_manager: ScopeManager::new(),
                         current_local_var_offset: 0,
+                        current_function_return_type: Type::ty_none,
                         unique_string_name_index: 0,
                         }
     }
@@ -429,6 +431,9 @@ impl ProgramAnalyzer {
 
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
         let (final_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
+        if let Func{return_type, ..} = &final_type {
+            self.current_function_return_type = *return_type.clone();
+        }
         // We must enter scope before analyzing function
         // parameters since function parameters are also in
         // the function body scope.
@@ -698,7 +703,8 @@ impl ProgramAnalyzer {
             },
             Return(expr) => {
                 let expr = self.analyze_expr(expr);
-                StmtType::Return(expr)
+                let casted_expr = cast(expr, &self.current_function_return_type);
+                StmtType::Return(casted_expr)
             },
             Block(items) => {
                 let stmts = self.analyze_block_in_new_scope(items);
@@ -952,20 +958,43 @@ impl ProgramAnalyzer {
                 match &ident.content {
                     Ident(name) => {
                         if let Some(obj) = self.scope_manager.resolve_object(name) {
-                            if let Func{return_type, param_types} = &obj.ty {
-                                let ty = *return_type.clone();
+                            let obj_ty = obj.ty.clone();
+                            if let Func{return_type, param_types} = obj_ty {
+                                let ty = *return_type;
                                 let ident = self.analyze_expr(ident);
-                                let mut analyzed_args = Vec::new();
-                                for arg in args {
-                                    let analyzed_arg = self.analyze_expr(arg);
-                                    analyzed_args.push(analyzed_arg);
+                                let mut casted_analyzed_args = Vec::new();
+
+                                // @Future: Add these judgements.
+                                // if args.len() > param_types.len() {
+                                //     print_error_at(span, "Too many arguments to call this function.");
+                                //     exit(1);
+                                // }
+                                if args.len() < param_types.len() {
+                                    print_error_at(span, "Too few arguments to call this function.");
+                                    exit(1);
                                 }
-                                // @Incomplete: Check whether these analyzed args is matching the param_types of the function.
-                                let content = ExprType::FunCall(Box::new(ident), analyzed_args);
+                                for arg_index in 0..args.len() {
+                                    let arg = &mut args[arg_index];
+                                    let mut analyzed_arg = self.analyze_expr(arg);
+                                    if arg_index < param_types.len() {
+                                        let param_type = &param_types[arg_index];
+                                        if matches!(param_type, Type::Struct(..) | Type::Union(..) | Type::Tag(..)) {
+                                            print_error_at(span, "passing struct or union is not supported yet");
+                                            exit(1);
+                                        }
+                                        analyzed_arg = cast(analyzed_arg, param_type);
+                                        casted_analyzed_args.push(analyzed_arg);
+                                    } else {
+                                        // @temporary: For now, we just accept the "too many arguments" case.
+                                        casted_analyzed_args.push(analyzed_arg);
+                                    }
+                                }
+
+                                let content = ExprType::FunCall(Box::new(ident), casted_analyzed_args);
                                 ir::Expr {content, ty, span}
                             }
                             else {
-                                let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &obj.ty);
+                                let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &obj_ty);
                                 print_error_at(ident.span, &error_message);
                                 exit(1);
                             }
