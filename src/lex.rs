@@ -26,6 +26,7 @@ pub enum TokenKind {
     Semicolon,
     Comma,
     Lex_Natural_Num(u64),
+    Lex_Char(u8),
     LexIdent(String),
     StringLiteral(Vec<u8>),
     Asterisk, // Specifically represents pointer and dereference operator.
@@ -263,6 +264,19 @@ impl Lexer {
                     let num_str = num.to_string();
                     tokens.push(Self::gen_token(Lex_Natural_Num(num), start_index, num_str.len()));
                 },
+                '\'' => {
+                    let character = self.read_char_literal();
+                    match character {
+                        Ok(byte) => {
+                            let end_index = self.index;
+                            let len = end_index-start_index+1;
+                            tokens.push(Self::gen_token(Lex_Natural_Num(byte as u64), start_index, len));
+                        }
+                        Err(s) => {
+                            lexical_error_at(start_index, &s);
+                        }
+                    }
+                }
                 '"' => {
                     match self.read_string() {
                         Ok(bytes) => {
@@ -352,6 +366,26 @@ impl Lexer {
         }
         let integer_string: &String = &self.src[start_index..start_index+len].iter().collect(); 
         return integer_string.parse().unwrap();
+    }
+
+    fn read_char_literal(&mut self) -> Result<u8, String> {
+        debug_assert!(matches!(self.cur_char(), '\''));
+        self.next_char();
+        if self.cur_char() == '\0' {
+            let error_info = "unclosed char literal".to_string();
+            return Err(error_info);
+        }
+        let the_char_literal = if self.cur_char() == '\\' {
+             self.read_escaped_char()
+        } else {
+            self.cur_char() as u8
+        };
+        self.next_char();
+        if self.cur_char() != '\'' {
+            let error_info = "unclosed char literal".to_string();
+            return Err(error_info);
+        }
+        return Ok(the_char_literal);
     }
 
     fn read_string(&mut self) -> Result<Vec<u8>, String> {
@@ -462,7 +496,6 @@ impl Lexer {
         }
         self.src[i..i+len].iter().collect()
     }
-
 }
 
 fn lexical_error_at(index: usize, err_msg: &str) {
