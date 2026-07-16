@@ -23,6 +23,7 @@ pub enum Type {
     Long,
     Short,
     Char,
+    Bool,
     Void,
     ArrayOf(Box<Type>, usize),
     Func{return_type: Box<Type>, param_types: Vec<Type>},
@@ -41,6 +42,7 @@ impl Type {
             Type::Long => 8,
             Type::Short => 2,
             Type::Char => 1,
+            Type::Bool => 1,
             Type::Void => 1,
             ArrayOf(element_ty, len) => element_ty.align(),
             Func{..} => 8,
@@ -59,6 +61,7 @@ pub fn sizeof(ty: &Type) -> usize {
         Type::Long => 8,
         Type::Short => 2,
         Type::Char => 1,
+        Type::Bool => 1,
         Type::Void => 1,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         Func{..} => 8,
@@ -511,9 +514,19 @@ impl ProgramAnalyzer {
             let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_object(obj.clone());
             if let Some(expr) = &mut declarator.init_expr {
-                let analyzed_expr = self.analyze_expr(expr);
+                let mut analyzed_expr = self.analyze_expr(expr);
                 if can_assign(&obj.ty, &analyzed_expr.ty) {
                     let expr = self.gen_expr_from_obj(&obj);
+
+                    // Cast rhs to match lhs when they are not struct type.
+                    if !matches!(&analyzed_expr.ty, Struct(..) | Union(..) | Tag(..) ) {
+                        // @Smell: Umm.... alright, this reflects that our code is getting error-prone now.
+                        // The cast is executed in both here and the place where we handle the real assignment expr from AST.
+                        // But I think that the cast can be done in a unified way when dealing with this kind of stuff.
+                        // Maybe we can write a new function that is used to generate an analyzed assignment expression from
+                        // already analyzed lhs and rhs.
+                        analyzed_expr = cast(analyzed_expr, &obj.ty);
+                    }
                     let content = ir::ExprType::Assign(Box::new(expr), Box::new(analyzed_expr));
                     let generated_expr = ir::Expr{content, ty: obj.ty, span: declarator.span};
                     let generated_stmt = ir::StmtType::Ex(generated_expr);
@@ -532,11 +545,12 @@ impl ProgramAnalyzer {
 
     fn analyze_decl_spec(&mut self, decl_specs: &Vec<Decl_Spec>) -> (Type, Symbol_Attribute) {
         const VOID:  u32 = 1 << 0;
-        const CHAR:  u32 = 1 << 2;
-        const SHORT: u32 = 1 << 4;
-        const INT:   u32 = 1 << 6;
-        const LONG:  u32 = 1 << 8;
-        const OTHER: u32 = 1 << 10;
+        const BOOL:  u32 = 1 << 2;
+        const CHAR:  u32 = 1 << 4;
+        const SHORT: u32 = 1 << 6;
+        const INT:   u32 = 1 << 8;
+        const LONG:  u32 = 1 << 10;
+        const OTHER: u32 = 1 << 12;
 
         let mut var_attribute = Symbol_Attribute::default();
         let mut count: u32 = 0;
@@ -570,6 +584,9 @@ impl ProgramAnalyzer {
                 Decl_Spec::Char => {
                     count += CHAR;
                 },
+                Decl_Spec::Bool => {
+                    count += BOOL;
+                },
                 Decl_Spec::Void => {
                     count += VOID;
                 },
@@ -582,6 +599,7 @@ impl ProgramAnalyzer {
 
             cur_type = match count {
                 _ if count == VOID              => Type::Void,
+                _ if count == BOOL              => Type::Bool,
                 _ if count == CHAR              => Type::Char,
                 _ if count == SHORT             => Type::Short,
                 _ if count == SHORT + INT       => Type::Short,
@@ -1102,7 +1120,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
 
 fn is_scalar_type(ty: &Type) -> bool {
     matches!(ty, 
-        Char | Short | Int | Long | Pointer_To(..) | ArrayOf(..)
+        Bool | Char | Short | Int | Long | Pointer_To(..) | ArrayOf(..)
     )
 }
 
@@ -1129,7 +1147,7 @@ fn dimension_of(ty: &Type) -> i32 {
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
 pub fn is_integer(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Long | Type::Short | Type::Char)
+    matches!(ty, Type::Int | Type::Long | Type::Short | Type::Char | Type::Bool)
 }
 
 fn can_assign(left: &Type, mut right: &Type) -> bool {

@@ -92,6 +92,7 @@ pub enum Decl_Spec {
     Long,
     Short,
     Char,
+    Bool,
     Void,
     Struct_Union(Struct_Union_Specifier),
 }
@@ -429,7 +430,7 @@ impl Parser {
 
     fn is_decl_spec(&self, token: &Token) -> bool {
         match &token.kind {
-            (Struct | Union | Int | Long | Short | Char | Void | Typedef) => true,
+            (Struct | Union | Int | Long | Short | Char | _Bool | Void | Typedef) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -437,7 +438,7 @@ impl Parser {
 
     fn is_type_spec(&self, token: &Token) -> bool {
         match &token.kind {
-            (Struct | Union | Int | Long | Short | Char | Void) => true,
+            (Struct | Union | Int | Long | Short | Char | _Bool | Void) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -471,6 +472,10 @@ impl Parser {
                 TokenKind::Char => {
                     self.bump();
                     Decl_Spec::Char
+                },
+                TokenKind::_Bool => {
+                    self.bump();
+                    Decl_Spec::Bool
                 },
                 TokenKind::Void => {
                     self.bump();

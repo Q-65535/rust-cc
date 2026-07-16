@@ -33,7 +33,7 @@ pub enum TokenKind {
 
     // Keywords:
     Ret, If, Else, For, While,
-    Sizeof, Typedef, Struct, Int, Char, Union,
+    Sizeof, Typedef, Struct, Int, Char, _Bool, Union,
     Long, Short, Void, _Atomic,
 
     Eof,
@@ -124,6 +124,7 @@ impl Lexer {
             ("short".to_string(), Short),
             ("void".to_string(), Void),
             ("_Atomic".to_string(), _Atomic),
+            ("_Bool".to_string(), _Bool),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

@@ -386,13 +386,31 @@ impl Generator {
 
 fn cast(from: &Type, to: &Type) {
     if to == &Void {return;}
+    if (to == &Bool) {
+        cmp_zero(from);
+        emit!("  setne %al");
+        emit!("  movzx %al, %eax");
+        return;
+    }
+
     let from_fundemental_type = get_assembly_type(from);
     let to_fundemental_type   = get_assembly_type(to);
     gen_cast_operation(from_fundemental_type, to_fundemental_type);
 }
 
+fn cmp_zero(ty: &Type) {
+  if is_integer(ty) && sizeof(ty) <= 4 {
+    emit!("  cmp $0, %eax");
+  } else {
+    emit!("  cmp $0, %rax");
+    }
+}
+
 fn get_assembly_type(ty: &Type) -> Fundemental_Type {
     match ty {
+        // Bool is special. Because it is normalized to either 0 or 1, we can
+        // just use I64 without any problem.
+        Bool => I64,
         Char => I8,
         Short => I16,
         Int => I32,

@@ -85,13 +85,22 @@ fn token_kind_label(kind: &TokenKind) -> (&'static str, &'static str) {
         TokenKind::Struct            => ("Keyword",   BLUE),
         TokenKind::Int               => ("Keyword",   BLUE),
         TokenKind::Char              => ("Keyword",   BLUE),
+        TokenKind::Typedef           => ("Keyword",   BLUE),
+        TokenKind::Union             => ("Keyword",   BLUE),
+        TokenKind::Long              => ("Keyword",   BLUE),
+        TokenKind::Short             => ("Keyword",   BLUE),
+        TokenKind::Void              => ("Keyword",   BLUE),
+        TokenKind::_Atomic           => ("Keyword",   BLUE),
+        TokenKind::_Bool             => ("Keyword",   BLUE),
         TokenKind::LexIdent(_)       => ("Ident",     CYAN),
-        TokenKind::Num(_)            => ("Number",    GREEN),
+        TokenKind::Lex_Natural_Num(_)=> ("Number",    GREEN),
         TokenKind::StringLiteral(_)  => ("String",    GREEN),
         TokenKind::Plus              => ("Plus",      YELLOW),
         TokenKind::Minus             => ("Minus",     YELLOW),
         TokenKind::Mul               => ("Mul",       YELLOW),
+        TokenKind::Asterisk          => ("Asterisk",  YELLOW),
         TokenKind::Div               => ("Div",       YELLOW),
+        TokenKind::LexCast           => ("Cast",      MAGENTA),
         TokenKind::Ampersand         => ("Ampersand", YELLOW),
         TokenKind::Not               => ("Not",       YELLOW),
         TokenKind::Assignment        => ("Assign",    MAGENTA),
@@ -151,12 +160,16 @@ fn branch(prefix: &str, is_last: bool, label: &str) {
 // ── Function ──────────────────────────────────────────
 
 fn print_function(fun: &Function, prefix: &str, is_last: bool) {
-    let stars = "*".repeat(fun.star_count as usize);
-    let ret   = decl_spec_str(&fun.return_type);
+    let stars = "*".repeat(fun.declarator.star_count as usize);
+    let ret   = decl_spec_str(&fun.return_type_specifier);
+    let params = match &fun.declarator.suffix {
+        Some(DeclaratorSuffix::FunParam(params)) => params.as_slice(),
+        _ => &[],
+    };
     let conn  = if is_last { LAST } else { TEE };
     println!(
         "{prefix}{conn}{BOLD}{GREEN}fn{RESET} {BOLD}{}{RESET}  {DIM}→ {stars}{ret}{RESET}",
-        fun.name
+        declarator_name(&fun.declarator)
     );
 
     let cp = child_prefix(prefix, is_last);
@@ -166,11 +179,11 @@ fn print_function(fun: &Function, prefix: &str, is_last: bool) {
     let param_conn = if has_body { TEE } else { LAST };
     println!("{cp}{param_conn}{BLUE}params{RESET}");
     let pp = child_prefix(&cp, !has_body);
-    if fun.params.is_empty() {
+    if params.is_empty() {
         println!("{pp}{LAST}{DIM}(none){RESET}");
     } else {
-        let pc = fun.params.len();
-        for (i, p) in fun.params.iter().enumerate() {
+        let pc = params.len();
+        for (i, p) in params.iter().enumerate() {
             print_parameter(p, &pp, i + 1 == pc);
         }
     }
@@ -191,7 +204,7 @@ fn print_parameter(p: &Parameter, prefix: &str, is_last: bool) {
     let ty    = decl_spec_str(&p.decl_spec);
     branch(
         prefix, is_last,
-        &format!("{CYAN}param{RESET} {stars}{ty} {}", p.declarator.name),
+        &format!("{CYAN}param{RESET} {stars}{ty} {}", declarator_name(&p.declarator)),
     );
 }
 
@@ -211,7 +224,7 @@ fn print_declaration(d: &Declaration, prefix: &str, is_last: bool) {
     let cp = child_prefix(prefix, is_last);
     let ic = d.declarators.len();
     for (i, id) in d.declarators.iter().enumerate() {
-        print_declarator(id, ty, &cp, i + 1 == ic);
+        print_declarator(id, &ty, &cp, i + 1 == ic);
     }
 }
 
@@ -221,7 +234,7 @@ fn print_declarator(id: &Declarator, base_ty: &str, prefix: &str, is_last: bool)
     let conn   = if is_last { LAST } else { TEE };
     println!(
         "{prefix}{conn}{CYAN}{}{RESET}{DIM}: {stars}{base_ty}{suffix}{RESET}",
-        id.name
+        declarator_name(id)
     );
     if let Some(expr) = &id.init_expr {
         let cp = child_prefix(prefix, is_last);
@@ -300,7 +313,7 @@ fn print_opt_expr(prefix: &str, label: &str, expr: &Option<Expr>, is_last: bool)
 fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
     let conn = if is_last { LAST } else { TEE };
     match &expr.content {
-        ExprType::Number(n) => {
+        ExprType::Natural_Number(n) => {
             println!("{prefix}{conn}{GREEN}Num{RESET}({n})");
         }
         ExprType::Ident(s) => {
@@ -330,8 +343,15 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
             println!("{prefix}{conn}{YELLOW}AddrOf{RESET}");
             print_expr(inner, &child_prefix(prefix, is_last), true);
         }
-        ExprType::Sizeof(inner) => {
+        ExprType::Sizeof_Expr(inner) => {
             println!("{prefix}{conn}{YELLOW}Sizeof{RESET}");
+            print_expr(inner, &child_prefix(prefix, is_last), true);
+        }
+        ExprType::Sizeof_Type_Name(type_name) => {
+            println!("{prefix}{conn}{YELLOW}SizeofType{RESET}  {DIM}{}{RESET}", type_name_str(type_name));
+        }
+        ExprType::Cast(inner, type_name) => {
+            println!("{prefix}{conn}{YELLOW}Cast{RESET}  {DIM}{}{RESET}", type_name_str(type_name));
             print_expr(inner, &child_prefix(prefix, is_last), true);
         }
         ExprType::ArrayIndexing(base, index) => {
@@ -385,25 +405,82 @@ fn print_expr(expr: &Expr, prefix: &str, is_last: bool) {
 
 // ── Helpers ───────────────────────────────────────────
 
-fn decl_spec_str(ds: &TypeSpec) -> &'static str {
-    match ds {
-        TypeSpec::Int => "int",
-        TypeSpec::Char => "char",
-        TypeSpec::Struct(_) => "struct",
+fn decl_spec_str(ds: &[Decl_Spec]) -> String {
+    ds.iter()
+        .map(|spec| match spec {
+            Decl_Spec::Typedef => "typedef".to_string(),
+            Decl_Spec::Typedef_Name(name) => name.clone(),
+            Decl_Spec::Int => "int".to_string(),
+            Decl_Spec::Long => "long".to_string(),
+            Decl_Spec::Short => "short".to_string(),
+            Decl_Spec::Char => "char".to_string(),
+            Decl_Spec::Bool => "_Bool".to_string(),
+            Decl_Spec::Void => "void".to_string(),
+            Decl_Spec::Struct_Union(specifier) => struct_union_spec_str(specifier),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn struct_union_spec_str(specifier: &Struct_Union_Specifier) -> String {
+    let kind = match specifier.kind {
+        Struct_Or_Union::Is_Struct => "struct",
+        Struct_Or_Union::Is_Union => "union",
+    };
+
+    match &specifier.name {
+        Some(name) => format!("{kind} {name}"),
+        None => format!("{kind} <anonymous>"),
+    }
+}
+
+fn type_name_str(type_name: &Type_Name) -> String {
+    let base_ty = decl_spec_str(&type_name.decl_specs);
+    match &type_name.declarator {
+        Some(declarator) => abstract_declarator_str(declarator, &base_ty),
+        None => base_ty,
+    }
+}
+
+fn abstract_declarator_str(declarator: &Abstract_Declarator, base_ty: &str) -> String {
+    let stars = "*".repeat(declarator.star_count as usize);
+    let mut ty = format!("{stars}{base_ty}");
+
+    if let Some(inner) = &declarator.direct_abstract_declarator {
+        ty = format!("({})", abstract_declarator_str(inner, &ty));
+    }
+
+    format!("{ty}{}", declarator_suffix_str(&declarator.suffix))
+}
+
+fn declarator_name(declarator: &Declarator) -> &str {
+    match &*declarator.direct_declarator {
+        Direct_Declarator::Identifier(name) => name,
+        Direct_Declarator::Paren_Enclosed_Declarator(inner) => declarator_name(inner),
     }
 }
 
 fn declarator_suffix_str(suffix: &Option<DeclaratorSuffix>) -> String {
     match suffix {
         None => String::new(),
-        Some(DeclaratorSuffix::ArrayLen(dims)) => {
-            dims.iter().map(|d| format!("[{d}]")).collect()
-        }
-        Some(DeclaratorSuffix::FunParam(params)) => {
+        Some(suffix) => declarator_suffix_part_str(suffix),
+    }
+}
+
+fn declarator_suffix_part_str(suffix: &DeclaratorSuffix) -> String {
+    match suffix {
+        DeclaratorSuffix::ArrayLen(len, inner_suffix) => {
+            let inner = inner_suffix
+                .as_deref()
+                .map(declarator_suffix_part_str)
+                .unwrap_or_default();
+            format!("[{len}]{inner}")
+        },
+        DeclaratorSuffix::FunParam(params) => {
             let ps: Vec<String> = params.iter().map(|p| {
                 let stars = "*".repeat(p.declarator.star_count as usize);
                 let ty    = decl_spec_str(&p.decl_spec);
-                format!("{stars}{ty} {}", p.declarator.name)
+                format!("{stars}{ty} {}", declarator_name(&p.declarator))
             }).collect();
             format!("({})", ps.join(", "))
         }
