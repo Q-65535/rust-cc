@@ -96,6 +96,7 @@ pub struct Obj {
 pub enum Symbol {
     Object(Obj),
     Typedef(Type),
+    EnumSymbol(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -134,6 +135,25 @@ impl ScopeManager {
     pub fn exit_current_scope(&mut self) {
         self.scopes.pop();
         self.current_scope_index -= 1;
+    }
+
+    pub fn contains_symbol(&self, name: &str) -> bool {
+        let index = self.current_scope_index;
+        for i in (0..=index).rev() {
+            let current_scope = &self.scopes[i];
+            if current_scope.symbols.contains_key(name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn contains_symbol_at_current_scope(&self, name: &str) -> bool {
+        let current_scope = &self.scopes[self.current_scope_index];
+        if current_scope.symbols.contains_key(name) {
+            return true;
+        }
+        return false;
     }
 
     pub fn resolve_typedef_alias(&self, name: &str) -> Option<&Type> {
@@ -190,10 +210,40 @@ impl ScopeManager {
 
     pub fn add_object(&mut self, obj: Obj) {
         let name = &obj.name;
-        debug_assert!(self.resolve_object_at_current_scope(name) == None);
+        debug_assert!(!self.contains_symbol_at_current_scope(name));
         let current_scope = &mut self.scopes[self.current_scope_index];
         current_scope.symbols.insert(name.to_string(), Symbol::Object(obj));
     }
+
+    // pub fn resolve_enum(&self, name: &str) -> Option<&u64> {
+    //     let index = self.current_scope_index;
+    //     for i in (0..=index).rev() {
+    //         let current_scope = &self.scopes[i];
+    //         if let Some(symbol) = current_scope.symbols.get(name) {
+    //             if let Symbol::Object(obj) = symbol {
+    //                 return Some(obj);
+    //             }
+    //         }
+    //     }
+    //     return None
+    // }
+
+    // pub fn resolve_enum_at_current_scope(&self, name: &str) -> Option<&Obj> {
+    //     let current_scope = &self.scopes[self.current_scope_index];
+    //     if let Some(symbol) = current_scope.symbols.get(name) {
+    //         if let Symbol::Object(obj) = symbol {
+    //             return Some(obj);
+    //         }
+    //     }
+    //     return None;
+    // }
+
+    // pub fn add_enum(&mut self, obj: Obj) {
+    //     let name = &obj.name;
+    //     debug_assert!(self.resolve_enum_at_current_scope(name) == None);
+    //     let current_scope = &mut self.scopes[self.current_scope_index];
+    //     current_scope.symbols.insert(name.to_string(), Symbol::Object(obj));
+    // }
 
     pub fn resolve_tag(&self, name: &str) -> Option<&Type> {
         let index = self.current_scope_index;
@@ -247,10 +297,10 @@ impl ProgramAnalyzer {
                 parse::TranslationUnit::FunctionDef(fun) => {
                     let (mut base_type, mut symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
                     let (function_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
-                    // It is not allowed that function and variable have the same name in the same scope.
-                    // So we only check whether we encounter a duplicate name without considering its is a function or a variable.
-                    if let Some(..) = self.scope_manager.resolve_object(&name) {
-                        let err_info = format!("semantic error: redefinition of {}", name);
+                    // It is not allowed that function, variable or typedef name have the same name in the same scope.
+                    // So we only check whether we encounter a duplicate name without considering it is function, variable or typedef name.
+                    if self.scope_manager.contains_symbol_at_current_scope(&name) {
+                        let err_info = format!("semantic error: {} redeclared as a symbol", name);
                         print_error_at(fun.declarator.span, &err_info);
                         exit(1);
                     }
@@ -290,8 +340,8 @@ impl ProgramAnalyzer {
         for declarator in &mut decl.declarators {
             let (final_type, name) = self.resolve_declarator(&base_type, declarator);
 
-            if let Some(_) = self.scope_manager.resolve_object(&name) {
-                let err_info = format!("global variable {} already defined", name);
+            if self.scope_manager.contains_symbol_at_current_scope(&name) {
+                let err_info = format!("semantic error: {} redeclared as a symbol", name);
                 // TODO: error handling
                 print_error_at(declarator.span, &err_info);
                 exit(1);
@@ -482,14 +532,14 @@ impl ProgramAnalyzer {
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
         let (final_type, name) = self.resolve_declarator(&base_type, &param.declarator);
-        if self.scope_manager.resolve_object(&name) == None {
-            let obj = self.create_local_obj(&final_type, &name);
-            self.scope_manager.add_object(obj.clone());
-            return obj;
-        } else {
+        if self.scope_manager.contains_symbol_at_current_scope(&name) {
             let err_info = format!("fatal error: parameter variable {} already defined", &name);
             print_error_at(param.declarator.span, &err_info);
             exit(1);
+        } else {
+            let obj = self.create_local_obj(&final_type, &name);
+            self.scope_manager.add_object(obj.clone());
+            return obj;
         }
     }
 
@@ -506,7 +556,7 @@ impl ProgramAnalyzer {
         }
         for declarator in &mut decl.declarators {
             let (final_type, name) = self.resolve_declarator(&base_type, declarator);
-            if let Some(_) = self.scope_manager.resolve_object_at_current_scope(&name) {
+            if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
                 print_error_at(declarator.span, &err_info);
                 exit(1);
@@ -705,6 +755,9 @@ impl ProgramAnalyzer {
             } else {
                 if let Some(enumerators) = &enum_spec.enumerators {
                     // @TODO: Register tag name and enum constant to current scope...
+                    for e in enumerators {
+
+                    }
                     todo!();
                 } else {
                     let err_info = format!("semantic error: undefined tag name: '{}'", name);
@@ -741,8 +794,7 @@ impl ProgramAnalyzer {
 
 
     fn create_local_obj(&mut self, ty: &Type, name: &str) -> Obj {
-        let resolve_result = self.scope_manager.resolve_object_at_current_scope(name);
-        debug_assert!(matches!(resolve_result, None));
+        debug_assert!(!self.scope_manager.contains_symbol_at_current_scope(name));
 
         let mut size: usize = sizeof(ty);
         let aligned_offset = align_to(self.current_local_var_offset, ty.align());
@@ -813,6 +865,8 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &mut expr.content {
+            // @TODO: Wrap the following to a function so that
+            // resolve_enum can use it to return an expr.
             Natural_Number(n) => {
                 let n = *n;
                 let content = ir::ExprType::Natural_Number(n);
@@ -1015,6 +1069,8 @@ impl ProgramAnalyzer {
             FunCall(ident, args) => {
                 match &ident.content {
                     Ident(name) => {
+                        // @Incomplete: GCC lets you to call a undeclared function,
+                        // linker reports the error if function name doesn't exist.
                         if let Some(obj) = self.scope_manager.resolve_object(name) {
                             let obj_ty = obj.ty.clone();
                             if let Func{return_type, param_types} = obj_ty {
@@ -1043,7 +1099,7 @@ impl ProgramAnalyzer {
                                         analyzed_arg = cast(analyzed_arg, param_type);
                                         casted_analyzed_args.push(analyzed_arg);
                                     } else {
-                                        // @temporary: For now, we just accept the "too many arguments" case.
+                                        // @Temporary: For now, we just accept the "too many arguments" case.
                                         casted_analyzed_args.push(analyzed_arg);
                                     }
                                 }
