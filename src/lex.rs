@@ -270,6 +270,16 @@ impl Lexer {
                         Ok(byte) => {
                             let end_index = self.index;
                             let len = end_index-start_index+1;
+                            // @Note: Both GCC and this compiler treat char literal as 32-bit signed integer.
+                            // However, the difference is that GCC sign extended the char from 8-bit to 32-bit,
+                            // while this compiler just 0 extend the char from 8-bit to 32-bit: we first 0 extend
+                            // it to 64-bit using "byte as u64" below, then at analyze phase we add type Int to it
+                            // which effectively means (later in codegen phase) to extract the lower 32-bit and
+                            // interpret the lower 32-bit as signed integer and since 8-bit char literal fits in 32-bit
+                            // integer the extraction doesn't affect the char literal value, the result is a positive
+                            // number whose data type is 32-bit singed integer.
+                            // So, in GCC, (-128=='\x80') evaluates to 1, in this compiler, (128=='\x80') evaluates to 1.
+                            // I don't known whether this difference will cause any problem, we'll see.
                             tokens.push(Self::gen_token(Lex_Natural_Num(byte as u64), start_index, len));
                         }
                         Err(s) => {
