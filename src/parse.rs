@@ -95,6 +95,7 @@ pub enum Decl_Spec {
     Bool,
     Void,
     Struct_Union(Struct_Union_Specifier),
+    Enum(Enum_Specifier),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,6 +110,18 @@ pub struct Struct_Union_Specifier {
     pub kind: Struct_Or_Union,
     pub name: Option<String>,
     pub members: Option<Vec<Member>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Enum_Specifier {
+    pub name: Option<String>,
+    pub enumerators: Option<Vec<Enumerator>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Enumerator {
+    pub name: String,
+    pub constant_expr: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -485,6 +498,10 @@ impl Parser {
                     let struct_spec = self.parse_struct_union_specifier()?;
                     Decl_Spec::Struct_Union(struct_spec)
                 },
+                TokenKind::LexEnum => {
+                    let enum_specifier = self.parse_enum_specifier()?;
+                    Decl_Spec::Enum(enum_specifier)
+                },
                 _ => {
                     let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
                     return Err(err_msg);
@@ -500,6 +517,7 @@ impl Parser {
         let kind = match keyword.kind {
             Union => Is_Union,
             Struct => Is_Struct,
+            // @Fix: This should be a compiler bug, not a compiler error.
             _ => return Err(error_token(&keyword, "expected 'struct' or 'union'")),
         };
 
@@ -522,6 +540,28 @@ impl Parser {
         Ok(struct_specifier)
     }
 
+    fn parse_enum_specifier(&mut self) -> Result<Enum_Specifier, String> {
+        debug_assert!(matches!(self.cur_token().kind, LexEnum));
+        self.bump();
+        let mut enum_specifier = Enum_Specifier{name: None, enumerators: None};
+        if let LexIdent(name) = &self.cur_token().kind {
+            enum_specifier.name = Some(name.clone());
+            self.bump();
+        }
+        if self.at(&LBrace) {
+            let enumerators = self.parse_enumerator_list()?;
+            if enumerators.len() == 0 {
+                let error_message = error_token(self.cur_token(), "empty enum is invalid");
+                return Err(error_message);
+            }
+            enum_specifier.enumerators = Some(self.parse_enumerator_list()?);
+        } else if enum_specifier.name.is_none() {
+            let error_message = error_token(self.cur_token(), "parsing struct specifier error: expected a tag or member list");
+            return Err(error_message);
+        }
+        Ok(enum_specifier)
+    }
+
     fn parse_struct_decl_list(&mut self) -> Result<Vec<Member>, String> {
         self.expect(&LBrace)?;
         let mut members = Vec::new();
@@ -541,6 +581,40 @@ impl Parser {
 
         self.expect(&RBrace)?;
         Ok(members)
+    }
+
+    fn parse_enumerator_list(&mut self) -> Result<Vec<Enumerator>, String> {
+        debug_assert!(matches!(self.cur_token().kind, LBrace));
+        self.bump();
+
+        let mut enumerators = Vec::new();
+        while !matches!(self.cur_token().kind, RBrace | Eof) {
+            let name = if let LexIdent(name) = &self.cur_token().kind {
+                name.clone()
+            } else {
+                let error_message = error_token(self.cur_token(),
+                "trying to parse enumerator constant, but this is not a identifier!");
+                return Err(error_message);
+            };
+            self.bump();
+
+            let constant_expr = if self.cur_token().kind == Assignment {
+                self.bump();
+                Some(self.parse_expr(Lowest)?)
+            } else {
+                None
+            };
+            let new_enumerator = Enumerator{name, constant_expr};
+            enumerators.push(new_enumerator);
+
+            if self.at(&RBrace) {
+                break;
+            } else {
+                self.expect(&Comma);
+            }
+        }
+        self.expect(&RBrace)?;
+        Ok(enumerators)
     }
 
     fn parse_declarator(&mut self) -> Result<Declarator, String> {

@@ -29,6 +29,7 @@ pub enum Type {
     Func{return_type: Box<Type>, param_types: Vec<Type>},
     Struct(ir::Struct),
     Union(ir::Struct),
+    Enum(String),
     Tag(String),
     ty_none,
 }
@@ -48,6 +49,7 @@ impl Type {
             Func{..} => 8,
             Struct(st) => st.align,
             Union(st) => st.align,
+            Enum(..) => 4,
             Tag(_) => 0,
             ty_none => 1,
         }
@@ -67,6 +69,7 @@ pub fn sizeof(ty: &Type) -> usize {
         Func{..} => 8,
         Struct(st) => st.size,
         Union(st) => st.size,
+        Enum(..) => 4,
         Tag(tag_name) => {
             // @Refactor: Return an error.
             let error_info = format!("unable to get the size of incomplete type");
@@ -595,6 +598,11 @@ impl ProgramAnalyzer {
                     count += OTHER;
                     continue;
                 },
+                Decl_Spec::Enum(enum_spec) => {
+                    cur_type = self.analyze_enum(enum_spec);
+                    count += OTHER;
+                    continue;
+                },
             }
 
             cur_type = match count {
@@ -670,7 +678,7 @@ impl ProgramAnalyzer {
         if let Some(name) = &st.name {
             if let Some(members) = &st.members {
                 if let Some(_) = self.scope_manager.resolve_tag_at_current_scope(name) {
-                    let err_info = format!("semantic error: redefinition of struct tag name: '{}'", name);
+                    let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
                     exit(1);
@@ -681,6 +689,38 @@ impl ProgramAnalyzer {
         }
 
         return the_type;
+    }
+
+    fn analyze_enum(&mut self, enum_spec: &Enum_Specifier) -> Type {
+        if let Some(name) = &enum_spec.name {
+            if let Some(the_type) = self.scope_manager.resolve_tag_at_current_scope(name) {
+                // If the tag name is already registerd at current scope, enumerator list shall not appear.
+                if let Some(_) = &enum_spec.enumerators {
+                    let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
+                    print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
+                    exit(1);
+                } else {
+                    return the_type.clone();
+                }
+            } else {
+                if let Some(enumerators) = &enum_spec.enumerators {
+                    // @TODO: Register tag name and enum constant to current scope...
+                    todo!();
+                } else {
+                    let err_info = format!("semantic error: undefined tag name: '{}'", name);
+                    print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
+                    exit(1);
+                }
+            }
+        } else {
+            if let Some(enumerators) = &enum_spec.enumerators {
+                // @TODO: Register enum constant to current scope...
+                todo!();
+            } else {
+                println!("compiler bug: both tag name and enumerator list are None.");
+                exit(1);
+            }
+        }
     }
 
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
