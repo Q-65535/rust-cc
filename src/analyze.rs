@@ -29,7 +29,7 @@ pub enum Type {
     Func{return_type: Box<Type>, param_types: Vec<Type>},
     Struct(ir::Struct),
     Union(ir::Struct),
-    Enum(String),
+    Enum,
     Tag(String),
     ty_none,
 }
@@ -49,7 +49,7 @@ impl Type {
             Func{..} => 8,
             Struct(st) => st.align,
             Union(st) => st.align,
-            Enum(..) => 4,
+            Enum => 4,
             Tag(_) => 0,
             ty_none => 1,
         }
@@ -69,7 +69,7 @@ pub fn sizeof(ty: &Type) -> usize {
         Func{..} => 8,
         Struct(st) => st.size,
         Union(st) => st.size,
-        Enum(..) => 4,
+        Enum => 4,
         Tag(tag_name) => {
             // @Refactor: Return an error.
             let error_info = format!("unable to get the size of incomplete type");
@@ -96,6 +96,7 @@ pub struct Obj {
 pub enum Symbol {
     Object(Obj),
     Typedef(Type),
+    // @Rename
     EnumSymbol(u64),
 }
 
@@ -215,35 +216,34 @@ impl ScopeManager {
         current_scope.symbols.insert(name.to_string(), Symbol::Object(obj));
     }
 
-    // pub fn resolve_enum(&self, name: &str) -> Option<&u64> {
-    //     let index = self.current_scope_index;
-    //     for i in (0..=index).rev() {
-    //         let current_scope = &self.scopes[i];
-    //         if let Some(symbol) = current_scope.symbols.get(name) {
-    //             if let Symbol::Object(obj) = symbol {
-    //                 return Some(obj);
-    //             }
-    //         }
-    //     }
-    //     return None
-    // }
+    pub fn resolve_enum(&self, name: &str) -> Option<u64> {
+        let index = self.current_scope_index;
+        for i in (0..=index).rev() {
+            let current_scope = &self.scopes[i];
+            if let Some(symbol) = current_scope.symbols.get(name) {
+                if let Symbol::EnumSymbol(number) = symbol {
+                    return Some(*number);
+                }
+            }
+        }
+        return None
+    }
 
-    // pub fn resolve_enum_at_current_scope(&self, name: &str) -> Option<&Obj> {
-    //     let current_scope = &self.scopes[self.current_scope_index];
-    //     if let Some(symbol) = current_scope.symbols.get(name) {
-    //         if let Symbol::Object(obj) = symbol {
-    //             return Some(obj);
-    //         }
-    //     }
-    //     return None;
-    // }
+    pub fn resolve_enum_at_current_scope(&self, name: &str) -> Option<u64> {
+        let current_scope = &self.scopes[self.current_scope_index];
+        if let Some(symbol) = current_scope.symbols.get(name) {
+            if let Symbol::EnumSymbol(number) = symbol {
+                return Some(*number);
+            }
+        }
+        return None;
+    }
 
-    // pub fn add_enum(&mut self, obj: Obj) {
-    //     let name = &obj.name;
-    //     debug_assert!(self.resolve_enum_at_current_scope(name) == None);
-    //     let current_scope = &mut self.scopes[self.current_scope_index];
-    //     current_scope.symbols.insert(name.to_string(), Symbol::Object(obj));
-    // }
+    pub fn add_enum(&mut self, name: &str, number: u64) {
+        debug_assert!(!self.contains_symbol(name));
+        let current_scope = &mut self.scopes[self.current_scope_index];
+        current_scope.symbols.insert(name.to_string(), Symbol::EnumSymbol(number));
+    }
 
     pub fn resolve_tag(&self, name: &str) -> Option<&Type> {
         let index = self.current_scope_index;
@@ -567,30 +567,11 @@ impl ProgramAnalyzer {
             let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_object(obj.clone());
             if let Some(expr) = &mut declarator.init_expr {
-                let mut analyzed_expr = self.analyze_expr(expr);
-                if can_assign(&obj.ty, &analyzed_expr.ty) {
-                    let expr = self.gen_expr_from_obj(&obj);
-
-                    // Cast rhs to match lhs when they are not struct type.
-                    if !matches!(&analyzed_expr.ty, Struct(..) | Union(..) | Tag(..) ) {
-                        // @Smell: Umm.... alright, this reflects that our code is getting error-prone now.
-                        // The cast is executed in both here and the place where we handle the real assignment expr from AST.
-                        // But I think that the cast can be done in a unified way when dealing with this kind of stuff.
-                        // Maybe we can write a new function that is used to generate an analyzed assignment expression from
-                        // already analyzed lhs and rhs.
-                        analyzed_expr = cast(analyzed_expr, &obj.ty);
-                    }
-                    let content = ir::ExprType::Assign(Box::new(expr), Box::new(analyzed_expr));
-                    let generated_expr = ir::Expr{content, ty: obj.ty, span: declarator.span};
-                    let generated_stmt = ir::StmtType::Ex(generated_expr);
-                    stmts.push(generated_stmt);
-                } else {
-                    // @Smell: Provide better error message explaining who wants what type of expr but what wrong type of expr is provided.
-                    let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                    obj.name, &obj.ty, &analyzed_expr.ty);
-                    print_error_at(declarator.span, &err_info);
-                    exit(1);
-                }
+                let lhs = self.gen_expr_from_obj(&obj);
+                let rhs = self.analyze_expr(expr);
+                let assignment_ir_expr = gen_assign_ir_expr(lhs, rhs);
+                let expr_stmt = ir::StmtType::Ex(assignment_ir_expr);
+                stmts.push(expr_stmt);
             }
         }
         stmts
@@ -675,6 +656,7 @@ impl ProgramAnalyzer {
         return (cur_type, var_attribute);
     }
 
+    // @Refactor: Refactor this to the process like analyze_enum().
     fn analyze_struct_union(&mut self, st: &Struct_Union_Specifier) -> Type {
         let mut analyzed_members = Vec::new();
         let mut offset: usize = 0;
@@ -744,8 +726,10 @@ impl ProgramAnalyzer {
     fn analyze_enum(&mut self, enum_spec: &Enum_Specifier) -> Type {
         if let Some(name) = &enum_spec.name {
             if let Some(the_type) = self.scope_manager.resolve_tag_at_current_scope(name) {
-                // If the tag name is already registerd at current scope, enumerator list shall not appear.
-                if let Some(_) = &enum_spec.enumerators {
+                // If it has a tag name, and the tag name is already registerd at
+                // current scope, enumerator list shall not appear, otherwise it is an semantic error.
+                // @Refactor: Refactor all if let Some(_) to the following.
+                if enum_spec.enumerators.is_some() {
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
                     exit(1);
@@ -753,12 +737,22 @@ impl ProgramAnalyzer {
                     return the_type.clone();
                 }
             } else {
+                let the_type = Type::Enum;
                 if let Some(enumerators) = &enum_spec.enumerators {
-                    // @TODO: Register tag name and enum constant to current scope...
+                    self.scope_manager.add_tag(name, &the_type);
+                    let mut value: u64 = 0;
                     for e in enumerators {
-
+                        if let Some(expr) = &e.constant_expr {
+                            // @Incomplete: For now, we just consider single constant number,
+                            // not actual constant expression which may involve operators.
+                            if let Natural_Number(n) = &expr.content {
+                                value = *n;
+                            }
+                        }
+                        self.scope_manager.add_enum(&e.name, value);
+                        value += 1;
                     }
-                    todo!();
+                    return the_type;
                 } else {
                     let err_info = format!("semantic error: undefined tag name: '{}'", name);
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
@@ -767,8 +761,20 @@ impl ProgramAnalyzer {
             }
         } else {
             if let Some(enumerators) = &enum_spec.enumerators {
-                // @TODO: Register enum constant to current scope...
-                todo!();
+                let mut value: u64 = 0;
+                for e in enumerators {
+                    if let Some(expr) = &e.constant_expr {
+                        // @Incomplete: For now, we just consider single constant number,
+                        // not actual constant expression which may involve operators.
+                        if let Natural_Number(n) = &expr.content {
+                            value = *n;
+                        }
+                    }
+                    self.scope_manager.add_enum(&e.name, value);
+                    value += 1;
+                }
+                let the_type = Type::Enum;
+                return the_type;
             } else {
                 println!("compiler bug: both tag name and enumerator list are None.");
                 exit(1);
@@ -865,17 +871,8 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &mut expr.content {
-            // @TODO: Wrap the following to a function so that
-            // resolve_enum can use it to return an expr.
             Natural_Number(n) => {
-                let n = *n;
-                let content = ir::ExprType::Natural_Number(n);
-                let ty = if n > i32::MAX as u64 {
-                    Type::Long
-                } else {
-                    Type::Int
-                };
-                ir::Expr {content, ty, span}
+                gen_num_ir_expr(*n, span)
             }
             Binary(lhs, rhs, tokenKind) => {
                 let mut lhs = self.analyze_expr(lhs);
@@ -952,22 +949,8 @@ impl ProgramAnalyzer {
             Assign(lhs, rhs) => {
                 let mut rhs = self.analyze_expr(rhs);
                 let lhs = self.analyze_expr(lhs);
-                if !can_be_lvalue(&lhs) {
-                    let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
-                    print_error_at(lhs.span, &err_info);
-                }
-                if !can_assign(&lhs.ty, &rhs.ty) {
-                    let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
-                    &rhs.ty, &lhs.ty);
-                    print_error_at(lhs.span, &err_info);
-                }
-                // Cast rhs to match lhs when they are not struct type.
-                if !matches!(lhs.ty, Struct(..) | Union(..) | Tag(..) ) {
-                    rhs = cast(rhs, &lhs.ty);
-                }
-                let ty = lhs.ty.clone();
-                let content = ExprType::Assign(Box::new(lhs), Box::new(rhs));
-                ir::Expr{content, ty, span}
+                let result = gen_assign_ir_expr(lhs, rhs);
+                return result;
             }
             Neg(val) => {
                 let val = self.analyze_expr(val);
@@ -988,16 +971,18 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             }
             Ident(s) => {
-                let obj = if let Some(o) = self.scope_manager.resolve_object(s) {
-                    o.clone()
+                if let Some(o) = self.scope_manager.resolve_object(s) {
+                    let obj = o.clone();
+                    let ty = obj.ty.clone();
+                    let content = ExprType::Ident(obj);
+                    return ir::Expr{content, ty, span};
+                } else if let Some(number) = self.scope_manager.resolve_enum(s) {
+                    return gen_num_ir_expr(number, span);
                 } else {
-                    let err_info = format!("semantic error: symbol '{}' not found", s);
+                    let err_info = format!("semantic error: symbol '{}' doesn't exist or is nither a variable nor enum constant.", s);
                     print_error_at(expr.span, &err_info);
                     exit(1);
                 };
-                let ty = obj.ty.clone();
-                let content = ExprType::Ident(obj);
-                ir::Expr{content, ty, span}
             }
             RequestStructMember(struct_expr, member_name) => {
                 let mut struct_expr = self.analyze_expr(struct_expr);
@@ -1113,7 +1098,11 @@ impl ProgramAnalyzer {
                                 exit(1);
                             }
                         } else {
-                            print_error_at(ident.span, "This function name is unknown!");
+                            if self.scope_manager.contains_symbol(name) {
+                                print_error_at(ident.span, "This symbol is not a function name!");
+                            } else {
+                                print_error_at(ident.span, "This is an unknown symbol");
+                            }
                             exit(1);
                         }
                     }
@@ -1216,7 +1205,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
 
 fn is_scalar_type(ty: &Type) -> bool {
     matches!(ty, 
-        Bool | Char | Short | Int | Long | Pointer_To(..) | ArrayOf(..)
+        Enum | Bool | Char | Short | Int | Long | Pointer_To(..) | ArrayOf(..)
     )
 }
 
@@ -1243,7 +1232,7 @@ fn dimension_of(ty: &Type) -> i32 {
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
 pub fn is_integer(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Long | Type::Short | Type::Char | Type::Bool)
+    matches!(ty, Type::Int | Type::Long | Type::Short | Type::Char | Type::Bool | Type::Enum)
 }
 
 fn can_assign(left: &Type, mut right: &Type) -> bool {
@@ -1303,6 +1292,36 @@ pub fn is_array(t: &Type) -> bool {
         ArrayOf(_, _) => true,
         _ => false
     }
+}
+
+fn gen_assign_ir_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
+        if !can_be_lvalue(&lhs) {
+            let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
+            print_error_at(lhs.span, &err_info);
+        }
+        if !can_assign(&lhs.ty, &rhs.ty) {
+            let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
+            &rhs.ty, &lhs.ty);
+            print_error_at(lhs.span, &err_info);
+        }
+        // Cast rhs to match lhs when they are not struct type.
+        if !matches!(lhs.ty, Struct(..) | Union(..) | Tag(..) ) {
+            rhs = cast(rhs, &lhs.ty);
+        }
+        let ty = lhs.ty.clone();
+        let span = Span::merge(lhs.span, rhs.span);
+        let content = ir::ExprType::Assign(Box::new(lhs), Box::new(rhs));
+        ir::Expr{content, ty, span}
+}
+
+fn gen_num_ir_expr(number: u64, span: Span) -> ir::Expr {
+        let content = ir::ExprType::Natural_Number(number);
+        let ty = if number > i32::MAX as u64 {
+            Type::Long
+        } else {
+            Type::Int
+        };
+        ir::Expr {content, ty, span}
 }
 
 fn scale_expr(expr: ir::Expr, factor: usize, op: ir::OP) -> ir::Expr {

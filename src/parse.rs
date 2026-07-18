@@ -443,7 +443,7 @@ impl Parser {
 
     fn is_decl_spec(&self, token: &Token) -> bool {
         match &token.kind {
-            (Struct | Union | Int | Long | Short | Char | _Bool | Void | Typedef) => true,
+            (Struct | Union | LexEnum | Int | Long | Short | Char | _Bool | Void | Typedef) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -451,7 +451,7 @@ impl Parser {
 
     fn is_type_spec(&self, token: &Token) -> bool {
         match &token.kind {
-            (Struct | Union | Int | Long | Short | Char | _Bool | Void) => true,
+            (Struct | Union | LexEnum | Int | Long | Short | Char | _Bool | Void) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -554,7 +554,7 @@ impl Parser {
                 let error_message = error_token(self.cur_token(), "empty enum is invalid");
                 return Err(error_message);
             }
-            enum_specifier.enumerators = Some(self.parse_enumerator_list()?);
+            enum_specifier.enumerators = Some(enumerators);
         } else if enum_specifier.name.is_none() {
             let error_message = error_token(self.cur_token(), "parsing struct specifier error: expected a tag or member list");
             return Err(error_message);
@@ -600,7 +600,8 @@ impl Parser {
 
             let constant_expr = if self.cur_token().kind == Assignment {
                 self.bump();
-                Some(self.parse_expr(Lowest)?)
+                // Commas separate declarators, so leave a comma unconsumed here.
+                Some(self.parse_expr(precedence(&Comma))?)
             } else {
                 None
             };
