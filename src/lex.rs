@@ -35,7 +35,7 @@ pub enum TokenKind {
     // Keywords:
     Ret, If, Else, For, While,
     Sizeof, Typedef, Struct, LexEnum, Int, Char, _Bool, Union,
-    Long, Short, Void, _Atomic,
+    Long, Short, Void, _Atomic, Static,
 
     Eof,
 }
@@ -127,6 +127,7 @@ impl Lexer {
             ("void".to_string(), Void),
             ("_Atomic".to_string(), _Atomic),
             ("_Bool".to_string(), _Bool),
+            ("static".to_string(), Static),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),
@@ -276,8 +277,8 @@ impl Lexer {
                             // while this compiler just 0 extend the char from 8-bit to 32-bit: we first 0 extend
                             // it to 64-bit using "byte as u64" below, then at analyze phase we add type Int to it
                             // which effectively means (later in codegen phase) to extract the lower 32-bit and
-                            // interpret the lower 32-bit as signed integer and since 8-bit char literal fits in 32-bit
-                            // integer the extraction doesn't affect the char literal value, the result is a positive
+                            // interpret that lower 32-bit as signed integer and since 8-bit char literal fits in 32-bit
+                            // integer, the extraction doesn't affect the char literal value, the result is a positive
                             // number whose data type is 32-bit singed integer.
                             // So, in GCC, (-128=='\x80') evaluates to 1, in this compiler, (128=='\x80') evaluates to 1.
                             // I don't known whether this difference will cause any problem, we'll see.

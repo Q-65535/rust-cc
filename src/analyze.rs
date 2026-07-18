@@ -14,6 +14,7 @@ use crate::common::{self, *};
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Symbol_Attribute {
     pub is_typedef: bool,
+    pub is_static:  bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,8 +97,7 @@ pub struct Obj {
 pub enum Symbol {
     Object(Obj),
     Typedef(Type),
-    // @Rename
-    EnumSymbol(u64),
+    Enum(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -221,7 +221,7 @@ impl ScopeManager {
         for i in (0..=index).rev() {
             let current_scope = &self.scopes[i];
             if let Some(symbol) = current_scope.symbols.get(name) {
-                if let Symbol::EnumSymbol(number) = symbol {
+                if let Symbol::Enum(number) = symbol {
                     return Some(*number);
                 }
             }
@@ -232,7 +232,7 @@ impl ScopeManager {
     pub fn resolve_enum_at_current_scope(&self, name: &str) -> Option<u64> {
         let current_scope = &self.scopes[self.current_scope_index];
         if let Some(symbol) = current_scope.symbols.get(name) {
-            if let Symbol::EnumSymbol(number) = symbol {
+            if let Symbol::Enum(number) = symbol {
                 return Some(*number);
             }
         }
@@ -242,7 +242,7 @@ impl ScopeManager {
     pub fn add_enum(&mut self, name: &str, number: u64) {
         debug_assert!(!self.contains_symbol(name));
         let current_scope = &mut self.scopes[self.current_scope_index];
-        current_scope.symbols.insert(name.to_string(), Symbol::EnumSymbol(number));
+        current_scope.symbols.insert(name.to_string(), Symbol::Enum(number));
     }
 
     pub fn resolve_tag(&self, name: &str) -> Option<&Type> {
@@ -486,6 +486,7 @@ impl ProgramAnalyzer {
         self.current_local_var_offset = 0;
 
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
+        let is_static = symbol_attribute.is_static;
         let (final_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
         if let Func{return_type, ..} = &final_type {
             self.current_function_return_type = *return_type.clone();
@@ -508,7 +509,7 @@ impl ProgramAnalyzer {
         let mut stmts = self.analyze_block(&mut fun.items);
         let stack_size = self.current_local_var_offset;
         self.scope_manager.exit_current_scope();
-        ir::Function{name, function_type: final_type, params: analyzed_params, stmts, stack_size}
+        ir::Function{name, function_type: final_type, params: analyzed_params, stmts, stack_size, is_static}
     }
 
     fn analyze_block(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
@@ -595,6 +596,10 @@ impl ProgramAnalyzer {
                     var_attribute.is_typedef = true;
                     continue;
                 },
+                Decl_Spec::Static => {
+                    var_attribute.is_static = true;
+                    continue;
+                },
                 Decl_Spec::Typedef_Name(name) => {
                     let result = self.scope_manager.resolve_typedef_alias(name);
                     if let Some(ty) = result {
@@ -653,6 +658,10 @@ impl ProgramAnalyzer {
                 }
             };
         }
+        if var_attribute.is_static && var_attribute.is_typedef {
+            println!("typedef and static may not be used together");
+            exit(1);
+        }
         return (cur_type, var_attribute);
     }
 
@@ -709,7 +718,7 @@ impl ProgramAnalyzer {
         // Deal with scope stuff.
         if let Some(name) = &st.name {
             if let Some(members) = &st.members {
-                if let Some(_) = self.scope_manager.resolve_tag_at_current_scope(name) {
+                if self.scope_manager.resolve_tag_at_current_scope(name).is_some() {
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
@@ -728,7 +737,6 @@ impl ProgramAnalyzer {
             if let Some(the_type) = self.scope_manager.resolve_tag_at_current_scope(name) {
                 // If it has a tag name, and the tag name is already registerd at
                 // current scope, enumerator list shall not appear, otherwise it is an semantic error.
-                // @Refactor: Refactor all if let Some(_) to the following.
                 if enum_spec.enumerators.is_some() {
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
                     print_error_at(Span{start_index: 0, end_index: 0}, &err_info);

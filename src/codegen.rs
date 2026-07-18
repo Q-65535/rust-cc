@@ -123,7 +123,11 @@ impl Generator {
         let aligned_stack_size = align_to(stack_size, 16);
         // prologue
         emit!();
-        emit!("  .globl {}", fun.name);
+        if fun.is_static {
+            emit!("  .local {}", fun.name);
+        } else {
+            emit!("  .globl {}", fun.name);
+        }
         emit!("  .text");
         emit!("{}:", fun.name);
         emit!("  push %rbp");

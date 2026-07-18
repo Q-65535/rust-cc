@@ -49,10 +49,16 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
+    // @Smell: Maybe we can modify this one field into return type and param_types,
+    // since we already know this is a function, we are sure the type must be function type.
+    // So we store return type and param types seperately.
+    // @Smell: Ooh wait! why do we even need this field?! The function_type information
+    // is already registerd in the symbol table right?
     pub function_type: Type,
     pub params: Vec<Obj>,
     pub stmts: Vec<StmtType>,
     pub stack_size: usize,
+    pub is_static: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
