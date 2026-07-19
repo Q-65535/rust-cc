@@ -275,7 +275,7 @@ impl Generator {
                 load_according_to_type(&expr.ty);
             }
             AddrOf(expr) => self.gen_addr(expr),
-            Ident(obj) => {
+            Object(obj) => {
                 self.gen_addr(expr);
                 load_according_to_type(&expr.ty);
             }
@@ -289,7 +289,7 @@ impl Generator {
             }
             FunCall(func_ref, args) => {
                 match &func_ref.content {
-                    Ident(obj) => {
+                    Object(obj) => {
                         let mut nargs = 0;
                         for arg in args {
                             self.expr_gen(arg);
@@ -329,7 +329,7 @@ impl Generator {
 
     fn gen_addr(&mut self, expr: &Expr) {
         match &expr.content {
-            Ident(obj) => {
+            Object(obj) => {
                 if obj.is_global {
                     emit!("  lea {}(%rip), %rax", obj.name);
                 } else {

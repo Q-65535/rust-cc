@@ -342,7 +342,6 @@ impl ProgramAnalyzer {
 
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("semantic error: {} redeclared as a symbol", name);
-                // TODO: error handling
                 print_error_at(declarator.span, &err_info);
                 exit(1);
             }
@@ -806,7 +805,7 @@ impl ProgramAnalyzer {
     }
 
     fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {
-        let content = ir::ExprType::Ident(o.clone());
+        let content = ir::ExprType::Object(o.clone());
         let span = Span{start_index: 0, end_index: 0};
         ir::Expr{content, ty: o.ty.clone(), span}
     }
@@ -889,14 +888,10 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &mut expr.content {
-            Natural_Number(n) => {
-                gen_num_ir_expr(*n, span)
-            }
+            Natural_Number(n) => gen_num_ir_expr(*n, span),
             Binary(lhs, rhs, tokenKind) => {
                 let mut lhs = self.analyze_expr(lhs);
                 let mut rhs = self.analyze_expr(rhs);
-                // All the stuff in the following match branche cases are all about dealing with pointer arithmatic.
-                // @Smell?: Maybe we can move all the pointer arithmatic stuff to gen_new_binary_expr()?
                 match tokenKind {
                     Plus => {
                         if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
@@ -950,12 +945,15 @@ impl ProgramAnalyzer {
                             // We intentionally hardcode it to be long for convenience.
                             scaled_expr.ty = Type::Long;
                             return scaled_expr;
+                        } else {
+                            return gen_new_binary_expr(lhs, rhs, OP::Minus);
                         }
                     }
-                    _ => (),
+                    _ => {
+                        let op = tokenkind_to_op(tokenKind);
+                        return gen_new_binary_expr(lhs, rhs, op);
+                    }
                 }
-                let op = tokenkind_to_op(tokenKind);
-                return gen_new_binary_expr(lhs, rhs, op);
             }
             CommaExpression(lhs, rhs) => {
                 let rhs = self.analyze_expr(rhs);
@@ -992,7 +990,7 @@ impl ProgramAnalyzer {
                 if let Some(o) = self.scope_manager.resolve_object(s) {
                     let obj = o.clone();
                     let ty = obj.ty.clone();
-                    let content = ExprType::Ident(obj);
+                    let content = ExprType::Object(obj);
                     return ir::Expr{content, ty, span};
                 } else if let Some(number) = self.scope_manager.resolve_enum(s) {
                     return gen_num_ir_expr(number, span);
@@ -1170,7 +1168,7 @@ impl ProgramAnalyzer {
                 let global_decl = ir::Declaration{obj: global_obj.clone(), init_value: Some(value_in_bytes)};
                 self.global_decls.push(global_decl);
 
-                let unique_symbol = ExprType::Ident(global_obj);
+                let unique_symbol = ExprType::Object(global_obj);
                 ir::Expr{content: unique_symbol, ty, span}
             }
             Paren(inner) => self.analyze_expr(inner),
@@ -1273,7 +1271,7 @@ fn can_be_lvalue(expr: &ir::Expr) -> bool {
     use ir::ExprType;
     match &expr.content {
         ExprType::FunCall(_, _) => false,
-        ExprType::Ident(_) => {
+        ExprType::Object(_) => {
             if let ArrayOf(_, _) = expr.ty {
                 false
             } else {
