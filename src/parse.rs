@@ -159,6 +159,8 @@ pub enum ExprType {
     Natural_Number(u64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
+    PreIncrement(Box<Expr>),
+    PreDecrement(Box<Expr>),
     Neg(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
@@ -878,6 +880,7 @@ impl Parser {
         Ok(expr)
     }
 
+    // @Smell: Maybe we should add a associative parameter
     pub fn parse_expr(&mut self, precedence: Precedence) -> Result<Expr, String> {
         let mut expr = self.parse_prefix()?;
 
@@ -935,6 +938,20 @@ impl Parser {
             Plus => {
                 self.bump();
                 self.parse_prefix()
+            },
+            PlusPlus => {
+                self.bump();
+                let operand = self.parse_prefix()?;
+                let span = Span::merge(prefix_starting_token.span, operand.span);
+                let expr = Expr::new(PreIncrement(Box::new(operand)), span);
+                Ok(expr)
+            },
+            MinusMinus => {
+                self.bump();
+                let operand = self.parse_prefix()?;
+                let span = Span::merge(prefix_starting_token.span, operand.span);
+                let expr = Expr::new(PreDecrement(Box::new(operand)), span);
+                Ok(expr)
             },
             Minus => {
                 self.bump();
@@ -1126,7 +1143,9 @@ impl Parser {
 
         let assignment = self.expect(&Assignment)?;
         // Subtract one precedence level to make assignment right-associative.
-        let val = self.parse_expr(assignment.precedence() - 1)?;
+        // @Smell: If we can pass associativity when calling parse_expr(),
+        // we don't need to write this kinda ugly -1 precedence.
+        let val = self.parse_expr(precedence(&Assignment) - 1)?;
         let span = Span {
             start_index: lhs.span.start_index,
             end_index: val.span.end_index,

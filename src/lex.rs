@@ -12,6 +12,7 @@ pub enum TokenKind {
     Mul,
     Div,
     PlusAssignment, MinusAssignment, MulAssignment, DivAssignment,
+    PlusPlus, MinusMinus,
     LParen,
     RParen,
     LBrace,
@@ -91,7 +92,7 @@ pub fn precedence(kind: &TokenKind) -> Precedence {
     return match kind {
         Comma =>LV1,
         Assignment | PlusAssignment | MinusAssignment |
-        MulAssignment | DivAssignment => LV2,
+        MulAssignment | DivAssignment | PlusPlus | MinusMinus => LV2,
         Eq | Neq | LT | LE | GT | GE => LV3,
         Plus | Minus => LV4,
         Mul | Div => LV5,
@@ -194,6 +195,10 @@ impl Lexer {
                 ',' => tokens.push(Self::gen_token(Comma, start_index, 1)),
                 '+' => {
                     match self.peek_char() {
+                        Some('+') => {
+                            tokens.push(Self::gen_token(PlusPlus,  start_index, 2));
+                            self.next_char();
+                        }
                         Some('=') => {
                             tokens.push(Self::gen_token(PlusAssignment,  start_index, 2));
                             self.next_char();
@@ -229,6 +234,10 @@ impl Lexer {
                     match self.peek_char() {
                         Some('>') => {
                             tokens.push(Self::gen_token(Arrow,  start_index, 2));
+                            self.next_char();
+                        },
+                        Some('-') => {
+                            tokens.push(Self::gen_token(MinusMinus,  start_index, 2));
                             self.next_char();
                         },
                         Some('=') => {

@@ -971,6 +971,16 @@ impl ProgramAnalyzer {
                 let result = gen_assign_ir_expr(lhs, rhs);
                 return result;
             }
+            PreIncrement(operand) => {
+                let lhs = self.analyze_expr(operand);
+                let rhs = gen_num_ir_expr(1, span);
+                return self.to_assign(lhs, rhs, &Plus);
+            }
+            PreDecrement(operand) => {
+                let lhs = self.analyze_expr(operand);
+                let rhs = gen_num_ir_expr(1, span);
+                return self.to_assign(lhs, rhs, &Minus);
+            }
             Neg(val) => {
                 let val = self.analyze_expr(val);
                 let common_type = get_common_type(&Type::Int, &val.ty);
