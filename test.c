@@ -9,7 +9,6 @@ int main() {
     int foofoo = foo();
     printf("returned_value=%d\n", foofoo);
 
-    foofoo();
 
     struct zxc (*zxcp);
     typedef struct coord {
@@ -30,6 +29,15 @@ int main() {
     typedef int t;
     t var;
     printf("sizeof var is %ld\n", sizeof(var));
+
+    int arr[3];
+    arr[0] = 100;
+    arr[1] = 101;
+    arr[2] = 102;
+    int index = 0;
+
+    printf("arr element=%d\n", arr[index=2]);
+
 
     int i = 0;
     while (1) {

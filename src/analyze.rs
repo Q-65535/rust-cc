@@ -6,7 +6,7 @@ use crate::ir;
 use ExprType::*;
 use Struct_Or_Union::*;
 use StmtType::*;
-use TokenKind::{Plus, Minus, Mul, Div, Eq, Neq, LT, LE, GT, GE};
+use TokenKind::{Plus, Minus, Mul, Div, PlusAssignment, MinusAssignment, MulAssignment, DivAssignment, Eq, Neq, LT, LE, GT, GE};
 use BlockItem::*;
 use crate::SRC;
 use crate::common::{self, *};
@@ -949,6 +949,9 @@ impl ProgramAnalyzer {
                             return gen_new_binary_expr(lhs, rhs, OP::Minus);
                         }
                     }
+                    PlusAssignment | MinusAssignment | MulAssignment | DivAssignment => {
+                        return self.to_assign(lhs, rhs, tokenKind);
+                    }
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
                         return gen_new_binary_expr(lhs, rhs, op);
@@ -978,20 +981,15 @@ impl ProgramAnalyzer {
             }
             Deref(val) => {
                 let val = self.analyze_expr(val);
-                return gen_deref_expr(&val);
+                return gen_deref_expr(val);
             }
             AddrOf(val) => {
                 let val = self.analyze_expr(val);
-                let ty = pointer_to(&val.ty);
-                let content = ExprType::AddrOf(Box::new(val));
-                ir::Expr{content, ty, span}
+                gen_addr_of_expr(val)
             }
             Ident(s) => {
                 if let Some(o) = self.scope_manager.resolve_object(s) {
-                    let obj = o.clone();
-                    let ty = obj.ty.clone();
-                    let content = ExprType::Object(obj);
-                    return ir::Expr{content, ty, span};
+                    return self.gen_expr_from_obj(o);
                 } else if let Some(number) = self.scope_manager.resolve_enum(s) {
                     return gen_num_ir_expr(number, span);
                 } else {
@@ -1004,7 +1002,7 @@ impl ProgramAnalyzer {
                 let mut struct_expr = self.analyze_expr(struct_expr);
                 // Automatic dereference a->b to *(a).b
                 if matches!(struct_expr.ty, Pointer_To(_)) {
-                    struct_expr = gen_deref_expr(&struct_expr);
+                    struct_expr = gen_deref_expr(struct_expr);
                 }
 
                 let mut cur_ty = struct_expr.ty.clone();
@@ -1065,7 +1063,7 @@ impl ProgramAnalyzer {
                 let element_size = sizeof(&element_type);
                 let scaled = scale_expr(index, element_size, OP::Mul);
                 let pointer_arithmatic_expr = gen_new_binary_expr(base_position, scaled, OP::Plus);
-                return gen_deref_expr(&pointer_arithmatic_expr);
+                return gen_deref_expr(pointer_arithmatic_expr);
             },
             FunCall(ident, args) => {
                 match &ident.content {
@@ -1185,6 +1183,25 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             },
         }
+    }
+
+    // Convert `A op= B` to `tmp = &A, *tmp = *tmp op B`
+    // where tmp is a fresh pointer variable.
+    fn to_assign(&mut self, lhs: ir::Expr, rhs: ir::Expr, token_kind: &TokenKind) -> ir::Expr {
+        let span = Span::merge(lhs.span, rhs.span);
+        let lhs_addr_expr = gen_addr_of_expr(lhs);
+        let temp_obj = self.create_local_obj(&lhs_addr_expr.ty, "");
+        let temp_obj_expr = self.gen_expr_from_obj(&temp_obj);
+        let expr_1 = gen_assign_ir_expr(temp_obj_expr.clone(), lhs_addr_expr);
+
+        let deref_temp_expr = gen_deref_expr(temp_obj_expr);
+        let op = tokenkind_to_op(token_kind);
+        let op_expr = gen_new_binary_expr(deref_temp_expr.clone(), rhs, op);
+        let expr_2 = gen_assign_ir_expr(deref_temp_expr, op_expr);
+        let ty = expr_2.ty.clone();
+
+        let content = ir::ExprType::CommaExpression(Box::new(expr_1), Box::new(expr_2));
+        ir::Expr{content, ty, span}
     }
 
     fn resolve_type_name(&mut self, type_name: &Type_Name) -> Type {
@@ -1390,7 +1407,7 @@ fn gen_new_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Expr {
     }
 }
 
-fn gen_deref_expr(expr: &ir::Expr) -> ir::Expr {
+fn gen_deref_expr(expr: ir::Expr) -> ir::Expr {
     let new_expr_content = ir::ExprType::Deref(Box::new(expr.clone()));
     let dereferenced_type = match &expr.ty {
         Pointer_To(pointee_type) => {
@@ -1414,22 +1431,30 @@ fn gen_deref_expr(expr: &ir::Expr) -> ir::Expr {
     }
 }
 
+fn gen_addr_of_expr(expr: ir::Expr) -> ir::Expr {
+        let span = expr.span;
+        let ty = pointer_to(&expr.ty);
+        let content = ir::ExprType::AddrOf(Box::new(expr));
+        ir::Expr{content, ty, span}
+}
+
 fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
     use ir::OP;
     match tokenkind {
-        Plus => OP::Plus,
-        Minus => OP::Minus,
-        Mul => OP::Mul,
-        Div => OP::Div,
+        Plus | PlusAssignment => OP::Plus,
+        Minus | MinusAssignment => OP::Minus,
+        Mul | MulAssignment => OP::Mul,
+        Div | DivAssignment => OP::Div,
         Eq => OP::Compare(ir::CompareToken::Eq),
         Neq => OP::Compare(ir::CompareToken::Neq),
         LT => OP::Compare(ir::CompareToken::LT),
         LE => OP::Compare(ir::CompareToken::LE),
         GT => OP::Compare(ir::CompareToken::GT),
         GE => OP::Compare(ir::CompareToken::GE),
-        // @Cleanup: Binary operation should be defined at parsing phase.
-        // Currently the operation is just tokenkind in parsing.
-        _ => OP::Compare(ir::CompareToken::Eq),
+        _ => {
+            println!("unknown operator");
+            exit(1);
+        }
     }
 }
 

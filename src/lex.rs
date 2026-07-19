@@ -11,6 +11,7 @@ pub enum TokenKind {
     Minus,
     Mul,
     Div,
+    PlusAssignment, MinusAssignment, MulAssignment, DivAssignment,
     LParen,
     RParen,
     LBrace,
@@ -89,7 +90,8 @@ pub fn precedence(kind: &TokenKind) -> Precedence {
     use Precedence::{*};
     return match kind {
         Comma =>LV1,
-        Assignment => LV2,
+        Assignment | PlusAssignment | MinusAssignment |
+        MulAssignment | DivAssignment => LV2,
         Eq | Neq | LT | LE | GT | GE => LV3,
         Plus | Minus => LV4,
         Mul | Div => LV5,
@@ -190,7 +192,16 @@ impl Lexer {
                 '.' => tokens.push(Self::gen_token(Period, start_index, 1)),
                 ';' => tokens.push(Self::gen_token(Semicolon, start_index, 1)),
                 ',' => tokens.push(Self::gen_token(Comma, start_index, 1)),
-                '+' => tokens.push(Self::gen_token(Plus, start_index, 1)),
+                '+' => {
+                    match self.peek_char() {
+                        Some('=') => {
+                            tokens.push(Self::gen_token(PlusAssignment,  start_index, 2));
+                            self.next_char();
+                        },
+                        _ => tokens.push(Self::gen_token(Plus, start_index, 1)),
+                    }
+                    
+                }
                 '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),
                 ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
                 '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
@@ -198,7 +209,15 @@ impl Lexer {
                 '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
                 ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
                 '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
-                '*' => tokens.push(Self::gen_token(Mul, start_index, 1)),
+                '*' => {
+                    match self.peek_char() {
+                        Some('=') => {
+                            tokens.push(Self::gen_token(MulAssignment,  start_index, 2));
+                            self.next_char();
+                        }
+                        _ => tokens.push(Self::gen_token(Mul, start_index, 1)),
+                    }
+                }
                 '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),
                 ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
                 '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
@@ -212,6 +231,10 @@ impl Lexer {
                             tokens.push(Self::gen_token(Arrow,  start_index, 2));
                             self.next_char();
                         },
+                        Some('=') => {
+                            tokens.push(Self::gen_token(MinusAssignment,  start_index, 2));
+                            self.next_char();
+                        }
                         _ => tokens.push(Self::gen_token(Minus, start_index, 1)),
                     }
                 },
@@ -303,6 +326,10 @@ impl Lexer {
                 },
                 '/' => {
                     match self.peek_char() {
+                        Some('=') => {
+                            tokens.push(Self::gen_token(DivAssignment,  start_index, 2));
+                            self.next_char();
+                        }
                         Some('/') => {
                             // Line comment: skip until end of line.
                             self.next_char();

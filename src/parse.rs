@@ -883,7 +883,9 @@ impl Parser {
 
         while precedence < self.cur_token().precedence() {
             expr = match self.cur_token().kind {
-                Plus | Minus | Mul | Div | Eq | Neq | LT | LE | GT | GE => {
+                Plus | Minus | Mul | Div | PlusAssignment | MinusAssignment |
+                MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE
+                => {
                     self.parse_infix(expr)?
                 },
                 Comma => self.parse_comma_expression(expr)?,
