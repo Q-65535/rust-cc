@@ -25,7 +25,7 @@ pub struct IfStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
-    pub init: Option<Expr>,
+    pub init: Option<Box<BlockItem>>,
     pub cond: Option<Expr>,
     pub inc: Option<Expr>,
     pub then: Box<StmtType>,
@@ -826,9 +826,14 @@ impl Parser {
         let init = if self.eat(&Semicolon) {
             None
         } else {
-            let expr = self.parse_expr(Lowest)?;
-            self.expect(&Semicolon)?;
-            Some(expr)
+            let init_clause = if self.is_type_spec(self.cur_token())  {
+                let decl = self.parse_decl()?;
+                Box::new(Decl(decl))
+            } else {
+                let expr_stmt = Ex(self.parse_expr_stmt()?);
+                Box::new(Stmt(expr_stmt))
+            };
+            Some(init_clause)
         };
 
         let cond = if self.eat(&Semicolon) {

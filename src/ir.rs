@@ -7,7 +7,7 @@ pub enum StmtType {
     Return(Expr),
     Block(Vec<StmtType>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
-    For {init: Option<Expr>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>},
+    For {init: Vec<StmtType>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>},
 }
 use StmtType::*;
 
@@ -49,12 +49,6 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
-    // @Smell: Maybe we can modify this one field into return type and param_types,
-    // since we already know this is a function, we are sure the type must be function type.
-    // So we store return type and param types seperately.
-    // @Smell: Ooh wait! why do we even need this field?! The function_type information
-    // is already registerd in the symbol table right?
-    pub function_type: Type,
     pub params: Vec<Obj>,
     pub stmts: Vec<StmtType>,
     pub stack_size: usize,

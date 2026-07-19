@@ -134,15 +134,13 @@ impl Generator {
         emit!("  mov %rsp, %rbp");
         emit!("  sub ${}, %rsp", aligned_stack_size);
         emit!();
-        let mut i = 0;
-        for param in &fun.params {
+        for (i, param) in fun.params.iter().enumerate() {
             match sizeof(&param.ty) {
                 1 => emit!("  mov {}, -{}(%rbp)\n", self.argregs8[i],  fun.stack_size-param.offset),
                 2 => emit!("  mov {}, -{}(%rbp)\n", self.argregs16[i], fun.stack_size-param.offset),
                 4 => emit!("  mov {}, -{}(%rbp)\n", self.argregs32[i], fun.stack_size-param.offset),
                 _ => emit!("  mov {}, -{}(%rbp)\n", self.argregs64[i], fun.stack_size-param.offset),
             }
-            i += 1;
         }
         self.block_gen(&fun.stmts);
 
@@ -191,10 +189,10 @@ impl Generator {
         emit!(".L.end.{}:", c);
     }
 
-    fn for_gen(&mut self, init: &Option<ir::Expr>, cond: &Option<ir::Expr>, inc: &Option<ir::Expr>, then: &Box<ir::StmtType>) {
+    fn for_gen(&mut self, init: &Vec<StmtType>, cond: &Option<ir::Expr>, inc: &Option<ir::Expr>, then: &Box<ir::StmtType>) {
         let c = self.next_jump_label_count();
-        if let Some(expr) = init {
-            self.expr_gen(expr);
+        for init_stmt in init {
+            self.stmt_gen(init_stmt);
         }
         emit!(".L.begin.{}:", c);
         if let Some(expr) = cond {

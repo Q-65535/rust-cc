@@ -488,8 +488,13 @@ impl ProgramAnalyzer {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
         let is_static = symbol_attribute.is_static;
         let (final_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
-        if let Func{return_type, ..} = &final_type {
-            self.current_function_return_type = *return_type.clone();
+        if let Func{return_type, ..} = final_type {
+            self.current_function_return_type = *return_type;
+        } else {
+            let err_info = format!("compiler bug: we are analyzing a function definition,
+            but the data type resolved is not function!.");
+            print_error_at(fun.declarator.span, &err_info);
+            exit(1);
         }
         // We must enter scope before analyzing function
         // parameters since function parameters are also in
@@ -509,7 +514,7 @@ impl ProgramAnalyzer {
         let mut stmts = self.analyze_block(&mut fun.items);
         let stack_size = self.current_local_var_offset;
         self.scope_manager.exit_current_scope();
-        ir::Function{name, function_type: final_type, params: analyzed_params, stmts, stack_size, is_static}
+        ir::Function{name, params: analyzed_params, stmts, stack_size, is_static}
     }
 
     fn analyze_block(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
@@ -846,15 +851,20 @@ impl ProgramAnalyzer {
                 StmtType::If{cond, then, otherwise}
             }
             For(parse::ForStmt{init, cond, inc, then}) => {
-                // The init might be a declaration (not implemented yet!).
-                // The declared symbol must be in a new scope.
                 self.scope_manager.enter_new_scope();
-                let init = if let Some(init) = init {
-                    let init = self.analyze_expr(init);
-                    Some(init)
-                } else {
-                    None
-                };
+                let mut init_stmts = Vec::new();
+                if let Some(init) = init {
+                    match init.as_mut() {
+                        Decl(decl) => {
+                            let mut stmts_from_decl = self.analyze_decl(decl);
+                            init_stmts.append(&mut stmts_from_decl);
+                        }
+                        Stmt(expr_stmt) => {
+                            let analyzed_expr_stmt = self.analyze_stmt(expr_stmt);
+                            init_stmts.push(analyzed_expr_stmt);
+                        }
+                    }
+                }
                 let cond = if let Some(cond) = cond {
                     let cond = self.analyze_expr(cond);
                     Some(cond)
@@ -869,7 +879,7 @@ impl ProgramAnalyzer {
                 };
                 let then = Box::new(self.analyze_stmt(then));
                 self.scope_manager.exit_current_scope();
-                StmtType::For{init, cond, inc, then}
+                StmtType::For{init: init_stmts, cond, inc, then}
             }
         }
     }
