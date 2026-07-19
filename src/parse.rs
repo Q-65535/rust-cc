@@ -888,14 +888,16 @@ impl Parser {
             expr = match self.cur_token().kind {
                 Plus | Minus | Mul | Div | PlusAssignment | MinusAssignment |
                 MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE
-                => {
-                    self.parse_infix(expr)?
-                },
-                Comma => self.parse_comma_expression(expr)?,
-                LParen => self.parse_funcall(expr)?,
-                LSqureBracket => self.parse_array_indexing(expr)?,
-                Assignment => self.parse_assign(expr)?,
+                =>                self.parse_infix(expr)?,
+
+                PlusPlus =>       self.parse_post_increment(expr)?,
+                MinusMinus =>     self.parse_post_decrement(expr)?,
+                Comma =>          self.parse_comma_expression(expr)?,
+                LParen =>         self.parse_funcall(expr)?,
+                LSqureBracket =>  self.parse_array_indexing(expr)?,
+                Assignment =>     self.parse_assign(expr)?,
                 Period | Arrow => self.parse_request_struct_member(expr)?,
+
                 _ => {
                     return Err(error_token(
                         self.cur_token(),
@@ -904,7 +906,6 @@ impl Parser {
                 },
             };
         }
-
         Ok(expr)
     }
 
@@ -1175,6 +1176,14 @@ impl Parser {
                 Err(error_token(&member_token, &err_msg))
             },
         }
+    }
+
+    fn parse_post_increment(&mut self, lhs:Expr) -> Result<Expr, String> {
+        todo!();
+    }
+
+    fn parse_post_decrement(&mut self, lhs:Expr) -> Result<Expr, String> {
+        todo!();
     }
 
     fn parse_comma_expression(&mut self, lhs:Expr) -> Result<Expr, String> {
