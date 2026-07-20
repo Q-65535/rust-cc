@@ -976,10 +976,32 @@ impl ProgramAnalyzer {
                 let rhs = gen_num_ir_expr(1, span);
                 return self.to_assign(lhs, rhs, &Plus);
             }
+            // Convert A++ to `(typeof A)((A += 1) - 1)`
+            PostIncrement(operand) => {
+                let lhs = self.analyze_expr(operand);
+                let operand_type = lhs.ty.clone();
+                let rhs = gen_num_ir_expr(1, span);
+                let lhs = self.to_assign(lhs, rhs, &Plus);  // lhs = (A += 1)
+
+                let rhs = gen_num_ir_expr(1, span);
+                let expr = gen_new_binary_expr(lhs, rhs, OP::Minus); // expr = ((A + 1) - 1)
+                cast(expr, &operand_type)
+            }
             PreDecrement(operand) => {
                 let lhs = self.analyze_expr(operand);
                 let rhs = gen_num_ir_expr(1, span);
                 return self.to_assign(lhs, rhs, &Minus);
+            }
+            // Convert A-- to `(typeof A)((A -= 1) + 1)`
+            PostDecrement(operand) => {
+                let lhs = self.analyze_expr(operand);
+                let operand_type = lhs.ty.clone();
+                let rhs = gen_num_ir_expr(1, span);
+                let lhs = self.to_assign(lhs, rhs, &Minus);  // lhs = (A -= 1)
+
+                let rhs = gen_num_ir_expr(1, span);
+                let expr = gen_new_binary_expr(lhs, rhs, OP::Plus); // expr = ((A -= 1) + 1)
+                cast(expr, &operand_type)
             }
             Neg(val) => {
                 let val = self.analyze_expr(val);

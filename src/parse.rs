@@ -160,6 +160,8 @@ pub enum ExprType {
     Assign(Box<Expr>, Box<Expr>),
     PreIncrement(Box<Expr>),
     PreDecrement(Box<Expr>),
+    PostIncrement(Box<Expr>),
+    PostDecrement(Box<Expr>),
     Neg(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
@@ -1230,12 +1232,18 @@ impl Parser {
         }
     }
 
-    fn parse_post_increment(&mut self, lhs:Expr) -> Result<Expr, String> {
-        todo!();
+    fn parse_post_increment(&mut self, expr:Expr) -> Result<Expr, String> {
+        let span = expr.span;
+        let content = PostIncrement(Box::new(expr));
+        self.bump();
+        Ok(Expr::new(content, span))
     }
 
-    fn parse_post_decrement(&mut self, lhs:Expr) -> Result<Expr, String> {
-        todo!();
+    fn parse_post_decrement(&mut self, expr:Expr) -> Result<Expr, String> {
+        let span = expr.span;
+        let content = PostDecrement(Box::new(expr));
+        self.bump();
+        Ok(Expr::new(content, span))
     }
 
     fn parse_comma_expression(&mut self, lhs:Expr) -> Result<Expr, String> {
