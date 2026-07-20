@@ -336,28 +336,87 @@ impl Lexer {
         tokens
     }
 
+    // @Refactor: This functions works, but it needs some cleanup work.
     fn read_int(&mut self) -> u64 {
         debug_assert!(matches!(self.cur_char(), '0'..='9'));
         let c = self.cur_char();
-        let mut len: usize = 1;
         let start_index = self.index;
-        loop {
-            match self.peek_char() {
-                Some(c) => {
-                    if c <= '9' && c >= '0' {
-                        len += 1;
-                        self.next_char();
-                    } else {
-                        break;
-                    }
-                },
-                None => {
+        let mut base = 10;
+        let mut len: usize = 1;
+        if c == '0' {
+            base = 8;
+            if self.peek_char() == Some('b') || self.peek_char() == Some('B') {
+                base = 2;
+                self.next_char();
+                self.next_char();
+                len += 1;
+            }
+            if self.peek_char() == Some('x') || self.peek_char() == Some('X') {
+                base = 16;
+                self.next_char();
+                self.next_char();
+                len += 1;
+            }
+        }
+
+        let mut result: u64 = 0;
+        if base == 10 {
+            while matches!(self.cur_char(), '0'..='9') {
+                let cur_digit = self.cur_char() as u64 - '0' as u64;
+                result *= base;
+                result += cur_digit;
+                if matches!(self.peek_char().unwrap(), '0'..='9') {
+                    self.next_char();
+                } else {
                     break;
                 }
             }
         }
-        let integer_string: &String = &self.src[start_index..start_index+len].iter().collect(); 
-        return integer_string.parse().unwrap();
+        if base == 8 {
+            while matches!(self.cur_char(), '0'..='7') {
+                let cur_digit = self.cur_char() as u64 - '0' as u64;
+                result *= base;
+                result += cur_digit;
+                if matches!(self.peek_char().unwrap(), '0'..='7') {
+                    self.next_char();
+                } else {
+                    break;
+                }
+            }
+        }
+        if base == 2 {
+            while matches!(self.cur_char(), '0'..='1') {
+                let cur_digit = self.cur_char() as u64 - '0' as u64;
+                result *= base;
+                result += cur_digit;
+                if matches!(self.peek_char().unwrap(), '0'..='1') {
+                    self.next_char();
+                } else {
+                    break;
+                }
+            }
+        }
+        if base == 16 {
+            while matches!(self.cur_char(), '0'..='9' | 'a'..='f' | 'A'..='F') {
+                let mut cur_digit: u64 = 0;
+                if matches!(self.cur_char(), '0'..='9') {
+                    cur_digit = self.cur_char() as u64 - '0' as u64;
+                } else if matches!(self.cur_char(), 'a'..='f') {
+                    cur_digit = self.cur_char() as u64 - 'a' as u64 + 10;
+                } else if matches!(self.cur_char(), 'A'..='F') {
+                    cur_digit = self.cur_char() as u64 - 'A' as u64 + 10;
+                }
+                result *= base;
+                result += cur_digit;
+
+                if matches!(self.peek_char().unwrap(), '0'..='9' | 'a'..='f' | 'A'..='F') {
+                    self.next_char();
+                } else {
+                    break;
+                }
+            }
+        }
+        return result;
     }
 
     fn read_char_literal(&mut self) -> Result<u8, String> {
