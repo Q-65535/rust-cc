@@ -574,8 +574,8 @@ impl ProgramAnalyzer {
             if let Some(expr) = &mut declarator.init_expr {
                 let lhs = self.gen_expr_from_obj(&obj);
                 let rhs = self.analyze_expr(expr);
-                let assignment_ir_expr = gen_assign_ir_expr(lhs, rhs);
-                let expr_stmt = ir::StmtType::Ex(assignment_ir_expr);
+                let assignment_expr = gen_assign_expr(lhs, rhs);
+                let expr_stmt = ir::StmtType::Ex(assignment_expr);
                 stmts.push(expr_stmt);
             }
         }
@@ -888,73 +888,18 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &mut expr.content {
-            Natural_Number(n) => gen_num_ir_expr(*n, span),
+            Natural_Number(n) => gen_num_expr(*n, span),
             Binary(lhs, rhs, tokenKind) => {
-                let mut lhs = self.analyze_expr(lhs);
-                let mut rhs = self.analyze_expr(rhs);
+                let lhs = self.analyze_expr(lhs);
+                let rhs = self.analyze_expr(rhs);
                 match tokenKind {
-                    Plus => {
-                        if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
-                            println!();
-                            print_error_at(lhs.span, "error: both lhs and rhs are of ptr type");
-                            print_error_at(rhs.span, "error: both lhs and rhs are of ptr type");
-                        }
-                        if lhs.is_integer() && rhs.is_pointer_or_array() {
-                            swap(&mut lhs, &mut rhs);
-                        }
-                        if lhs.is_pointer_or_array() && rhs.is_integer() {
-                            let mut scale: usize;
-                            match &lhs.ty {
-                                Pointer_To(pointee_type) => scale = sizeof(pointee_type),
-                                ArrayOf(element_type, _) => scale = sizeof(element_type),
-                                _ => exit(1),
-                            }
-                            rhs = scale_expr(rhs, scale, OP::Mul);
-                        }
-                        return gen_new_binary_expr(lhs, rhs, OP::Plus);
-                    }
-                    Minus => {
-                        if lhs.is_integer() && rhs.is_pointer_or_array() {
-                            print_error_at(rhs.span, "error: integer - ptr");
-                        }
-                        if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
-                            let mut scale: usize;
-                            match &lhs.ty {
-                                Pointer_To(pointee_type) => scale = sizeof(pointee_type),
-                                ArrayOf(element_type, _) => scale = sizeof(element_type),
-                                _ => exit(1),
-                            }
-                            rhs = scale_expr(rhs, scale, OP::Mul);
-                            return gen_new_binary_expr(lhs, rhs, OP::Minus);
-                        } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
-                            let mut basic_ty = lhs.ty.clone();
-							if let ArrayOf(basic, _) = &lhs.ty {
-								basic_ty = *basic.clone();
-							} else if let Pointer_To(basic) = &lhs.ty {
-								basic_ty = *basic.clone();
-                            }
-							if lhs.ty != rhs.ty {
-								print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
-							}
-                            // The result of "pointer - pointer" is the gap (in terms of number of elements) between them.
-                            // The result is a singed number.
-                            let expr = gen_new_binary_expr(lhs, rhs, OP::Minus);
-                            let scale = sizeof(&basic_ty);
-                            let mut scaled_expr = scale_expr(expr, scale, OP::Div);
-                            // @Note: In reality, the data type of the result is implementation dependent.
-                            // We intentionally hardcode it to be long for convenience.
-                            scaled_expr.ty = Type::Long;
-                            return scaled_expr;
-                        } else {
-                            return gen_new_binary_expr(lhs, rhs, OP::Minus);
-                        }
-                    }
-                    PlusAssignment | MinusAssignment | MulAssignment | DivAssignment => {
-                        return self.to_assign(lhs, rhs, tokenKind);
-                    }
+                    PlusAssignment => self.to_assign(lhs, rhs, OP::Plus),
+                    MinusAssignment => self.to_assign(lhs, rhs, OP::Minus),
+                    MulAssignment => self.to_assign(lhs, rhs, OP::Mul),
+                    DivAssignment => self.to_assign(lhs, rhs, OP::Div),
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
-                        return gen_new_binary_expr(lhs, rhs, op);
+                        gen_binary_expr(lhs, rhs, op)
                     }
                 }
             }
@@ -968,39 +913,39 @@ impl ProgramAnalyzer {
             Assign(lhs, rhs) => {
                 let mut rhs = self.analyze_expr(rhs);
                 let lhs = self.analyze_expr(lhs);
-                let result = gen_assign_ir_expr(lhs, rhs);
+                let result = gen_assign_expr(lhs, rhs);
                 return result;
             }
             PreIncrement(operand) => {
                 let lhs = self.analyze_expr(operand);
-                let rhs = gen_num_ir_expr(1, span);
-                return self.to_assign(lhs, rhs, &Plus);
+                let rhs = gen_num_expr(1, span);
+                return self.to_assign(lhs, rhs, OP::Plus);
             }
             // Convert A++ to `(typeof A)((A += 1) - 1)`
             PostIncrement(operand) => {
                 let lhs = self.analyze_expr(operand);
                 let operand_type = lhs.ty.clone();
-                let rhs = gen_num_ir_expr(1, span);
-                let lhs = self.to_assign(lhs, rhs, &Plus);  // lhs = (A += 1)
+                let rhs = gen_num_expr(1, span);
+                let lhs = self.to_assign(lhs, rhs, OP::Plus);  // lhs = (A += 1)
 
-                let rhs = gen_num_ir_expr(1, span);
-                let expr = gen_new_binary_expr(lhs, rhs, OP::Minus); // expr = ((A + 1) - 1)
+                let rhs = gen_num_expr(1, span);
+                let expr = gen_binary_expr(lhs, rhs, OP::Minus); // expr = ((A + 1) - 1)
                 cast(expr, &operand_type)
             }
             PreDecrement(operand) => {
                 let lhs = self.analyze_expr(operand);
-                let rhs = gen_num_ir_expr(1, span);
-                return self.to_assign(lhs, rhs, &Minus);
+                let rhs = gen_num_expr(1, span);
+                return self.to_assign(lhs, rhs, OP::Minus);
             }
             // Convert A-- to `(typeof A)((A -= 1) + 1)`
             PostDecrement(operand) => {
                 let lhs = self.analyze_expr(operand);
                 let operand_type = lhs.ty.clone();
-                let rhs = gen_num_ir_expr(1, span);
-                let lhs = self.to_assign(lhs, rhs, &Minus);  // lhs = (A -= 1)
+                let rhs = gen_num_expr(1, span);
+                let lhs = self.to_assign(lhs, rhs, OP::Minus);  // lhs = (A -= 1)
 
-                let rhs = gen_num_ir_expr(1, span);
-                let expr = gen_new_binary_expr(lhs, rhs, OP::Plus); // expr = ((A -= 1) + 1)
+                let rhs = gen_num_expr(1, span);
+                let expr = gen_binary_expr(lhs, rhs, OP::Plus); // expr = ((A -= 1) + 1)
                 cast(expr, &operand_type)
             }
             Neg(val) => {
@@ -1023,7 +968,7 @@ impl ProgramAnalyzer {
                 if let Some(o) = self.scope_manager.resolve_object(s) {
                     return self.gen_expr_from_obj(o);
                 } else if let Some(number) = self.scope_manager.resolve_enum(s) {
-                    return gen_num_ir_expr(number, span);
+                    return gen_num_expr(number, span);
                 } else {
                     let err_info = format!("semantic error: symbol '{}' doesn't exist or is nither a variable nor enum constant.", s);
                     print_error_at(expr.span, &err_info);
@@ -1094,7 +1039,7 @@ impl ProgramAnalyzer {
                 };
                 let element_size = sizeof(&element_type);
                 let scaled = scale_expr(index, element_size, OP::Mul);
-                let pointer_arithmatic_expr = gen_new_binary_expr(base_position, scaled, OP::Plus);
+                let pointer_arithmatic_expr = gen_promoted_binary_expr(base_position, scaled, OP::Plus);
                 return gen_deref_expr(pointer_arithmatic_expr);
             },
             FunCall(ident, args) => {
@@ -1219,17 +1164,16 @@ impl ProgramAnalyzer {
 
     // Convert `A op= B` to `tmp = &A, *tmp = *tmp op B`
     // where tmp is a fresh pointer variable.
-    fn to_assign(&mut self, lhs: ir::Expr, rhs: ir::Expr, token_kind: &TokenKind) -> ir::Expr {
+    fn to_assign(&mut self, lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Expr {
         let span = Span::merge(lhs.span, rhs.span);
         let lhs_addr_expr = gen_addr_of_expr(lhs);
         let temp_obj = self.create_local_obj(&lhs_addr_expr.ty, "");
         let temp_obj_expr = self.gen_expr_from_obj(&temp_obj);
-        let expr_1 = gen_assign_ir_expr(temp_obj_expr.clone(), lhs_addr_expr);
+        let expr_1 = gen_assign_expr(temp_obj_expr.clone(), lhs_addr_expr); // tmp = &A
 
         let deref_temp_expr = gen_deref_expr(temp_obj_expr);
-        let op = tokenkind_to_op(token_kind);
-        let op_expr = gen_new_binary_expr(deref_temp_expr.clone(), rhs, op);
-        let expr_2 = gen_assign_ir_expr(deref_temp_expr, op_expr);
+        let op_expr = gen_binary_expr(deref_temp_expr.clone(), rhs, op); // *tmp op B
+        let expr_2 = gen_assign_expr(deref_temp_expr, op_expr); // *tmp = *tmp op B
         let ty = expr_2.ty.clone();
 
         let content = ir::ExprType::CommaExpression(Box::new(expr_1), Box::new(expr_2));
@@ -1359,7 +1303,7 @@ pub fn is_array(t: &Type) -> bool {
     }
 }
 
-fn gen_assign_ir_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
+fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
         if !can_be_lvalue(&lhs) {
             let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
             print_error_at(lhs.span, &err_info);
@@ -1379,7 +1323,7 @@ fn gen_assign_ir_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
         ir::Expr{content, ty, span}
 }
 
-fn gen_num_ir_expr(number: u64, span: Span) -> ir::Expr {
+fn gen_num_expr(number: u64, span: Span) -> ir::Expr {
         let content = ir::ExprType::Natural_Number(number);
         let ty = if number > i32::MAX as u64 {
             Type::Long
@@ -1398,7 +1342,69 @@ fn scale_expr(expr: ir::Expr, factor: usize, op: ir::OP) -> ir::Expr {
         ty: Type::Long,
         span: expr.span,
     };
-    return gen_new_binary_expr(expr, factor_expr, op);
+    return gen_promoted_binary_expr(expr, factor_expr, op);
+}
+
+fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr {
+    use ir::OP;
+    match op {
+        OP::Plus => {
+            if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
+                println!();
+                print_error_at(lhs.span, "error: both lhs and rhs are of ptr type");
+                print_error_at(rhs.span, "error: both lhs and rhs are of ptr type");
+            }
+            if lhs.is_integer() && rhs.is_pointer_or_array() {
+                swap(&mut lhs, &mut rhs);
+            }
+            if lhs.is_pointer_or_array() && rhs.is_integer() {
+                let scale = match &lhs.ty {
+                    Pointer_To(pointee_type) => sizeof(pointee_type),
+                    ArrayOf(element_type, _) => sizeof(element_type),
+                    _ => exit(1),
+                };
+                rhs = scale_expr(rhs, scale, ir::OP::Mul);
+            }
+            gen_promoted_binary_expr(lhs, rhs, ir::OP::Plus)
+        }
+        OP::Minus => {
+            if lhs.is_integer() && rhs.is_pointer_or_array() {
+                print_error_at(rhs.span, "error: integer - ptr");
+            }
+            if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
+                let scale = match &lhs.ty {
+                    Pointer_To(pointee_type) => sizeof(pointee_type),
+                    ArrayOf(element_type, _) => sizeof(element_type),
+                    _ => exit(1),
+                };
+                rhs = scale_expr(rhs, scale, ir::OP::Mul);
+                gen_promoted_binary_expr(lhs, rhs, ir::OP::Minus)
+            } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
+                let basic_ty = match &lhs.ty {
+                    ArrayOf(basic, _) => *basic.clone(),
+                    Pointer_To(basic) => *basic.clone(),
+                    _ => exit(1),
+                };
+                if lhs.ty != rhs.ty {
+                    print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
+                }
+                // The result of "pointer - pointer" is the gap between them,
+                // measured in elements.
+                let expr = gen_promoted_binary_expr(lhs, rhs, ir::OP::Minus);
+                let scale = sizeof(&basic_ty);
+                let mut scaled_expr = scale_expr(expr, scale, ir::OP::Div);
+                // @Note: In reality, the data type of the result is implementation dependent.
+                // We intentionally hardcode it to be long for convenience.
+                scaled_expr.ty = Type::Long;
+                scaled_expr
+            } else {
+                gen_promoted_binary_expr(lhs, rhs, ir::OP::Minus)
+            }
+        }
+        _ => {
+            gen_promoted_binary_expr(lhs, rhs, op)
+        }
+    }
 }
 
 fn usual_arithmatic_conversion(lhs: ir::Expr, rhs: ir::Expr) -> (ir::Expr, ir::Expr) {
@@ -1421,7 +1427,7 @@ fn get_common_type(lhs_type: &Type, rhs_type: &Type) -> Type {
     return Type::Int;
 }
 
-fn gen_new_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Expr {
+fn gen_promoted_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Expr {
     let span = Span{
         start_index: lhs.span.start_index,
         end_index: rhs.span.end_index,

@@ -43,6 +43,8 @@ int main() {
   ASSERT(3, ({ int i=6; i/=2; i; }));
   ASSERT(3, ({ int i=6; i/=2; }));
 
+  ASSERT(2, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a; p+=2; *p; }));
+  ASSERT(0, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+2; p-=2; *p; }));
 
   ASSERT(3, ({ int i=2; ++i; }));
   ASSERT(2, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; ++*p; }));
