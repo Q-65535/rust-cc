@@ -1,6 +1,5 @@
 use colored::*;
 use crate::lex::*;
-use crate::lex::Precedence::{self, *};
 use crate::lex::TokenKind::{self, *};
 use ExprType::*;
 use crate::SRC;
@@ -179,6 +178,58 @@ pub enum ExprType {
     // should unwrap it.
     Paren(Box<Expr>),
     StmtExpr(Vec<BlockItem>),
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
+pub enum Precedence {
+    Lowest = 0,
+    Comma,
+    Assignment,
+    Conditional,
+    Logical_OR,
+    Logical_AND,
+    Bitwise_OR,
+    Bitwise_XOR,
+    Bitwise_AND,
+    Equality,
+    Relational,
+    Shift,
+    Additive,
+    Multiplicative,
+    Prefix_Or_Cast,
+    Postfix,
+}
+use Precedence::*;
+
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
+pub enum Associativity {
+    Left_To_Right,
+    Right_To_Left,
+}
+use Associativity::*;
+
+fn get_associativity(p: Precedence) -> Associativity {
+    use Precedence::*;
+    match p {
+        Assignment | Conditional | Prefix_Or_Cast => Right_To_Left,
+        _ => Left_To_Right,
+    }
+}
+
+fn token_as_infix_or_prefix_operator_kind(token_kind: &TokenKind) -> Precedence {
+    use Precedence::*;
+    return match token_kind {
+        LexComma => Comma,
+        LexAssignment | PlusAssignment | MinusAssignment | MulAssignment | DivAssignment => Assignment,
+        Eq | Neq => Equality,
+        LT | LE | GT | GE => Relational,
+        Plus | Minus => Additive,
+        Mul | Div => Multiplicative,
+        Period | Arrow | LParen | LSqureBracket | PlusPlus | MinusMinus => Postfix,
+
+        _ => Lowest,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -435,7 +486,7 @@ impl Parser {
                 }
                 declarators.push(declarator);
 
-                if !self.eat(&Comma) {
+                if !self.eat(&LexComma) {
                     break;
                 }
             }
@@ -580,7 +631,7 @@ impl Parser {
                 let declarator = self.parse_declarator()?;
                 let m = Member{decl_spec: decl_spec.clone(), declarator};
                 members.push(m);
-                if !self.eat(&Comma) {
+                if !self.eat(&LexComma) {
                     break;
                 }
             }
@@ -606,10 +657,10 @@ impl Parser {
             };
             self.bump();
 
-            let constant_expr = if self.cur_token().kind == Assignment {
+            let constant_expr = if self.cur_token().kind == LexAssignment {
                 self.bump();
                 // Commas separate declarators, so leave a comma unconsumed here.
-                Some(self.parse_expr(precedence(&Comma))?)
+                Some(self.parse_expr(Comma)?)
             } else {
                 None
             };
@@ -619,7 +670,7 @@ impl Parser {
             if self.at(&RBrace) {
                 break;
             } else {
-                self.expect(&Comma);
+                self.expect(&LexComma);
             }
         }
         self.expect(&RBrace)?;
@@ -673,9 +724,9 @@ impl Parser {
 
     fn parse_init_declarator(&mut self) -> Result<Declarator, String> {
         let mut declarator = self.parse_declarator()?;
-        if self.eat(&Assignment) {
+        if self.eat(&LexAssignment) {
             // Commas separate declarators, so leave a comma unconsumed here.
-            declarator.init_expr = Some(self.parse_expr(precedence(&Comma))?);
+            declarator.init_expr = Some(self.parse_expr(Comma)?);
         }
         Ok(declarator)
     }
@@ -714,7 +765,7 @@ impl Parser {
                     let param = Parameter{decl_spec, declarator};
                     params.push(param);
 
-                    if !self.eat(&Comma) {
+                    if !self.eat(&LexComma) {
                         break;
                     }
                 }
@@ -881,10 +932,18 @@ impl Parser {
     }
 
     // @Smell: Maybe we should add a associative parameter
-    pub fn parse_expr(&mut self, precedence: Precedence) -> Result<Expr, String> {
+    pub fn parse_expr(&mut self, passed_precedence: Precedence) -> Result<Expr, String> {
         let mut expr = self.parse_prefix()?;
 
-        while precedence < self.cur_token().precedence() {
+        while passed_precedence < token_as_infix_or_prefix_operator_kind(&self.cur_token().kind) {
+        // loop {
+        //     cur_precedence = token_as_infix_or_prefix_operator_kind(&self.cur_token().kind);
+        //     let should_break = match asso {
+        //         Left_To_Right => cur_precedence <= passed_precedence,
+        //         Right_To_Left => cur_precedence < passed_precedence,
+        //     };
+        //     if should_break {break;}
+
             expr = match self.cur_token().kind {
                 Plus | Minus | Mul | Div | PlusAssignment | MinusAssignment |
                 MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE
@@ -892,10 +951,10 @@ impl Parser {
 
                 PlusPlus =>       self.parse_post_increment(expr)?,
                 MinusMinus =>     self.parse_post_decrement(expr)?,
-                Comma =>          self.parse_comma_expression(expr)?,
+                LexComma =>          self.parse_comma_expression(expr)?,
                 LParen =>         self.parse_funcall(expr)?,
                 LSqureBracket =>  self.parse_array_indexing(expr)?,
-                Assignment =>     self.parse_assign(expr)?,
+                LexAssignment =>     self.parse_assign(expr)?,
                 Period | Arrow => self.parse_request_struct_member(expr)?,
 
                 _ => {
@@ -911,7 +970,7 @@ impl Parser {
 
     fn parse_paren(&mut self) -> Result<Expr, String> {
         let open_paren = self.expect(&LParen)?;
-        let inner = self.parse_expr(Precedence::Lowest)?;
+        let inner = self.parse_expr(Lowest)?;
         let close_paren = self.expect(&RParen)?;
         // Wrap, don't mutate: the inner expression keeps its own span; the Paren
         // node carries the wider span that includes the parentheses.
@@ -938,25 +997,25 @@ impl Parser {
             Lex_Natural_Num(n) => Ok(self.parse_natural_number(n)),
             Plus => {
                 self.bump();
-                self.parse_prefix()
+                self.parse_expr(Prefix_Or_Cast)
             },
             PlusPlus => {
                 self.bump();
-                let operand = self.parse_prefix()?;
+                let operand = self.parse_expr(Prefix_Or_Cast)?;
                 let span = Span::merge(prefix_starting_token.span, operand.span);
                 let expr = Expr::new(PreIncrement(Box::new(operand)), span);
                 Ok(expr)
             },
             MinusMinus => {
                 self.bump();
-                let operand = self.parse_prefix()?;
+                let operand = self.parse_expr(Prefix_Or_Cast)?;
                 let span = Span::merge(prefix_starting_token.span, operand.span);
                 let expr = Expr::new(PreDecrement(Box::new(operand)), span);
                 Ok(expr)
             },
             Minus => {
                 self.bump();
-                let operand = self.parse_prefix()?;
+                let operand = self.parse_expr(Prefix_Or_Cast)?;
                 let span = Span{
                     start_index: prefix_starting_token.span.start_index,
                     end_index: operand.span.end_index,
@@ -966,7 +1025,7 @@ impl Parser {
             },
             Mul => {
                 self.bump();
-                let operand = self.parse_expr(precedence(&TokenKind::Asterisk))?;
+                let operand = self.parse_expr(Prefix_Or_Cast)?;
                 let span = Span{
                     start_index: prefix_starting_token.span.start_index,
                     end_index: operand.span.end_index,
@@ -976,7 +1035,7 @@ impl Parser {
             },
             Ampersand => {
                 self.bump();
-                let operand = self.parse_prefix()?;
+                let operand = self.parse_expr(Prefix_Or_Cast)?;
                 let span = Span{
                     start_index: prefix_starting_token.span.start_index,
                     end_index: operand.span.end_index,
@@ -993,7 +1052,7 @@ impl Parser {
                     let close_paren = self.expect(&RParen)?;
                     (Sizeof_Type_Name(type_name), close_paren.span.end_index)
                 } else {
-                    let operand = self.parse_prefix()?;
+                    let operand = self.parse_expr(Prefix_Or_Cast)?;
                     let end_index = operand.span.end_index;
                     (Sizeof_Expr(Box::new(operand)), end_index)
                 };
@@ -1015,7 +1074,7 @@ impl Parser {
         let starting_token = self.bump();
         let type_name = self.parse_type_name()?;
         self.expect(&RParen)?;
-        let expr = self.parse_expr(precedence(&TokenKind::LexCast))?;
+        let expr = self.parse_expr(Prefix_Or_Cast)?;
         let span = Span{
             start_index: starting_token.span.start_index,
             end_index: expr.span.end_index,
@@ -1124,8 +1183,8 @@ impl Parser {
 
     fn parse_infix(&mut self, lhs: Expr) -> Result<Expr, String> {
         let infix_operator = self.bump().kind;
-        let p = precedence(&infix_operator);
-        let rhs = self.parse_expr(p)?;
+        let precedence = token_as_infix_or_prefix_operator_kind(&infix_operator);
+        let rhs = self.parse_expr(precedence)?;
         let span = Span {
             start_index: lhs.span.start_index,
             end_index: rhs.span.end_index,
@@ -1142,11 +1201,16 @@ impl Parser {
             return Err(syntax_error(lhs.span, "definitely not a lvalue name"));
         }
 
-        let assignment = self.expect(&Assignment)?;
+        let assignment = self.expect(&LexAssignment)?;
         // Subtract one precedence level to make assignment right-associative.
         // @Smell: If we can pass associativity when calling parse_expr(),
         // we don't need to write this kinda ugly -1 precedence.
-        let val = self.parse_expr(precedence(&Assignment) - 1)?;
+        // @Fix: Pass associativity!!!!
+        // @Fix: Pass associativity!!!!
+        // @Fix: Pass associativity!!!!
+        // @Fix: Pass associativity!!!!
+        // @Fix: Pass associativity!!!!
+        let val = self.parse_expr(Comma)?;
         let span = Span {
             start_index: lhs.span.start_index,
             end_index: val.span.end_index,
@@ -1188,7 +1252,7 @@ impl Parser {
 
     fn parse_comma_expression(&mut self, lhs:Expr) -> Result<Expr, String> {
         let start_index = lhs.span.start_index;
-        self.expect(&Comma)?;
+        self.expect(&LexComma)?;
         let rhs = self.parse_expr(Lowest)?;
         let end_index = rhs.span.end_index;
         let span = Span {start_index, end_index};
@@ -1229,10 +1293,10 @@ impl Parser {
         loop {
             // The comma here is an argument separator, not a comma operator.
             // Passing comma precedence leaves the separator unconsumed.
-            let expr = self.parse_expr(precedence(&Comma))?;
+            let expr = self.parse_expr(Comma)?;
             args.push(expr);
 
-            if self.eat(&Comma) {
+            if self.eat(&LexComma) {
                 continue;
             }
 

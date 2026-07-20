@@ -38,9 +38,8 @@ int main() {
 
     printf("arr element=%d\n", arr[index=2]);
 
-    // @CompilerBug: Uncomment this to see a compile error report (which shouldn't
-    // be a error). This is all about precedence stuff.
-    // -arr[2];
+    -arr[2];
+    printf("-arr[2]=%d\n", -arr[2]);
 
     int i = 0;
     while (1) {

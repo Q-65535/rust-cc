@@ -19,20 +19,18 @@ pub enum TokenKind {
     RBrace,
     LSqureBracket,
     RSqureBracket,
-    Assignment,
+    LexAssignment,
     // Compares
     Eq, Neq, LT, LE, GT, GE,
     Not,
     Arrow,
     Ampersand,
     Semicolon,
-    Comma,
+    LexComma,
     Lex_Natural_Num(u64),
     Lex_Char(u8),
     LexIdent(String),
     StringLiteral(Vec<u8>),
-    Asterisk, // Specifically represents pointer and dereference operator.
-    LexCast, // This is just a fake token for the convenicence of getting the precedence of cast expression.
 
     // Keywords:
     Ret, If, Else, For, While,
@@ -43,64 +41,10 @@ pub enum TokenKind {
 }
 use TokenKind::*;
 
-#[repr(u8)]
-#[derive(Copy, Clone, PartialEq, PartialOrd)]
-pub enum Precedence {
-    Lowest,
-    LV1,
-    LV2,
-    LV3,
-    LV4,
-    LV5,
-    LV6,
-    LV7,
-    LV8,
-}
-
-impl std::ops::Sub<u8> for Precedence {
-    type Output = Precedence;
-    fn sub(self, rhs: u8) -> Precedence {
-        match (self as u8).saturating_sub(rhs) {
-            0 => Precedence::Lowest,
-            1 => Precedence::LV1,
-            2 => Precedence::LV2,
-            3 => Precedence::LV3,
-            4 => Precedence::LV4,
-            5 => Precedence::LV5,
-            6 => Precedence::LV6,
-            7 => Precedence::LV7,
-            8 => Precedence::LV8,
-            _ => todo!(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
-}
-
-impl Token {
-    pub fn precedence(&self) -> Precedence {
-        return precedence(&self.kind);
-    }
-}
-
-pub fn precedence(kind: &TokenKind) -> Precedence {
-    use Precedence::{*};
-    return match kind {
-        Comma =>LV1,
-        Assignment | PlusAssignment | MinusAssignment |
-        MulAssignment | DivAssignment | PlusPlus | MinusMinus => LV2,
-        Eq | Neq | LT | LE | GT | GE => LV3,
-        Plus | Minus => LV4,
-        Mul | Div => LV5,
-        LexCast => LV6,
-        Asterisk => LV7,
-        Period | Arrow | LParen | LSqureBracket => LV8,
-        _ => Lowest,
-    }
 }
 
 pub struct Lexer {
@@ -192,7 +136,7 @@ impl Lexer {
                 ' ' | '\t' | '\n' | '\r' => (),
                 '.' => tokens.push(Self::gen_token(Period, start_index, 1)),
                 ';' => tokens.push(Self::gen_token(Semicolon, start_index, 1)),
-                ',' => tokens.push(Self::gen_token(Comma, start_index, 1)),
+                ',' => tokens.push(Self::gen_token(LexComma, start_index, 1)),
                 '+' => {
                     match self.peek_char() {
                         Some('+') => {
@@ -263,7 +207,7 @@ impl Lexer {
                             tokens.push(Self::gen_token(Eq, start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Assignment, start_index, 1)),
+                        _ => tokens.push(Self::gen_token(LexAssignment, start_index, 1)),
                     }
                 },
                 '!' => {
