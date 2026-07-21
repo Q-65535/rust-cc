@@ -956,6 +956,13 @@ impl ProgramAnalyzer {
                 let neg_expr = ir::Expr{content, ty, span};
                 return cast(neg_expr, &common_type);
             }
+            Not(val) => {
+                let span = expr.span;
+                let ty = Type::Int;
+                let val = self.analyze_expr(val);
+                let content = ir::ExprType::Not(Box::new(val));
+                ir::Expr{content, ty, span}
+            }
             Deref(val) => {
                 let val = self.analyze_expr(val);
                 return gen_deref_expr(val);

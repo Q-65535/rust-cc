@@ -22,7 +22,7 @@ pub enum TokenKind {
     LexAssignment,
     // Compares
     Eq, Neq, LT, LE, GT, GE,
-    Not,
+    LexNot,
     Arrow,
     Ampersand,
     Semicolon,
@@ -216,7 +216,7 @@ impl Lexer {
                             tokens.push(Self::gen_token(Neq, start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Not, start_index, 1)),
+                        _ => tokens.push(Self::gen_token(LexNot, start_index, 1)),
                     }
                 },
                 '<' => {
