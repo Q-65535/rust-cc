@@ -485,7 +485,6 @@ impl ProgramAnalyzer {
         self.current_local_var_offset = 0;
 
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
-        let is_static = symbol_attribute.is_static;
         let (final_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
         if let Func{return_type, ..} = final_type {
             self.current_function_return_type = *return_type;
@@ -506,14 +505,19 @@ impl ProgramAnalyzer {
                 analyzed_params.push(p);
             }
         } else {
-            let err_info = format!("compiler bug: the function doesn't have parameter filed.");
+            let err_info = format!("compiler bug: the function doesn't have parameter field.");
             print_error_at(fun.declarator.span, &err_info);
             exit(1);
         }
         let mut stmts = self.analyze_block(&mut fun.items);
         let stack_size = self.current_local_var_offset;
         self.scope_manager.exit_current_scope();
-        ir::Function{name, params: analyzed_params, stmts, stack_size, is_static}
+        ir::Function{
+            name,
+            params: analyzed_params,
+            stmts, stack_size,
+            is_static: symbol_attribute.is_static
+        }
     }
 
     fn analyze_block(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
