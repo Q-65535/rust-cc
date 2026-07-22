@@ -952,12 +952,6 @@ impl ProgramAnalyzer {
                 let expr = gen_binary_expr(lhs, rhs, OP::Plus); // expr = ((A -= 1) + 1)
                 cast(expr, &operand_type)
             }
-            Not(val) => {
-                todo!();
-            }
-            BitNot(val) => {
-                todo!();
-            }
             Neg(val) => {
                 let val = self.analyze_expr(val);
                 let common_type = get_common_type(&Type::Int, &val.ty);
@@ -972,6 +966,9 @@ impl ProgramAnalyzer {
                 let val = self.analyze_expr(val);
                 let content = ir::ExprType::Not(Box::new(val));
                 ir::Expr{content, ty, span}
+            }
+            BitNot(val) => {
+                todo!();
             }
             Deref(val) => {
                 let val = self.analyze_expr(val);
