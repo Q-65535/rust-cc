@@ -163,6 +163,8 @@ pub enum ExprType {
     PostIncrement(Box<Expr>),
     PostDecrement(Box<Expr>),
     Neg(Box<Expr>),
+    Not(Box<Expr>),
+    BitNot(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
     Ident(String),
@@ -993,6 +995,20 @@ impl Parser {
                 }
             },
             Lex_Natural_Num(n) => Ok(self.parse_natural_number(n)),
+            Exclamation => {
+                self.bump();
+                let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
+                let span = Span::merge(prefix_starting_token.span, operand.span);
+                let expr = Expr::new(Not(Box::new(operand)), span);
+                Ok(expr)
+            }
+            Tilde => {
+                self.bump();
+                let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
+                let span = Span::merge(prefix_starting_token.span, operand.span);
+                let expr = Expr::new(BitNot(Box::new(operand)), span);
+                Ok(expr)
+            }
             Plus => {
                 self.bump();
                 self.parse_expr(Prefix_Or_Cast, Right_To_Left)

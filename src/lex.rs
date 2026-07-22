@@ -22,7 +22,8 @@ pub enum TokenKind {
     LexAssignment,
     // Compares
     Eq, Neq, LT, LE, GT, GE,
-    Not,
+    Exclamation,
+    Tilde,
     Arrow,
     Ampersand,
     Semicolon,
@@ -134,6 +135,7 @@ impl Lexer {
             let start_index = self.index;
             match c {
                 ' ' | '\t' | '\n' | '\r' => (),
+                '~' => tokens.push(Self::gen_token(Tilde, start_index, 1)),
                 '.' => tokens.push(Self::gen_token(Period, start_index, 1)),
                 ';' => tokens.push(Self::gen_token(Semicolon, start_index, 1)),
                 ',' => tokens.push(Self::gen_token(LexComma, start_index, 1)),
@@ -216,7 +218,7 @@ impl Lexer {
                             tokens.push(Self::gen_token(Neq, start_index, 2));
                             self.next_char();
                         },
-                        _ => tokens.push(Self::gen_token(Not, start_index, 1)),
+                        _ => tokens.push(Self::gen_token(Exclamation, start_index, 1)),
                     }
                 },
                 '<' => {
