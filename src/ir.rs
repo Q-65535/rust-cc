@@ -17,6 +17,7 @@ pub enum ExprType {
     Binary(Box<Expr>, Box<Expr>, OP),
     Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
+    Not(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
     RequestStructMember(Box<Expr>, usize),

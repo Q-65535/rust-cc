@@ -270,6 +270,12 @@ impl Generator {
                 self.expr_gen(expr);
                 emit!("  neg %rax");
             }
+            Not(expr) => {
+                self.expr_gen(expr);
+                emit!("  cmp $0, %rax");
+                emit!("  sete %al");
+                emit!("  movzx %al, %rax");
+            }
             Deref(inner_expr) => {
                 self.expr_gen(inner_expr);
                 load_according_to_type(&expr.ty);

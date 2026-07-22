@@ -1057,6 +1057,16 @@ impl Parser {
                 let expr = Expr::new(AddrOf(Box::new(operand)), span);
                 Ok(expr)
             },
+            LexNot => {
+                self.bump();
+                let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
+                let span = Span{
+                    start_index: prefix_starting_token.span.start_index,
+                    end_index: operand.span.end_index,
+                };
+                let expr = Expr::new(Not(Box::new(operand)), span);
+                Ok(expr)
+            }
             TokenKind::Sizeof => {
                 self.expect(&Sizeof)?;
                 let (expr_content, end_index) = if self.at(&LParen)
