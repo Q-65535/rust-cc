@@ -18,6 +18,7 @@ pub enum ExprType {
     Assign(Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
     Not(Box<Expr>),
+    BitNot(Box<Expr>),
     Deref(Box<Expr>),
     AddrOf(Box<Expr>),
     RequestStructMember(Box<Expr>, usize),

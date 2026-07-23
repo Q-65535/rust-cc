@@ -276,6 +276,10 @@ impl Generator {
                 emit!("  sete %al");
                 emit!("  movzx %al, %rax");
             }
+            BitNot(expr) => {
+                self.expr_gen(expr);
+                emit!("  not %rax");
+            }
             Deref(inner_expr) => {
                 self.expr_gen(inner_expr);
                 load_according_to_type(&expr.ty);

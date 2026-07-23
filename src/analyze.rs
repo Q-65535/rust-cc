@@ -968,7 +968,11 @@ impl ProgramAnalyzer {
                 ir::Expr{content, ty, span}
             }
             BitNot(val) => {
-                todo!();
+                let val = self.analyze_expr(val);
+                let span = expr.span;
+                let ty = val.ty.clone();
+                let content = ir::ExprType::BitNot(Box::new(val));
+                ir::Expr{content, ty, span}
             }
             Deref(val) => {
                 let val = self.analyze_expr(val);
