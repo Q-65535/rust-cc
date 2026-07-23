@@ -11,7 +11,9 @@ pub enum TokenKind {
     Minus,
     Mul,
     Div,
-    PlusAssignment, MinusAssignment, MulAssignment, DivAssignment,
+    Modulus,
+    PlusAssignment, MinusAssignment, MulAssignment,
+    DivAssignment, ModulusAssignment,
     PlusPlus, MinusMinus,
     LParen,
     RParen,
@@ -167,6 +169,15 @@ impl Lexer {
                             self.next_char();
                         }
                         _ => tokens.push(Self::gen_token(Mul, start_index, 1)),
+                    }
+                }
+                '%' => {
+                    match self.peek_char() {
+                        Some('=') => {
+                            tokens.push(Self::gen_token(ModulusAssignment,  start_index, 2));
+                            self.next_char();
+                        }
+                        _ => tokens.push(Self::gen_token(Modulus, start_index, 1)),
                     }
                 }
                 '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),

@@ -225,11 +225,12 @@ fn token_as_infix_or_prefix_operator_kind(token_kind: &TokenKind) -> Precedence 
     use Precedence::*;
     return match token_kind {
         LexComma => Comma,
-        LexAssignment | PlusAssignment | MinusAssignment | MulAssignment | DivAssignment => Assignment,
+        LexAssignment | PlusAssignment | MinusAssignment |
+        MulAssignment | DivAssignment | ModulusAssignment => Assignment,
         Eq | Neq => Equality,
         LT | LE | GT | GE => Relational,
         Plus | Minus => Additive,
-        Mul | Div => Multiplicative,
+        Mul | Div | Modulus => Multiplicative,
         Period | Arrow | LParen | LSqureBracket | PlusPlus | MinusMinus => Postfix,
 
         _ => Lowest,
@@ -946,7 +947,8 @@ impl Parser {
 
             expr = match self.cur_token().kind {
                 Plus | Minus | Mul | Div | PlusAssignment | MinusAssignment |
-                MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE
+                MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE |
+                Modulus | ModulusAssignment
                 =>                self.parse_infix(expr)?,
 
                 PlusPlus =>       self.parse_post_increment(expr)?,

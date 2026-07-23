@@ -231,13 +231,16 @@ impl Generator {
                     Plus =>  emit!("  add {}, {}", di, ax),
                     Minus => emit!("  sub {}, {}", di, ax),
                     Mul =>   emit!("  imul {}, {}", di, ax),
-                    Div => {
+                    Div | Modulus => {
                         if sizeof(&lhs.ty) == 8 {
                             emit!("  cqo");
                         } else {
                             emit!("  cdq");
                         }
                         emit!("  idiv {}", di);
+                        if *kind == Modulus {
+                            emit!("  mov %rdx, %rax");
+                        }
                     },
                     Compare(c) => {
                         emit!("  cmp {}, {}", di, ax);

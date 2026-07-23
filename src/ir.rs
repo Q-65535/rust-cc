@@ -114,6 +114,7 @@ pub enum OP {
     Minus,
     Mul,
     Div,
+    Modulus,
     Compare(CompareToken),
 }
 

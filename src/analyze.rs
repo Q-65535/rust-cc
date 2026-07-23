@@ -6,7 +6,7 @@ use crate::ir;
 use ExprType::*;
 use Struct_Or_Union::*;
 use StmtType::*;
-use TokenKind::{Plus, Minus, Mul, Div, PlusAssignment, MinusAssignment, MulAssignment, DivAssignment, Eq, Neq, LT, LE, GT, GE};
+use TokenKind::{Plus, Minus, Mul, Div, Modulus, PlusAssignment, ModulusAssignment, MinusAssignment, MulAssignment, DivAssignment, Eq, Neq, LT, LE, GT, GE};
 use BlockItem::*;
 use crate::SRC;
 use crate::common::{self, *};
@@ -901,6 +901,7 @@ impl ProgramAnalyzer {
                     MinusAssignment => self.to_assign(lhs, rhs, OP::Minus),
                     MulAssignment => self.to_assign(lhs, rhs, OP::Mul),
                     DivAssignment => self.to_assign(lhs, rhs, OP::Div),
+                    ModulusAssignment => self.to_assign(lhs, rhs, OP::Modulus),
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
                         gen_binary_expr(lhs, rhs, op)
@@ -1501,6 +1502,7 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
         Minus | MinusAssignment => OP::Minus,
         Mul | MulAssignment => OP::Mul,
         Div | DivAssignment => OP::Div,
+        Modulus | DivAssignment => OP::Modulus,
         Eq => OP::Compare(ir::CompareToken::Eq),
         Neq => OP::Compare(ir::CompareToken::Neq),
         LT => OP::Compare(ir::CompareToken::LT),
