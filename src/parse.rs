@@ -40,7 +40,7 @@ use BlockItem::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorSuffix {
-    ArrayLen(usize, Option<Box<DeclaratorSuffix>>),
+    ArrayLen(Option<usize>, Option<Box<DeclaratorSuffix>>),
     FunParam(Vec<Parameter>),
 }
 use DeclaratorSuffix::*;
@@ -746,21 +746,24 @@ impl Parser {
         match self.cur_token().kind {
             // array sizes
             LSqureBracket => {
+                // @Cleanup: Just bump()?
                 self.expect(&LSqureBracket)?;
-                if matches!(self.cur_token().kind, Lex_Natural_Num(_)) {
-                    let cur_array_len: usize = self.parse_raw_usize()?;
-                    self.expect(&RSqureBracket)?;
-                    if matches!(self.cur_token().kind, LSqureBracket | LParen) {
-                        let inner_suffix = self.parse_declarator_suffix()?;
-                        Ok(ArrayLen(cur_array_len, Some(Box::new(inner_suffix))))
-                    } else {
-                        Ok(ArrayLen(cur_array_len, None))
-                    }
+                let cur_array_len = if matches!(&self.cur_token().kind, Lex_Natural_Num(_)) {
+                        Some(self.parse_raw_usize()?)
+                } else if matches!(&self.cur_token().kind, RSquareBracket) {
+                    None
                 } else {
-                    Err(error_token(
+                    return Err(error_token(
                         self.cur_token(),
-                        "expect an unsigned integer after square bracket in array decl",
-                    ))
+                        "expect either an unsigned integer or empty in the square bracket in array decl",
+                    ));
+                };
+                self.expect(&RSqureBracket)?;
+                if matches!(self.cur_token().kind, LSqureBracket | LParen) {
+                    let inner_suffix = self.parse_declarator_suffix()?;
+                    Ok(ArrayLen(cur_array_len, Some(Box::new(inner_suffix))))
+                } else {
+                    Ok(ArrayLen(cur_array_len, None))
                 }
             },
             // function parameters

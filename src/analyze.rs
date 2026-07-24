@@ -299,7 +299,7 @@ impl ProgramAnalyzer {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
                     let (mut base_type, mut symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
-                    let (function_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
+                    let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
                     // It is not allowed that function, variable or typedef name have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering it is function, variable or typedef name.
                     if self.scope_manager.contains_symbol_at_current_scope(&name) {
@@ -326,8 +326,8 @@ impl ProgramAnalyzer {
         ir::AnalyzedProgram{afuns, global_decls: self.global_decls}
     }
 
-    pub fn analyze_typedef(&mut self, base_type: &Type, declarator: &Declarator) {
-        let (final_type, name) = self.resolve_declarator(base_type, declarator);
+    pub fn analyze_typedef(&mut self, symbol_attribute: &Symbol_Attribute, base_type: &Type, declarator: &Declarator) {
+        let (final_type, name) = self.resolve_declarator(symbol_attribute, base_type, declarator);
         self.scope_manager.add_typedef_alias(&name, final_type);
     }
 
@@ -336,12 +336,12 @@ impl ProgramAnalyzer {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
         if symbol_attribute.is_typedef {
             for declarator in &mut decl.declarators {
-                self.analyze_typedef(&base_type, declarator);
+                self.analyze_typedef(&symbol_attribute, &base_type, declarator);
             }
             return decls;
         }
         for declarator in &mut decl.declarators {
-            let (final_type, name) = self.resolve_declarator(&base_type, declarator);
+            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, declarator);
 
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("semantic error: {} redeclared as a symbol", name);
@@ -390,11 +390,17 @@ impl ProgramAnalyzer {
     fn resolve_type_with_suffix(&mut self, base_type: &Type, suffix: &DeclaratorSuffix) -> Type {
         match suffix {
             DeclaratorSuffix::ArrayLen(len, inner_suffix) => {
+                let mut final_len: usize;
+                if let Some(number) = len {
+                    final_len = *number;
+                } else {
+                    final_len = 0;
+                }
                 if let Some(inner_suffix) = inner_suffix {
                     let cur_type = self.resolve_type_with_suffix(base_type, inner_suffix);
-                    return array_of(&cur_type, *len);
+                    return array_of(&cur_type, final_len);
                 } else {
-                    return array_of(base_type, *len);
+                    return array_of(base_type, final_len);
                 }
             },
             DeclaratorSuffix::FunParam(params) => {
@@ -402,7 +408,7 @@ impl ProgramAnalyzer {
                 let mut param_types = Vec::new();
                 for param in params {
                     let (param_base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
-                    let (param_final_type, _) = self.resolve_declarator(&param_base_type, &param.declarator);
+                    let (param_final_type, _) = self.resolve_declarator(&symbol_attribute, &param_base_type, &param.declarator);
                     param_types.push(param_final_type);
                 }
                 let return_type = Box::new(return_type);
@@ -411,18 +417,25 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn resolve_abstract_declarator(&mut self, base_type: &Type, declarator: &Abstract_Declarator) -> Type {
-        // deal with pointers
+    fn resolve_abstract_declarator(&mut self, base_type: &Type, declarator: &Option<Abstract_Declarator>) -> Type {
         let mut cur_type = base_type.clone();
-        for i in 0..declarator.star_count {
-            cur_type = pointer_to(&cur_type);
-        }
-        // deal with suffix
-        if let Some(suffix) = &declarator.suffix {
-            cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
-        }
-        if let Some(inner_declarator) = &declarator.direct_abstract_declarator {
-            cur_type = self.resolve_abstract_declarator(&cur_type, &*inner_declarator);
+        if let Some(declarator)  = declarator {
+            // deal with pointers
+            for i in 0..declarator.star_count {
+                cur_type = pointer_to(&cur_type);
+            }
+            // deal with suffix
+            if let Some(suffix) = &declarator.suffix {
+                cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
+            }
+            if let Some(inner_declarator) = &declarator.direct_abstract_declarator {
+
+                // @Cleanup
+                // @Cleanup
+                // @Cleanup
+                // @Cleanup
+                cur_type = self.resolve_abstract_declarator(&cur_type, &Some(*inner_declarator.clone()));
+            }
         }
 
         // If the final type is a tag, We want to make sure that
@@ -431,8 +444,9 @@ impl ProgramAnalyzer {
             match self.scope_manager.resolve_tag(&tag_name) {
                 Some(the_type) => cur_type = the_type.clone(),
                 None => {
+                    let span = Span{start_index: 0, end_index: 0};
                     let err_info = format!("storage size of {} is unkonwn", &tag_name);
-                    print_error_at(declarator.span, &err_info);
+                    print_error_at(span, &err_info);
                     exit(1);
                 },
             }
@@ -440,7 +454,7 @@ impl ProgramAnalyzer {
         return cur_type;
     }
 
-    fn resolve_declarator(&mut self, base_type: &Type, declarator: &Declarator) -> (Type, String) {
+    fn resolve_declarator(&mut self, attribute: &Symbol_Attribute, base_type: &Type, declarator: &Declarator) -> (Type, String) {
         // deal with pointers
         let mut cur_type = base_type.clone();
         let mut name = "empty_declarator_name".to_string();
@@ -456,28 +470,30 @@ impl ProgramAnalyzer {
                 name = ident.clone();
             },
             Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
-                (cur_type, name) = self.resolve_declarator(&cur_type, &inner_declarator);
+                (cur_type, name) = self.resolve_declarator(attribute, &cur_type, &inner_declarator);
             },
         }
-        // If the final type is a tag, We want to make sure that
-        // it can resove to a concrete struct, and do the Resolvation.
-        if let Tag(tag_name) = cur_type.clone() {
-            match self.scope_manager.resolve_tag(&tag_name) {
-                Some(the_type) => cur_type = the_type.clone(),
-                None => {
-                    let err_info = format!("storage size of {} is unkonwn", &tag_name);
-                    print_error_at(declarator.span, &err_info);
-                    exit(1);
-                },
+        if !attribute.is_typedef {
+            // If the final type is a tag, We want to make sure that
+            // it can resove to a concrete struct, and do the Resolvation.
+            if let Tag(tag_name) = cur_type.clone() {
+                match self.scope_manager.resolve_tag(&tag_name) {
+                    Some(the_type) => cur_type = the_type.clone(),
+                    None => {
+                        let err_info = format!("storage size of {} is unkonwn", &tag_name);
+                        print_error_at(declarator.span, &err_info);
+                        exit(1);
+                    },
+                }
             }
-        }
 
-        // @TODO: Remove this because "typdef void x;" is valid c code,
-        // but analyze_typedef calls current function.
-        if cur_type == Void {
-            let err_info = format!("variable declared void!");
-            print_error_at(declarator.span, &err_info);
-            exit(1);
+            // @TODO: Remove this because "typdef void x;" is valid c code,
+            // but analyze_typedef calls current function.
+            if cur_type == Void {
+                let err_info = format!("variable declared void!");
+                print_error_at(declarator.span, &err_info);
+                exit(1);
+            }
         }
         return (cur_type, name);
     }
@@ -488,7 +504,7 @@ impl ProgramAnalyzer {
         self.current_local_var_offset = 0;
 
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
-        let (final_type, name) = self.resolve_declarator(&base_type, &fun.declarator);
+        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
         if let Func{return_type, ..} = final_type {
             self.current_function_return_type = *return_type;
         } else {
@@ -543,7 +559,7 @@ impl ProgramAnalyzer {
 
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
-        let (final_type, name) = self.resolve_declarator(&base_type, &param.declarator);
+        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &param.declarator);
         if self.scope_manager.contains_symbol_at_current_scope(&name) {
             let err_info = format!("fatal error: parameter variable {} already defined", &name);
             print_error_at(param.declarator.span, &err_info);
@@ -562,14 +578,23 @@ impl ProgramAnalyzer {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
         if symbol_attribute.is_typedef {
             for declarator in &mut decl.declarators {
-                self.analyze_typedef(&base_type, declarator);
+                self.analyze_typedef(&symbol_attribute, &base_type, declarator);
             }
             return stmts;
         }
         for declarator in &mut decl.declarators {
-            let (final_type, name) = self.resolve_declarator(&base_type, declarator);
+            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, declarator);
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
+                print_error_at(declarator.span, &err_info);
+                exit(1);
+            }
+            // If the type is an array with 0 length, i.e., incomplete array type,
+            // this declaration is not allowed.
+            // @Incomplete: But...GCC allows variable with incomplete array type.
+            // It just gives a warning: array ‘xxx’ assumed to have one element.
+            if matches!(&final_type, Type::ArrayOf(..)) && sizeof(&final_type) == 0 {
+                let err_info = format!("variable {} has incomplete type", name);
                 print_error_at(declarator.span, &err_info);
                 exit(1);
             }
@@ -803,7 +828,7 @@ impl ProgramAnalyzer {
 
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&member.decl_spec);
-        let (final_type, name) = self.resolve_declarator(&base_type, &member.declarator);
+        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &member.declarator);
         ir::Member{
             ty: final_type,
             name: name.clone(),
@@ -1197,9 +1222,8 @@ impl ProgramAnalyzer {
 
     fn resolve_type_name(&mut self, type_name: &Type_Name) -> Type {
         let (base_type, _) = self.analyze_decl_spec(&type_name.decl_specs);
-        let mut final_type = base_type;
+        let final_type = self.resolve_abstract_declarator(&base_type, &type_name.declarator);
         if let Some(abstract_declarator) = &type_name.declarator {
-            final_type = self.resolve_abstract_declarator(&final_type, &abstract_declarator);
         }
         return final_type;
     }
