@@ -15,6 +15,7 @@ pub enum TokenKind {
     PlusAssignment, MinusAssignment, MulAssignment,
     DivAssignment, ModulusAssignment,
     PlusPlus, MinusMinus,
+    Ampersand, BitXOR, BitOR, BitAndAssignment, BitXORAssignment, BitORAssignment,
     LParen,
     RParen,
     LBrace,
@@ -27,7 +28,7 @@ pub enum TokenKind {
     Exclamation,
     Tilde,
     Arrow,
-    Ampersand,
+    
     Semicolon,
     LexComma,
     Lex_Natural_Num(u64),
@@ -161,7 +162,33 @@ impl Lexer {
                 '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
                 '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
                 ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
-                '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
+                '&' => {
+                    match self.peek_char() {
+                        Some('=') => {
+                            tokens.push(Self::gen_token(BitAndAssignment, start_index, 2));
+                            self.next_char();
+                        }
+                        _ => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
+                    }
+                }
+                '^' => {
+                    match self.peek_char() {
+                        Some('=') => {
+                            tokens.push(Self::gen_token(BitXORAssignment, start_index, 2));
+                            self.next_char();
+                        }
+                        _ => tokens.push(Self::gen_token(BitXOR, start_index, 1)),
+                    }
+                }
+                '|' => {
+                    match self.peek_char() {
+                        Some('=') => {
+                            tokens.push(Self::gen_token(BitORAssignment, start_index, 2));
+                            self.next_char();
+                        }
+                        _ => tokens.push(Self::gen_token(BitOR, start_index, 1)),
+                    }
+                }
                 '*' => {
                     match self.peek_char() {
                         Some('=') => {

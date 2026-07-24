@@ -124,6 +124,11 @@ pub enum OP {
     LE,
     GT,
     GE,
+
+    // bitwise
+    BitAnd,
+    BitXOR,
+    BitOR,
 }
 
 impl OP {

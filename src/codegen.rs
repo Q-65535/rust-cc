@@ -241,6 +241,9 @@ impl Generator {
                             emit!("  mov %rdx, %rax");
                         }
                     },
+                    BitAnd => emit!("  and %rdi, %rax"),
+                    BitOR =>  emit!("  or %rdi, %rax"),
+                    BitXOR => emit!("  xor %rdi, %rax"),
                     op if op.is_compare() => {
                         emit!("  cmp {}, {}", di, ax);
                         match op {

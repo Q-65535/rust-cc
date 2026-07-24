@@ -1,3 +1,4 @@
+use crate::exit;
 use colored::*;
 use crate::lex::*;
 use crate::lex::TokenKind::{self, *};
@@ -221,19 +222,37 @@ fn get_associativity(p: Precedence) -> Associativity {
     }
 }
 
-fn token_as_infix_or_prefix_operator_kind(token_kind: &TokenKind) -> Precedence {
+// Smell: This is kinda crazy...
+fn is_infix_operator(token_kind: &TokenKind) -> bool {
+    matches!(token_kind, LexComma | LexAssignment | PlusAssignment | MinusAssignment |
+    MulAssignment | DivAssignment | ModulusAssignment | BitAndAssignment |
+    DivAssignment | ModulusAssignment | BitAndAssignment | BitXORAssignment |
+    BitORAssignment | Ampersand | BitXOR | BitOR | Eq | Neq | LT | LE | GT | GE |
+    Plus | Minus | Mul | Div | Modulus | Period | Arrow | LParen | LSqureBracket |
+    PlusPlus | MinusMinus)
+}
+
+fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
     use Precedence::*;
     return match token_kind {
         LexComma => Comma,
         LexAssignment | PlusAssignment | MinusAssignment |
-        MulAssignment | DivAssignment | ModulusAssignment => Assignment,
+        MulAssignment | DivAssignment | ModulusAssignment |
+        BitAndAssignment | BitXORAssignment | BitORAssignment => Assignment,
+        Ampersand => Logical_AND,
+        BitXOR => Bitwise_XOR,
+        BitOR => Bitwise_OR,
         Eq | Neq => Equality,
         LT | LE | GT | GE => Relational,
         Plus | Minus => Additive,
         Mul | Div | Modulus => Multiplicative,
         Period | Arrow | LParen | LSqureBracket | PlusPlus | MinusMinus => Postfix,
 
-        _ => Lowest,
+        _ => {
+            // Lowest
+            println!("compiler bug: unknown operator precedence for {:?}", token_kind);
+            exit(1);
+        }
     }
 }
 
@@ -938,17 +957,21 @@ impl Parser {
         let mut expr = self.parse_prefix()?;
 
         loop {
-            let cur_precedence = token_as_infix_or_prefix_operator_kind(&self.cur_token().kind);
-            let should_break = match asso {
+            if !is_infix_operator(&self.cur_token().kind) {
+                break;
+            }
+            let cur_precedence = get_infix_operator_precedence(&self.cur_token().kind);
+            let cur_precedence_is_weaker = match asso {
                 Left_To_Right => cur_precedence <= passed_precedence,
                 Right_To_Left => cur_precedence < passed_precedence,
             };
-            if should_break {break;}
+            if cur_precedence_is_weaker {break;}
 
             expr = match self.cur_token().kind {
                 Plus | Minus | Mul | Div | PlusAssignment | MinusAssignment |
                 MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE |
-                Modulus | ModulusAssignment
+                Modulus | ModulusAssignment | Ampersand | BitXOR | BitOR |
+                BitAndAssignment | BitXORAssignment | BitORAssignment
                 =>                self.parse_infix(expr)?,
 
                 PlusPlus =>       self.parse_post_increment(expr)?,
@@ -1199,7 +1222,7 @@ impl Parser {
 
     fn parse_infix(&mut self, lhs: Expr) -> Result<Expr, String> {
         let infix_operator = self.bump().kind;
-        let precedence = token_as_infix_or_prefix_operator_kind(&infix_operator);
+        let precedence = get_infix_operator_precedence(&infix_operator);
         let rhs = self.parse_expr(precedence, get_associativity(precedence))?;
         let span = Span {
             start_index: lhs.span.start_index,
