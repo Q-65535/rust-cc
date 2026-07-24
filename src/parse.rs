@@ -222,16 +222,6 @@ fn get_associativity(p: Precedence) -> Associativity {
     }
 }
 
-// Smell: This is kinda crazy...
-fn is_infix_operator(token_kind: &TokenKind) -> bool {
-    matches!(token_kind, LexComma | LexAssignment | PlusAssignment | MinusAssignment |
-    MulAssignment | DivAssignment | ModulusAssignment | BitAndAssignment |
-    DivAssignment | ModulusAssignment | BitAndAssignment | BitXORAssignment |
-    BitORAssignment | Ampersand | BitXOR | BitOR | Eq | Neq | LT | LE | GT | GE |
-    Plus | Minus | Mul | Div | Modulus | Period | Arrow | LParen | LSqureBracket |
-    PlusPlus | MinusMinus)
-}
-
 fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
     use Precedence::*;
     return match token_kind {
@@ -248,11 +238,8 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
         Mul | Div | Modulus => Multiplicative,
         Period | Arrow | LParen | LSqureBracket | PlusPlus | MinusMinus => Postfix,
 
-        _ => {
-            // Lowest
-            println!("compiler bug: unknown operator precedence for {:?}", token_kind);
-            exit(1);
-        }
+        // Any other token that cannot be infix operator gets Lowest precedence.
+        _ => Lowest,
     }
 }
 
@@ -957,10 +944,8 @@ impl Parser {
         let mut expr = self.parse_prefix()?;
 
         loop {
-            if !is_infix_operator(&self.cur_token().kind) {
-                break;
-            }
             let cur_precedence = get_infix_operator_precedence(&self.cur_token().kind);
+            if cur_precedence == Lowest {break;}
             let cur_precedence_is_weaker = match asso {
                 Left_To_Right => cur_precedence <= passed_precedence,
                 Right_To_Left => cur_precedence < passed_precedence,
@@ -979,6 +964,7 @@ impl Parser {
                 LexComma =>          self.parse_comma_expression(expr)?,
                 LParen =>         self.parse_funcall(expr)?,
                 LSqureBracket =>  self.parse_array_indexing(expr)?,
+                // @Smell: Should have parse_infix() to handle assignment.
                 LexAssignment =>     self.parse_assign(expr)?,
                 Period | Arrow => self.parse_request_struct_member(expr)?,
 
