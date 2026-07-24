@@ -897,10 +897,10 @@ impl ProgramAnalyzer {
                 let lhs = self.analyze_expr(lhs);
                 let rhs = self.analyze_expr(rhs);
                 match tokenKind {
-                    PlusAssignment => self.to_assign(lhs, rhs, OP::Plus),
-                    MinusAssignment => self.to_assign(lhs, rhs, OP::Minus),
-                    MulAssignment => self.to_assign(lhs, rhs, OP::Mul),
-                    DivAssignment => self.to_assign(lhs, rhs, OP::Div),
+                    PlusAssignment    => self.to_assign(lhs, rhs, OP::Plus),
+                    MinusAssignment   => self.to_assign(lhs, rhs, OP::Minus),
+                    MulAssignment     => self.to_assign(lhs, rhs, OP::Mul),
+                    DivAssignment     => self.to_assign(lhs, rhs, OP::Div),
                     ModulusAssignment => self.to_assign(lhs, rhs, OP::Modulus),
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
@@ -1048,17 +1048,7 @@ impl ProgramAnalyzer {
                     print_error_at(index.span, "array subscript is not an integer");
                     exit(1);
                 }
-                let element_type = match &base_position.ty {
-                    Pointer_To(pointee_type) => pointee_type.clone(),
-                    ArrayOf(element_type, _) => element_type.clone(),
-                    _ => {
-                        println!("array indexing error: the base type is nither pointer nor array");
-                        exit(1);
-                    },
-                };
-                let element_size = sizeof(&element_type);
-                let scaled = scale_expr(index, element_size, OP::Mul);
-                let pointer_arithmatic_expr = gen_promoted_binary_expr(base_position, scaled, OP::Plus);
+                let pointer_arithmatic_expr = gen_binary_expr(base_position, index, OP::Plus);
                 return gen_deref_expr(pointer_arithmatic_expr);
             },
             FunCall(ident, args) => {
@@ -1502,7 +1492,7 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
         Minus | MinusAssignment => OP::Minus,
         Mul | MulAssignment => OP::Mul,
         Div | DivAssignment => OP::Div,
-        Modulus | DivAssignment => OP::Modulus,
+        Modulus | ModulusAssignment => OP::Modulus,
         Eq => OP::Compare(ir::CompareToken::Eq),
         Neq => OP::Compare(ir::CompareToken::Neq),
         LT => OP::Compare(ir::CompareToken::LT),
