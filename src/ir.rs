@@ -108,6 +108,7 @@ pub struct AnalyzedProgram {
     pub global_decls: Vec<Declaration>,
 }
 
+// binary operators
 #[derive(Debug, Clone, PartialEq)]
 pub enum OP {
     Plus,
@@ -115,11 +116,8 @@ pub enum OP {
     Mul,
     Div,
     Modulus,
-    Compare(CompareToken),
-}
 
-#[derive(PartialEq, Clone, Debug)]
-pub enum CompareToken {
+    // compares
     Eq,
     Neq,
     LT,
@@ -127,4 +125,9 @@ pub enum CompareToken {
     GT,
     GE,
 }
-use CompareToken::*;
+
+impl OP {
+    pub fn is_compare(&self) -> bool {
+        matches!(self, OP::Eq | OP::Neq | OP::LT | OP::LE | OP::GT | OP::GE)
+    }
+}

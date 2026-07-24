@@ -3,6 +3,7 @@ use colored::*;
 use crate::parse::{self, *};
 use crate::lex::{self, *};
 use crate::ir;
+use ir::OP;
 use ExprType::*;
 use Struct_Or_Union::*;
 use StmtType::*;
@@ -1443,7 +1444,7 @@ fn gen_promoted_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Exp
     };
     let (lhs, rhs) = usual_arithmatic_conversion(lhs, rhs);
     let mut the_type = lhs.ty.clone();
-    if matches!(op, ir::OP::Compare(..)) {
+    if op.is_compare() {
         the_type = Type::Int;
     }
     let new_expr_content = ir::ExprType::Binary(Box::new(lhs), Box::new(rhs), op);
@@ -1486,21 +1487,20 @@ fn gen_addr_of_expr(expr: ir::Expr) -> ir::Expr {
 }
 
 fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
-    use ir::OP;
     match tokenkind {
-        Plus | PlusAssignment => OP::Plus,
-        Minus | MinusAssignment => OP::Minus,
-        Mul | MulAssignment => OP::Mul,
-        Div | DivAssignment => OP::Div,
-        Modulus | ModulusAssignment => OP::Modulus,
-        Eq => OP::Compare(ir::CompareToken::Eq),
-        Neq => OP::Compare(ir::CompareToken::Neq),
-        LT => OP::Compare(ir::CompareToken::LT),
-        LE => OP::Compare(ir::CompareToken::LE),
-        GT => OP::Compare(ir::CompareToken::GT),
-        GE => OP::Compare(ir::CompareToken::GE),
+        Plus => OP::Plus,
+        Minus => OP::Minus,
+        Mul => OP::Mul,
+        Div => OP::Div,
+        Modulus => OP::Modulus,
+        Eq =>  OP::Eq,
+        Neq => OP::Neq,
+        LT =>  OP::LT,
+        LE =>  OP::LE,
+        GT =>  OP::GT,
+        GE =>  OP::GE,
         _ => {
-            println!("unknown operator");
+            println!("semantic error: trying to convert {:?} to binary operator", tokenkind);
             exit(1);
         }
     }

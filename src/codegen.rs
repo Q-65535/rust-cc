@@ -4,7 +4,6 @@ use colored::*;
 use crate::ir::ExprType::{self, *};
 use crate::ir::StmtType::{self, *};
 use crate::ir::OP::{self, *};
-use ir::CompareToken::{self, *};
 use crate::Declaration;
 use crate::Function;
 use crate::Obj;
@@ -217,7 +216,7 @@ impl Generator {
                 self.expr_gen(lhs);
                 self.expr_gen(rhs);
             }
-            Binary(lhs, rhs, kind) => {
+            Binary(lhs, rhs, op) => {
                 self.expr_gen(rhs);
                 self.push("%rax");
                 self.expr_gen(lhs);
@@ -227,7 +226,7 @@ impl Generator {
                 } else {
                     ("%eax", "%edi")
                 };
-                match kind {
+                match op {
                     Plus =>  emit!("  add {}, {}", di, ax),
                     Minus => emit!("  sub {}, {}", di, ax),
                     Mul =>   emit!("  imul {}, {}", di, ax),
@@ -238,13 +237,13 @@ impl Generator {
                             emit!("  cdq");
                         }
                         emit!("  idiv {}", di);
-                        if *kind == Modulus {
+                        if *op == Modulus {
                             emit!("  mov %rdx, %rax");
                         }
                     },
-                    Compare(c) => {
+                    op if op.is_compare() => {
                         emit!("  cmp {}, {}", di, ax);
-                        match c {
+                        match op {
                             Eq => emit!("  sete %al"),
                             Neq => emit!("  setne %al"),
                             LT => emit!("  setl %al"),
@@ -257,10 +256,11 @@ impl Generator {
                                 emit!("  cmp %rax, %rdi");
                                 emit!("  setle %al");
                             },
+                            _ => unreachable!(),
                         }
                         emit!("  movzb %al, %rax");
                     },
-                    _ => eprintln!("gen_code error: not support {:?}", content),
+                    _ => eprintln!("gen_code error: not support binary expr {:?}", content),
                 }
             }
             Assign(var, val) => {
