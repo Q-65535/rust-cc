@@ -4,6 +4,7 @@ int sleep(int a);
 
 
 // We can just call any function in the same file without forward declaring it.
+// GCC C compiler also can? But C++ doesn't?
 // int foo();
 int main() {
     int foofoo = foo();

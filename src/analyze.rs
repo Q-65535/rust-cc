@@ -408,7 +408,11 @@ impl ProgramAnalyzer {
                 let mut param_types = Vec::new();
                 for param in params {
                     let (param_base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
-                    let (param_final_type, _) = self.resolve_declarator(&symbol_attribute, &param_base_type, &param.declarator);
+                    let (mut param_final_type, _) = self.resolve_declarator(&symbol_attribute, &param_base_type, &param.declarator);
+                    // Function accepts parameters with array type, but treat it as a pointer.
+                    if let ArrayOf(ref element_ty, _) = param_final_type {
+                        param_final_type = pointer_to(&element_ty);
+                    }
                     param_types.push(param_final_type);
                 }
                 let return_type = Box::new(return_type);
@@ -473,7 +477,12 @@ impl ProgramAnalyzer {
                 (cur_type, name) = self.resolve_declarator(attribute, &cur_type, &inner_declarator);
             },
         }
-        if !attribute.is_typedef {
+
+        let mut need_concrete_type_info = true;
+        if attribute.is_typedef {
+            need_concrete_type_info = false;
+        }
+        if need_concrete_type_info {
             // If the final type is a tag, We want to make sure that
             // it can resove to a concrete struct, and do the Resolvation.
             if let Tag(tag_name) = cur_type.clone() {
@@ -487,8 +496,6 @@ impl ProgramAnalyzer {
                 }
             }
 
-            // @TODO: Remove this because "typdef void x;" is valid c code,
-            // but analyze_typedef calls current function.
             if cur_type == Void {
                 let err_info = format!("variable declared void!");
                 print_error_at(declarator.span, &err_info);
@@ -559,7 +566,12 @@ impl ProgramAnalyzer {
 
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
-        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &param.declarator);
+        let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &param.declarator);
+        // Function accepts parameters with array type, but treat it as a pointer.
+        if let ArrayOf(ref element_ty, _) = final_type {
+            final_type = pointer_to(&element_ty);
+        }
+        
         if self.scope_manager.contains_symbol_at_current_scope(&name) {
             let err_info = format!("fatal error: parameter variable {} already defined", &name);
             print_error_at(param.declarator.span, &err_info);
