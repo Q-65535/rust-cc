@@ -13,6 +13,8 @@ pub enum StmtType {
     Block(Vec<BlockItem>),
     If(IfStmt),
     For(ForStmt),
+    GotoStmt(String),
+    LabeledStmt(String, Box<StmtType>),
 }
 use StmtType::*;
 
@@ -68,6 +70,7 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
     pub decl_spec: Vec<Decl_Spec>,
+    // @Future: Parameter may have declarator or Option<Abstract_Declarator>
     pub declarator: Declarator,
 }
 
@@ -442,6 +445,7 @@ impl Parser {
                 }
                 Ok(find) => find_LBrace = find,
             }
+            // @Temporary: Not the final correct way to evaluate wthether this is a function def or declaration.
             // Only function definition have LBrace, so if we hit LBrace then just start parsing function def.
             if find_LBrace {
                 match self.parse_fun_def() {
@@ -792,16 +796,29 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> Result<StmtType, String> {
-        match self.cur_token().kind {
+        match &self.cur_token().kind {
             TokenKind::Ret => Ok(Return(self.parse_ret_stmt()?)),
             TokenKind::If => Ok(StmtType::If(self.parse_if_stmt()?)),
             TokenKind::For => Ok(StmtType::For(self.parse_for_stmt()?)),
             TokenKind::While => Ok(StmtType::For(self.parse_while_stmt()?)),
+            TokenKind::Goto => {
+                self.bump();
+                let goto_label_name = self.parse_raw_ident_name()?;
+                self.expect(&Semicolon);
+                Ok(StmtType::GotoStmt(goto_label_name))
+            }
+            TokenKind::LexIdent(name) if self.peek_token().kind == Colon => {
+                let label_name = self.parse_raw_ident_name()?;
+                self.expect(&Colon);
+                let stmt = self.parse_stmt()?;
+                Ok(StmtType::LabeledStmt(label_name, Box::new(stmt)))
+            }
             Semicolon => {
                 self.expect(&Semicolon)?;
                 Ok(Block(Vec::new()))
             },
             LBrace => Ok(Block(self.parse_block())),
+            // Any others are treated as expression statement to parse.
             _ => Ok(Ex(self.parse_expr_stmt()?)),
         }
     }
@@ -1181,6 +1198,15 @@ impl Parser {
             Ok(expr)
         } else {
             Err(error_token(&tok, "expect a string literal"))
+        }
+    }
+
+    fn parse_raw_ident_name(&mut self) -> Result<String, String> {
+        let tok = self.bump();
+        if let LexIdent(name) = &tok.kind {
+            Ok(name.clone())
+        } else {
+            Err(error_token(&tok, "expect an identifier"))
         }
     }
 

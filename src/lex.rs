@@ -30,6 +30,7 @@ pub enum TokenKind {
     Arrow,
     
     Semicolon,
+    Colon,
     LexComma,
     Lex_Natural_Num(u64),
     Lex_Char(u8),
@@ -39,7 +40,7 @@ pub enum TokenKind {
     // Keywords:
     Ret, If, Else, For, While,
     Sizeof, Typedef, Struct, LexEnum, Int, Char, _Bool, Union,
-    Long, Short, Void, _Atomic, Static,
+    Long, Short, Void, _Atomic, Static, Goto,
 
     Eof,
 }
@@ -79,6 +80,7 @@ impl Lexer {
             ("_Atomic".to_string(), _Atomic),
             ("_Bool".to_string(), _Bool),
             ("static".to_string(), Static),
+            ("goto".to_string(), Goto),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),
@@ -140,6 +142,7 @@ impl Lexer {
                 ' ' | '\t' | '\n' | '\r' => (),
                 '~' => tokens.push(Self::gen_token(Tilde, start_index, 1)),
                 '.' => tokens.push(Self::gen_token(Period, start_index, 1)),
+                ':' => tokens.push(Self::gen_token(Colon, start_index, 1)),
                 ';' => tokens.push(Self::gen_token(Semicolon, start_index, 1)),
                 ',' => tokens.push(Self::gen_token(LexComma, start_index, 1)),
                 '+' => {

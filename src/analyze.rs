@@ -924,6 +924,8 @@ impl ProgramAnalyzer {
                 self.scope_manager.exit_current_scope();
                 StmtType::For{init: init_stmts, cond, inc, then}
             }
+            GotoStmt(label_name) => todo!(),
+            LabeledStmt(label_name, stmt) => todo!(),
         }
     }
 
