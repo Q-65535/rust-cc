@@ -49,12 +49,12 @@ int main() {
         if (i == 4) {
             return 0;
         }
-        sleep(1);
+        k: sleep(1);
     }
     return 0;
 }
 
 int foo() {
-    printf("foo being called.\n");
+    k: printf("foo being called.\n");
     return 88;
 }

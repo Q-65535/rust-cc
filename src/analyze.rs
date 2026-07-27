@@ -946,6 +946,8 @@ impl ProgramAnalyzer {
         }
     }
 
+    // @Issue: What if 2 identical label name in different function?
+    // Every goto label must be unique across the whole .c file.
     fn transform_to_unique_goto_label(&mut self, label: &str) -> String {
         let unique_goto_label = format!(".GOTO_{}", label.clone());
         return unique_goto_label;
