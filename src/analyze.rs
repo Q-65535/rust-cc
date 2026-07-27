@@ -279,6 +279,7 @@ pub struct ProgramAnalyzer {
     pub current_function_return_type: Type,
     pub unique_string_name_index: usize,
     pub unique_stmt_label_index: usize,
+    pub cur_loop_end_label: Option<String>,
 }
 
 impl ProgramAnalyzer {
@@ -292,6 +293,7 @@ impl ProgramAnalyzer {
                         current_function_return_type: Type::ty_none,
                         unique_string_name_index: 0,
                         unique_stmt_label_index: 0,
+                        cur_loop_end_label: None,
                         }
     }
 
@@ -900,6 +902,8 @@ impl ProgramAnalyzer {
             }
             For(parse::ForStmt{init, cond, inc, then}) => {
                 self.scope_manager.enter_new_scope();
+                let end_label = self.next_loop_end_label();
+                self.cur_loop_end_label = Some(end_label.clone());
                 let mut init_stmts = Vec::new();
                 if let Some(init) = init {
                     match init.as_mut() {
@@ -926,8 +930,17 @@ impl ProgramAnalyzer {
                     None
                 };
                 let then = Box::new(self.analyze_stmt(then));
+                self.cur_loop_end_label = None;
                 self.scope_manager.exit_current_scope();
-                StmtType::For{init: init_stmts, cond, inc, then}
+                StmtType::For{init: init_stmts, cond, inc, then, end_label}
+            }
+            BreakStmt => {
+                if let Some(label) = &self.cur_loop_end_label {
+                    StmtType::Goto(label.clone())
+                } else {
+                    println!("this is not inside for or while loop, you cannot break");
+                    exit(1);
+                }
             }
             GotoStmt(label) => {
                 if self.stmt_labels_in_cur_function.contains(label) {
@@ -951,6 +964,12 @@ impl ProgramAnalyzer {
     fn transform_to_unique_goto_label(&mut self, label: &str) -> String {
         let unique_goto_label = format!(".GOTO_{}", label.clone());
         return unique_goto_label;
+    }
+
+    fn next_loop_end_label(&mut self) -> String {
+        let unique_loop_end_label = format!(".LOOPEND_{}", self.unique_stmt_label_index);
+        self.unique_stmt_label_index += 1;
+        return unique_loop_end_label;
     }
 
     fn analyze_expr(&mut self, expr: &mut Expr) -> ir::Expr {

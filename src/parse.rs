@@ -15,6 +15,7 @@ pub enum StmtType {
     For(ForStmt),
     GotoStmt(String),
     LabeledStmt(String, Box<StmtType>),
+    BreakStmt,
 }
 use StmtType::*;
 
@@ -805,6 +806,11 @@ impl Parser {
             TokenKind::If => Ok(StmtType::If(self.parse_if_stmt()?)),
             TokenKind::For => Ok(StmtType::For(self.parse_for_stmt()?)),
             TokenKind::While => Ok(StmtType::For(self.parse_while_stmt()?)),
+            TokenKind::Break => {
+                self.bump();
+                self.expect(&Semicolon);
+                Ok(StmtType::BreakStmt)
+            }
             TokenKind::Goto => {
                 self.bump();
                 let goto_label_name = self.parse_raw_ident_name()?;

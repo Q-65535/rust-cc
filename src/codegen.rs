@@ -165,7 +165,7 @@ impl Generator {
             ir::StmtType::Return(expr) =>self.ret_gen(&expr),
             ir::StmtType::Block(item) =>self.block_gen(item),
             ir::StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
-            ir::StmtType::For{init, cond, inc, then} => self.for_gen(init, cond, inc, then),
+            ir::StmtType::For{init, cond, inc, then, end_label} => self.for_gen(init, cond, inc, then, end_label),
             ir::StmtType::Goto(label) => emit!("  jmp {}", label),
             ir::StmtType::LabeledStmt(label, stmt) => {
                 emit!("{}:", label);
@@ -193,7 +193,7 @@ impl Generator {
         emit!(".L.end.{}:", c);
     }
 
-    fn for_gen(&mut self, init: &Vec<StmtType>, cond: &Option<ir::Expr>, inc: &Option<ir::Expr>, then: &Box<ir::StmtType>) {
+    fn for_gen(&mut self, init: &Vec<StmtType>, cond: &Option<ir::Expr>, inc: &Option<ir::Expr>, then: &Box<ir::StmtType>, end_label: &str) {
         let c = self.next_jump_label_count();
         for init_stmt in init {
             self.stmt_gen(init_stmt);
@@ -202,14 +202,14 @@ impl Generator {
         if let Some(expr) = cond {
             self.expr_gen(expr);
             emit!("  cmp $0, %rax");
-            emit!("  je  .L.end.{}", c);
+            emit!("  je  {}", end_label);
         }
         self.stmt_gen(&then);
         if let Some(expr) = inc {
             self.expr_gen(expr);
         }
         emit!("  jmp .L.begin.{}", c);
-        emit!(".L.end.{}:", c);
+        emit!("{}:", end_label);
     }
 
     fn expr_gen(&mut self, expr: &ir::Expr) {
