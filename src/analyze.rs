@@ -275,8 +275,10 @@ pub struct ProgramAnalyzer {
     pub global_decls: Vec<ir::Declaration>,
     pub scope_manager: ScopeManager,
     pub current_local_var_offset: usize,
+    pub stmt_labels_in_cur_function: Vec<String>,
     pub current_function_return_type: Type,
     pub unique_string_name_index: usize,
+    pub unique_stmt_label_index: usize,
 }
 
 impl ProgramAnalyzer {
@@ -286,8 +288,10 @@ impl ProgramAnalyzer {
                         global_decls: Vec::new(),
                         scope_manager: ScopeManager::new(),
                         current_local_var_offset: 0,
+                        stmt_labels_in_cur_function: Vec::new(),
                         current_function_return_type: Type::ty_none,
                         unique_string_name_index: 0,
+                        unique_stmt_label_index: 0,
                         }
     }
 
@@ -509,6 +513,7 @@ impl ProgramAnalyzer {
         // current_local_var_offset will be used to determine the position of all local variables in current
         // to-be-analyzed function. Thus, at the start of each function analyzation, we must reset it.
         self.current_local_var_offset = 0;
+        self.stmt_labels_in_cur_function = fun.stmt_labels.clone();
 
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
         let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
@@ -924,9 +929,26 @@ impl ProgramAnalyzer {
                 self.scope_manager.exit_current_scope();
                 StmtType::For{init: init_stmts, cond, inc, then}
             }
-            GotoStmt(label_name) => todo!(),
-            LabeledStmt(label_name, stmt) => todo!(),
+            GotoStmt(label) => {
+                if self.stmt_labels_in_cur_function.contains(label) {
+                    let unique_goto_label = self.transform_to_unique_goto_label(label);
+                    StmtType::Goto(unique_goto_label)
+                } else {
+                    println!("unknown goto label: {}", label);
+                    exit(1);
+                }
+            }
+            LabeledStmt(label, stmt) => {
+                let unique_goto_label = self.transform_to_unique_goto_label(label);
+                let stmt = Box::new(self.analyze_stmt(stmt));
+                StmtType::LabeledStmt(unique_goto_label, stmt)
+            }
         }
+    }
+
+    fn transform_to_unique_goto_label(&mut self, label: &str) -> String {
+        let unique_goto_label = format!(".GOTO_{}", label.clone());
+        return unique_goto_label;
     }
 
     fn analyze_expr(&mut self, expr: &mut Expr) -> ir::Expr {

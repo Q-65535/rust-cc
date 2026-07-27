@@ -8,6 +8,8 @@ pub enum StmtType {
     Block(Vec<StmtType>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
     For {init: Vec<StmtType>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>},
+    Goto(String),
+    LabeledStmt(String, Box<StmtType>),
 }
 use StmtType::*;
 

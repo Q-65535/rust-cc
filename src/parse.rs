@@ -65,6 +65,7 @@ pub struct Function {
     pub return_type_specifier: Vec<Decl_Spec>,
     pub declarator: Declarator,
     pub items: Vec<BlockItem>,
+    pub stmt_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -342,6 +343,8 @@ pub struct Parser {
     cur_index: usize,
     scope_manager: ScopeManager,
     syntax_errors: Vec<String>,
+    // stmt_labels stores every statement labels.
+    stmt_labels: Vec<String>,
     // This is just for the convenience for debugging.
     // It just shows where we are parsing now.
     cur_parsing_context: String,
@@ -355,6 +358,7 @@ impl Parser {
             cur_index: 0,
             scope_manager: ScopeManager::new(),
             syntax_errors: Vec::new(),
+            stmt_labels: Vec::new(),
             cur_parsing_context: starting_context,
         }
     }
@@ -809,6 +813,11 @@ impl Parser {
             }
             TokenKind::LexIdent(name) if self.peek_token().kind == Colon => {
                 let label_name = self.parse_raw_ident_name()?;
+                if self.stmt_labels.contains(&label_name) {
+                    let error_message = format!("duplicate statement label {}", label_name);
+                    return Err(error_token(self.cur_token(), &error_message));
+                }
+                self.stmt_labels.push(label_name.clone());
                 self.expect(&Colon);
                 let stmt = self.parse_stmt()?;
                 Ok(StmtType::LabeledStmt(label_name, Box::new(stmt)))
@@ -848,9 +857,11 @@ impl Parser {
 
         while !matches!(self.cur_token().kind, RBrace | Eof) {
             let start_index = self.cur_index;
-            // @Future: if the token kind is a declaration-specifier (i.e., storage-class-specifier,
-            // type-specifier or function-specifier), we parse decl.
-            if self.is_decl_spec(self.cur_token()) {
+            //                         This avoids conflicts between statement labels and typedef names.
+            //                         If peeked token is a colon, then this is a labeled statement, not a decl.                             
+            //                                                      |
+            //                                                      V
+            if self.is_decl_spec(self.cur_token()) && self.peek_token().kind != Colon {
                 match self.parse_decl() {
                     Err(error_message) => {
                         self.syntax_errors.push(error_message);
@@ -1360,6 +1371,7 @@ impl Parser {
     }
 
     fn parse_fun_def(&mut self) -> Result<Function, String> {
+        self.stmt_labels.clear();
         let return_type_specifier = self.parse_decl_specs()?;
         let declarator = self.parse_declarator()?;
         if let Some(FunParam(params)) = &declarator.suffix {
@@ -1367,7 +1379,7 @@ impl Parser {
                 return Err(error_token(self.cur_token(), "expected function body"));
             }
             let items = self.parse_block();
-            Ok(Function{return_type_specifier, declarator, items})
+            Ok(Function{return_type_specifier, declarator, items, stmt_labels: self.stmt_labels.clone()})
         } else {
             Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }

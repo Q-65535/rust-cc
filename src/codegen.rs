@@ -166,6 +166,11 @@ impl Generator {
             ir::StmtType::Block(item) =>self.block_gen(item),
             ir::StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
             ir::StmtType::For{init, cond, inc, then} => self.for_gen(init, cond, inc, then),
+            ir::StmtType::Goto(label) => emit!("  jmp {}", label),
+            ir::StmtType::LabeledStmt(label, stmt) => {
+                emit!("{}:", label);
+                self.stmt_gen(stmt);
+            }
         }
     }
 
