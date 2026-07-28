@@ -275,7 +275,7 @@ pub struct ProgramAnalyzer {
     pub global_decls: Vec<ir::Declaration>,
     pub scope_manager: ScopeManager,
     pub current_local_var_offset: usize,
-    pub stmt_labels_in_cur_function: Vec<String>,
+    pub unique_stmt_labels_map_in_cur_function: HashMap<String, String>,
     pub current_function_return_type: Type,
     pub unique_string_name_index: usize,
     pub unique_stmt_label_index: usize,
@@ -289,7 +289,7 @@ impl ProgramAnalyzer {
                         global_decls: Vec::new(),
                         scope_manager: ScopeManager::new(),
                         current_local_var_offset: 0,
-                        stmt_labels_in_cur_function: Vec::new(),
+                        unique_stmt_labels_map_in_cur_function: HashMap::new(),
                         current_function_return_type: Type::ty_none,
                         unique_string_name_index: 0,
                         unique_stmt_label_index: 0,
@@ -515,7 +515,13 @@ impl ProgramAnalyzer {
         // current_local_var_offset will be used to determine the position of all local variables in current
         // to-be-analyzed function. Thus, at the start of each function analyzation, we must reset it.
         self.current_local_var_offset = 0;
-        self.stmt_labels_in_cur_function = fun.stmt_labels.clone();
+        self.unique_stmt_labels_map_in_cur_function.clear();
+        for label in &fun.stmt_labels {
+            let unique_label = self.transform_to_unique_goto_label(label);
+            self.unique_stmt_labels_map_in_cur_function.insert(label.clone(), unique_label);
+        }
+
+        
 
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
         let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
@@ -902,6 +908,7 @@ impl ProgramAnalyzer {
             }
             For(parse::ForStmt{init, cond, inc, then}) => {
                 self.scope_manager.enter_new_scope();
+                let pre_end_label = self.cur_loop_end_label.clone();
                 let end_label = self.next_loop_end_label();
                 self.cur_loop_end_label = Some(end_label.clone());
                 let mut init_stmts = Vec::new();
@@ -930,7 +937,7 @@ impl ProgramAnalyzer {
                     None
                 };
                 let then = Box::new(self.analyze_stmt(then));
-                self.cur_loop_end_label = None;
+                self.cur_loop_end_label = pre_end_label;
                 self.scope_manager.exit_current_scope();
                 StmtType::For{init: init_stmts, cond, inc, then, end_label}
             }
@@ -943,26 +950,30 @@ impl ProgramAnalyzer {
                 }
             }
             GotoStmt(label) => {
-                if self.stmt_labels_in_cur_function.contains(label) {
-                    let unique_goto_label = self.transform_to_unique_goto_label(label);
-                    StmtType::Goto(unique_goto_label)
+                let unique_goto_label = self.unique_stmt_labels_map_in_cur_function.get(label);
+                if let Some(unique_goto_label) = unique_goto_label {
+                    StmtType::Goto(unique_goto_label.clone())
                 } else {
                     println!("unknown goto label: {}", label);
                     exit(1);
                 }
             }
             LabeledStmt(label, stmt) => {
-                let unique_goto_label = self.transform_to_unique_goto_label(label);
                 let stmt = Box::new(self.analyze_stmt(stmt));
-                StmtType::LabeledStmt(unique_goto_label, stmt)
+                let unique_goto_label = self.unique_stmt_labels_map_in_cur_function.get(label);
+                if let Some(unique_goto_label) = unique_goto_label {
+                    StmtType::LabeledStmt(unique_goto_label.clone(), stmt)
+                } else {
+                    println!("compiler bug: statement label {} is not recored in parse phase.", label);
+                    exit(1);
+                }
             }
         }
     }
 
-    // @Issue: What if 2 identical label name in different function?
-    // Every goto label must be unique across the whole .c file.
     fn transform_to_unique_goto_label(&mut self, label: &str) -> String {
-        let unique_goto_label = format!(".GOTO_{}", label.clone());
+        let unique_goto_label = format!(".GOTO_{}_{}", label.clone(), self.unique_stmt_label_index);
+        self.unique_stmt_label_index += 1;
         return unique_goto_label;
     }
 
