@@ -280,6 +280,7 @@ pub struct ProgramAnalyzer {
     pub unique_string_name_index: usize,
     pub unique_stmt_label_index: usize,
     pub cur_loop_end_label: Option<String>,
+    pub cur_loop_begin_label: Option<String>,
 }
 
 impl ProgramAnalyzer {
@@ -294,6 +295,7 @@ impl ProgramAnalyzer {
                         unique_string_name_index: 0,
                         unique_stmt_label_index: 0,
                         cur_loop_end_label: None,
+                        cur_loop_begin_label: None,
                         }
     }
 
@@ -908,9 +910,12 @@ impl ProgramAnalyzer {
             }
             For(parse::ForStmt{init, cond, inc, then}) => {
                 self.scope_manager.enter_new_scope();
-                let pre_end_label = self.cur_loop_end_label.clone();
+                let backup_end_label = self.cur_loop_end_label.clone();
                 let end_label = self.next_loop_end_label();
                 self.cur_loop_end_label = Some(end_label.clone());
+                let backup_begin_label = self.cur_loop_begin_label.clone();
+                let continue_point_label = self.next_loop_begin_label();
+                self.cur_loop_begin_label = Some(continue_point_label.clone());
                 let mut init_stmts = Vec::new();
                 if let Some(init) = init {
                     match init.as_mut() {
@@ -937,9 +942,18 @@ impl ProgramAnalyzer {
                     None
                 };
                 let then = Box::new(self.analyze_stmt(then));
-                self.cur_loop_end_label = pre_end_label;
+                self.cur_loop_end_label = backup_end_label;
+                self.cur_loop_begin_label = backup_begin_label;
                 self.scope_manager.exit_current_scope();
-                StmtType::For{init: init_stmts, cond, inc, then, end_label}
+                StmtType::For{init: init_stmts, cond, inc, then, end_label, continue_point_label}
+            }
+            ContinueStmt => {
+                if let Some(label) = &self.cur_loop_begin_label {
+                    StmtType::Goto(label.clone())
+                } else {
+                    println!("this is not inside for or while loop, you cannot continue");
+                    exit(1);
+                }
             }
             BreakStmt => {
                 if let Some(label) = &self.cur_loop_end_label {
@@ -975,6 +989,12 @@ impl ProgramAnalyzer {
         let unique_goto_label = format!(".GOTO_{}_{}", label.clone(), self.unique_stmt_label_index);
         self.unique_stmt_label_index += 1;
         return unique_goto_label;
+    }
+
+    fn next_loop_begin_label(&mut self) -> String {
+        let unique_loop_begin_label = format!(".LOOPBEGIN_{}", self.unique_stmt_label_index);
+        self.unique_stmt_label_index += 1;
+        return unique_loop_begin_label;
     }
 
     fn next_loop_end_label(&mut self) -> String {
