@@ -8,6 +8,9 @@ pub enum StmtType {
     Block(Vec<StmtType>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
     For {init: Vec<StmtType>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>, end_label: String, continue_point_label: String},
+    Switch{expr: Expr, cases: Vec<StmtType>, end_label: String},
+    Case(i64, Box<StmtType>),
+    DefaultStmt(Box<StmtType>),
     Goto(String),
     LabeledStmt(String, Box<StmtType>),
 }

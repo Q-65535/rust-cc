@@ -280,7 +280,8 @@ pub struct ProgramAnalyzer {
     pub unique_string_name_index: usize,
     pub unique_stmt_label_index: usize,
     pub cur_loop_end_label: Option<String>,
-    pub cur_loop_begin_label: Option<String>,
+    pub cur_loop_continue_point_label: Option<String>,
+    pub cur_switch: Option<ir::StmtType>,
 }
 
 impl ProgramAnalyzer {
@@ -295,7 +296,7 @@ impl ProgramAnalyzer {
                         unique_string_name_index: 0,
                         unique_stmt_label_index: 0,
                         cur_loop_end_label: None,
-                        cur_loop_begin_label: None,
+                        cur_loop_continue_point_label: None,
                         }
     }
 
@@ -913,9 +914,9 @@ impl ProgramAnalyzer {
                 let backup_end_label = self.cur_loop_end_label.clone();
                 let end_label = self.next_loop_end_label();
                 self.cur_loop_end_label = Some(end_label.clone());
-                let backup_begin_label = self.cur_loop_begin_label.clone();
+                let backup_begin_label = self.cur_loop_continue_point_label.clone();
                 let continue_point_label = self.next_loop_begin_label();
-                self.cur_loop_begin_label = Some(continue_point_label.clone());
+                self.cur_loop_continue_point_label = Some(continue_point_label.clone());
                 let mut init_stmts = Vec::new();
                 if let Some(init) = init {
                     match init.as_mut() {
@@ -943,12 +944,47 @@ impl ProgramAnalyzer {
                 };
                 let then = Box::new(self.analyze_stmt(then));
                 self.cur_loop_end_label = backup_end_label;
-                self.cur_loop_begin_label = backup_begin_label;
+                self.cur_loop_continue_point_label = backup_begin_label;
                 self.scope_manager.exit_current_scope();
                 StmtType::For{init: init_stmts, cond, inc, then, end_label, continue_point_label}
             }
+            SwitchStmt(expr, stmt) => {
+                let expr = self.analyze_expr(expr);
+
+                let backup_end_label = end_label.clone();
+                let end_label = self.next_loop_end_label();
+                self.cur_loop_end_label = Some(end_label.clone());
+                let stmt = self.analyze_stmt(stmt);
+                self.cur_loop_end_label = backup_end_label;
+                StmtType::Switch{expr, stmt, end_label}
+            }
+            CaseStmt(expr, stmt) => {
+                if let Some(swtich_stmt) = self.cur_switch {
+                    let value = self.get_constant_value(expr);
+                    let stmt = self.analyze_stmt(stmt);
+                    // @TODO: add label to this case statement
+                    let case_stmt = StmtType::Case(value, Box::new(stmt));
+                    self.cur_switch.add_case(case_stmt.clone());
+                    case_stmt
+                } else {
+                    println!("this is not inside switch statement, you cannot handle case statement");
+                    exit(1);
+                }
+            }
+            DefaultStmt(stmt) => {
+                if let Some(swtich_stmt) = self.cur_switch {
+                    let stmt = self.analyze_stmt(stmt);
+                    // @TODO: add label to this case statement
+                    let default_case_stmt = StmtType::Case(value, Box::new(stmt));
+                    self.cur_switch.add_default_case(default_case_stmt.clone());
+                    default_case_stmt
+                } else {
+                    println!("this is not inside switch statement, you cannot handle case statement");
+                    exit(1);
+                }
+            }
             ContinueStmt => {
-                if let Some(label) = &self.cur_loop_begin_label {
+                if let Some(label) = &self.cur_loop_continue_point_label {
                     StmtType::Goto(label.clone())
                 } else {
                     println!("this is not inside for or while loop, you cannot continue");
@@ -998,7 +1034,7 @@ impl ProgramAnalyzer {
     }
 
     fn next_loop_end_label(&mut self) -> String {
-        let unique_loop_end_label = format!(".LOOPEND_{}", self.unique_stmt_label_index);
+        let unique_loop_end_label = format!(".CONTINUE_POINT_{}", self.unique_stmt_label_index);
         self.unique_stmt_label_index += 1;
         return unique_loop_end_label;
     }
