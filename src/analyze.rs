@@ -279,9 +279,9 @@ pub struct ProgramAnalyzer {
     pub current_function_return_type: Type,
     pub unique_string_name_index: usize,
     pub unique_stmt_label_index: usize,
-    pub cur_loop_end_label: Option<String>,
+    pub cur_end_label: Option<String>,
     pub cur_loop_continue_point_label: Option<String>,
-    pub cur_switch: Option<ir::StmtType>,
+    pub cur_switch: Option<ir::Switch_Case>,
 }
 
 impl ProgramAnalyzer {
@@ -295,8 +295,9 @@ impl ProgramAnalyzer {
                         current_function_return_type: Type::ty_none,
                         unique_string_name_index: 0,
                         unique_stmt_label_index: 0,
-                        cur_loop_end_label: None,
+                        cur_end_label: None,
                         cur_loop_continue_point_label: None,
+                        cur_switch: None,
                         }
     }
 
@@ -911,9 +912,9 @@ impl ProgramAnalyzer {
             }
             For(parse::ForStmt{init, cond, inc, then}) => {
                 self.scope_manager.enter_new_scope();
-                let backup_end_label = self.cur_loop_end_label.clone();
+                let backup_end_label = self.cur_end_label.clone();
                 let end_label = self.next_loop_end_label();
-                self.cur_loop_end_label = Some(end_label.clone());
+                self.cur_end_label = Some(end_label.clone());
                 let backup_begin_label = self.cur_loop_continue_point_label.clone();
                 let continue_point_label = self.next_loop_begin_label();
                 self.cur_loop_continue_point_label = Some(continue_point_label.clone());
@@ -943,41 +944,62 @@ impl ProgramAnalyzer {
                     None
                 };
                 let then = Box::new(self.analyze_stmt(then));
-                self.cur_loop_end_label = backup_end_label;
+                self.cur_end_label = backup_end_label;
                 self.cur_loop_continue_point_label = backup_begin_label;
                 self.scope_manager.exit_current_scope();
                 StmtType::For{init: init_stmts, cond, inc, then, end_label, continue_point_label}
             }
             SwitchStmt(expr, stmt) => {
-                let expr = self.analyze_expr(expr);
+                let new_switch = ir::Switch_Case{
+                    target_expr: self.analyze_expr(expr),
+                    cases: Vec::new(),
+                    default_label: None,
+                };
 
-                let backup_end_label = end_label.clone();
+                let backup_switch = self.cur_switch.clone();
+                self.cur_switch = Some(new_switch);
+                let backup_end_label = self.cur_end_label.clone();
                 let end_label = self.next_loop_end_label();
-                self.cur_loop_end_label = Some(end_label.clone());
+                self.cur_end_label = Some(end_label.clone());
                 let stmt = self.analyze_stmt(stmt);
-                self.cur_loop_end_label = backup_end_label;
-                StmtType::Switch{expr, stmt, end_label}
+                let result_switch = self.cur_switch.clone();
+                self.cur_end_label = backup_end_label;
+                self.cur_switch = backup_switch;
+
+                if let Some(switch) = result_switch {
+                    StmtType::Switch{switch_case_info: switch, body: Box::new(stmt), end_label}
+                } else {
+                    println!("compiler bug: switch statement doesn't exist after handling the body!!!");
+                    exit(1);
+                }
             }
             CaseStmt(expr, stmt) => {
-                if let Some(swtich_stmt) = self.cur_switch {
-                    let value = self.get_constant_value(expr);
-                    let stmt = self.analyze_stmt(stmt);
-                    // @TODO: add label to this case statement
-                    let case_stmt = StmtType::Case(value, Box::new(stmt));
-                    self.cur_switch.add_case(case_stmt.clone());
-                    case_stmt
+                let analyzed_expr = self.analyze_expr(expr);
+                let unique_label = self.next_case_label();
+                let stmt = self.analyze_stmt(stmt);
+                if let Some(cur_switch) = &mut self.cur_switch {
+                    if is_constant_value(&analyzed_expr) {
+                        let matching_value = get_constant_value(&analyzed_expr);
+                        let case = ir::Case{matching_value, unique_label: unique_label.clone()};
+                        cur_switch.cases.push(case.clone());
+                        ir::StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
+                    } else {
+                        let error_message = format!("this matching case is not a constant expression");
+                        print_error_at(expr.span, &error_message);
+                        exit(1);
+                    }
                 } else {
                     println!("this is not inside switch statement, you cannot handle case statement");
                     exit(1);
                 }
             }
-            DefaultStmt(stmt) => {
-                if let Some(swtich_stmt) = self.cur_switch {
-                    let stmt = self.analyze_stmt(stmt);
-                    // @TODO: add label to this case statement
-                    let default_case_stmt = StmtType::Case(value, Box::new(stmt));
-                    self.cur_switch.add_default_case(default_case_stmt.clone());
-                    default_case_stmt
+            DefaultStmt(default_case) => {
+                let unique_label = self.next_case_label();
+                let stmt = self.analyze_stmt(default_case);
+                if let Some(cur_switch) = &mut self.cur_switch {
+                    let case = ir::Case{matching_value: 0, unique_label: unique_label.clone()};
+                    cur_switch.default_label = Some(unique_label.clone());
+                    StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
                 } else {
                     println!("this is not inside switch statement, you cannot handle case statement");
                     exit(1);
@@ -992,10 +1014,10 @@ impl ProgramAnalyzer {
                 }
             }
             BreakStmt => {
-                if let Some(label) = &self.cur_loop_end_label {
+                if let Some(label) = &self.cur_end_label {
                     StmtType::Goto(label.clone())
                 } else {
-                    println!("this is not inside for or while loop, you cannot break");
+                    println!("this is not inside for or while loop or switch case body, you cannot break");
                     exit(1);
                 }
             }
@@ -1037,6 +1059,12 @@ impl ProgramAnalyzer {
         let unique_loop_end_label = format!(".CONTINUE_POINT_{}", self.unique_stmt_label_index);
         self.unique_stmt_label_index += 1;
         return unique_loop_end_label;
+    }
+
+    fn next_case_label(&mut self) -> String {
+        let unique_loop_begin_label = format!(".CASE_{}", self.unique_stmt_label_index);
+        self.unique_stmt_label_index += 1;
+        return unique_loop_begin_label;
     }
 
     fn analyze_expr(&mut self, expr: &mut Expr) -> ir::Expr {
@@ -1697,3 +1725,23 @@ pub fn align_to(n: usize, align: usize) -> usize {
         _ => base + align,
     }
 }
+
+fn is_constant_value(expr: &ir::Expr) -> bool {
+    match &expr.content {
+        ir::ExprType::Natural_Number(..) => true,
+        ir::ExprType::Neg(expr) => is_constant_value(&expr),
+        _ => false,
+    }
+}
+    
+fn get_constant_value(expr: &ir::Expr) -> i64 {
+    match &expr.content {
+        ir::ExprType::Natural_Number(n) => *n as i64,
+        ir::ExprType::Neg(expr) => -get_constant_value(&expr),
+        _ => {
+            println!("this is not a costant expression");
+            exit(1);
+        }
+    }
+}
+

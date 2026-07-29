@@ -8,13 +8,25 @@ pub enum StmtType {
     Block(Vec<StmtType>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
     For {init: Vec<StmtType>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>, end_label: String, continue_point_label: String},
-    Switch{expr: Expr, cases: Vec<StmtType>, end_label: String},
-    Case(i64, Box<StmtType>),
-    DefaultStmt(Box<StmtType>),
+    Switch{switch_case_info: Switch_Case, body: Box<StmtType>, end_label: String},
+    CaseStmt{unique_label: String, stmt: Box<StmtType>},
     Goto(String),
     LabeledStmt(String, Box<StmtType>),
 }
 use StmtType::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Switch_Case {
+    pub target_expr: Expr,
+    pub cases: Vec<Case>,
+    pub default_label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Case {
+    pub matching_value: i64,
+    pub unique_label: String,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {

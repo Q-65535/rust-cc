@@ -171,7 +171,34 @@ impl Generator {
                 emit!("{}:", label);
                 self.stmt_gen(stmt);
             }
+            ir::StmtType::Switch{switch_case_info, body, end_label} => self.switch_gen(switch_case_info, body, end_label),
+            ir::StmtType::CaseStmt{unique_label, stmt} => {
+                emit!("{}:", unique_label);
+                self.stmt_gen(stmt);
+            }
         }
+    }
+
+    fn switch_gen(&mut self, switch_case_info: &Switch_Case, body: &StmtType, end_label: &str) {
+        
+        self.expr_gen(&switch_case_info.target_expr);
+        let reg = if sizeof(&switch_case_info.target_expr.ty) == 8 {
+            "%rax".to_string()
+        } else {
+            "%eax".to_string()
+        };
+        for case in &switch_case_info.cases {
+            emit!("  cmp ${}, {}", case.matching_value, reg);
+            emit!("  je {}", case.unique_label);
+        }
+        if let Some(d) = &switch_case_info.default_label {
+            emit!("  jmp {}", d);
+        }
+        emit!("  jmp {}", end_label);
+
+        self.stmt_gen(body);
+        
+        emit!("{}:", end_label);
     }
 
     fn ret_gen(&mut self, expr: &ir::Expr) {
