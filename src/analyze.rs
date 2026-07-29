@@ -9,7 +9,9 @@ use Struct_Or_Union::*;
 use StmtType::*;
 use TokenKind::{Plus, Minus, Mul, Div, Modulus, PlusAssignment, ModulusAssignment,
     MinusAssignment, MulAssignment, DivAssignment, Eq, Neq, LT, LE,
-    GT, GE, Ampersand, BitXOR, BitOR, BitAndAssignment, BitXORAssignment, BitORAssignment};
+    GT, GE, Ampersand, BitXOR, BitOR, SHL, SHR, BitAndAssignment, BitXORAssignment, BitORAssignment,
+    SHLAssignment, SHRAssignment,
+};
 use BlockItem::*;
 use crate::SRC;
 use crate::common::{self, *};
@@ -1085,6 +1087,8 @@ impl ProgramAnalyzer {
                     BitAndAssignment  => self.to_assign(lhs, rhs, OP::BitAnd),
                     BitXORAssignment  => self.to_assign(lhs, rhs, OP::BitXOR),
                     BitORAssignment   => self.to_assign(lhs, rhs, OP::BitOR),
+                    SHLAssignment     => self.to_assign(lhs, rhs, OP::SHL),
+                    SHRAssignment     => self.to_assign(lhs, rhs, OP::SHR),
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
                         gen_binary_expr(lhs, rhs, op)
@@ -1683,6 +1687,8 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
         Ampersand => OP::BitAnd,
         BitXOR => OP::BitXOR,
         BitOR => OP::BitOR,
+        SHL => OP::SHL,
+        SHR => OP::SHR,
         _ => {
             println!("semantic error: trying to convert {:?} to binary operator", tokenkind);
             exit(1);
@@ -1744,4 +1750,3 @@ fn get_constant_value(expr: &ir::Expr) -> i64 {
         }
     }
 }
-

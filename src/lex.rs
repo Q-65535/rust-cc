@@ -13,9 +13,12 @@ pub enum TokenKind {
     Div,
     Modulus,
     PlusAssignment, MinusAssignment, MulAssignment,
-    DivAssignment, ModulusAssignment,
+    DivAssignment, ModulusAssignment, BitAndAssignment,
+    BitXORAssignment, BitORAssignment, SHLAssignment,
+    SHRAssignment,
     PlusPlus, MinusMinus,
-    Ampersand, BitXOR, BitOR, BitAndAssignment, BitXORAssignment, BitORAssignment,
+    Ampersand, BitXOR, BitOR, 
+    SHL, SHR,
     LParen,
     RParen,
     LBrace,
@@ -270,6 +273,16 @@ impl Lexer {
                 },
                 '<' => {
                     match self.peek_char() {
+                        Some('<') => {
+                            self.next_char();
+                            match self.peek_char() {
+                                Some('=') => {
+                                    tokens.push(Self::gen_token(SHLAssignment, start_index, 3));
+                                    self.next_char();
+                                },
+                                _ => tokens.push(Self::gen_token(SHL, start_index, 2)),
+                            }
+                        },
                         Some('=') => {
                             tokens.push(Self::gen_token(LE, start_index, 2));
                             self.next_char();
@@ -279,6 +292,16 @@ impl Lexer {
                 },
                 '>' => {
                     match self.peek_char() {
+                        Some('>') => {
+                            self.next_char();
+                            match self.peek_char() {
+                                Some('=') => {
+                                    tokens.push(Self::gen_token(SHRAssignment, start_index, 3));
+                                    self.next_char();
+                                },
+                                _ => tokens.push(Self::gen_token(SHR, start_index, 2)),
+                            }
+                        },
                         Some('=') => {
                             tokens.push(Self::gen_token(GE, start_index, 2));
                             self.next_char();

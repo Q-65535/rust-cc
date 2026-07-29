@@ -146,6 +146,9 @@ pub enum OP {
     BitAnd,
     BitXOR,
     BitOR,
+    SHL,
+    SHR,
+
 }
 
 impl OP {

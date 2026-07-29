@@ -237,10 +237,12 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
         LexComma => Comma,
         LexAssignment | PlusAssignment | MinusAssignment |
         MulAssignment | DivAssignment | ModulusAssignment |
-        BitAndAssignment | BitXORAssignment | BitORAssignment => Assignment,
+        BitAndAssignment | BitXORAssignment | BitORAssignment |
+        SHLAssignment | SHRAssignment => Assignment,
         Ampersand => Logical_AND,
         BitXOR => Bitwise_XOR,
         BitOR => Bitwise_OR,
+        SHL | SHR => Shift,
         Eq | Neq => Equality,
         LT | LE | GT | GE => Relational,
         Plus | Minus => Additive,
@@ -681,7 +683,10 @@ impl Parser {
 
             let constant_expr = if self.cur_token().kind == LexAssignment {
                 self.bump();
-                // Commas separate declarators, so leave a comma unconsumed here.
+                // Comma here serves as a seperator between enumerators, instead of infix operator.
+                // We don't want to treat the comma as infix operator,
+                // so we pass Comma precedence and Left_To_Right associativity to make sure that
+                // the parsing of this expr stops right at the next comma token.
                 Some(self.parse_expr(Comma, Left_To_Right)?)
             } else {
                 None
@@ -1021,12 +1026,13 @@ impl Parser {
                 Plus | Minus | Mul | Div | PlusAssignment | MinusAssignment |
                 MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE |
                 Modulus | ModulusAssignment | Ampersand | BitXOR | BitOR |
-                BitAndAssignment | BitXORAssignment | BitORAssignment
+                BitAndAssignment | BitXORAssignment | BitORAssignment |
+                SHL | SHLAssignment | SHR | SHRAssignment
                 =>                self.parse_infix(expr)?,
 
                 PlusPlus =>       self.parse_post_increment(expr)?,
                 MinusMinus =>     self.parse_post_decrement(expr)?,
-                LexComma =>          self.parse_comma_expression(expr)?,
+                LexComma =>       self.parse_comma_expression(expr)?,
                 LParen =>         self.parse_funcall(expr)?,
                 LSqureBracket =>  self.parse_array_indexing(expr)?,
                 // @Smell: Should have parse_infix() to handle assignment.

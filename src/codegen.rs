@@ -277,6 +277,18 @@ impl Generator {
                     BitAnd => emit!("  and %rdi, %rax"),
                     BitOR =>  emit!("  or %rdi, %rax"),
                     BitXOR => emit!("  xor %rdi, %rax"),
+                    SHL => {
+                        emit!("  mov %rdi, %rcx");
+                        emit!("  shl %cl, {}", ax);
+                    }
+                    SHR => {
+                        emit!("  mov %rdi, %rcx");
+                        if sizeof(&expr.ty) == 8 {
+                            emit!("  sar %cl, {}", ax);
+                        } else {
+                            emit!("  sar %cl, {}", ax);
+                        }
+                    }
                     op if op.is_compare() => {
                         emit!("  cmp {}, {}", di, ax);
                         match op {
