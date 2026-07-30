@@ -31,6 +31,7 @@ pub enum TokenKind {
     Exclamation,
     Tilde,
     Arrow,
+    QuestionMark,
     
     Semicolon,
     Colon,
@@ -262,6 +263,7 @@ impl Lexer {
                         _ => tokens.push(Self::gen_token(LexAssignment, start_index, 1)),
                     }
                 },
+                '?' => tokens.push(Self::gen_token(QuestionMark, start_index, 1)),
                 '!' => {
                     match self.peek_char() {
                         Some('=') => {

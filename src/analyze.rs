@@ -1095,6 +1095,14 @@ impl ProgramAnalyzer {
                     }
                 }
             }
+            Conditional(cond_expr, then_expr, else_expr) => {
+                let cond_expr = self.analyze_expr(cond_expr);
+                let then_expr = self.analyze_expr(then_expr);
+                let else_expr = self.analyze_expr(else_expr);
+                let ty = then_expr.ty.clone();
+                let content = ExprType::Conditional{cond: Box::new(cond_expr), then: Box::new(then_expr), otherwise: Box::new(else_expr)};
+                ir::Expr{content, ty, span}
+            }
             CommaExpression(lhs, rhs) => {
                 let rhs = self.analyze_expr(rhs);
                 let lhs = self.analyze_expr(lhs);

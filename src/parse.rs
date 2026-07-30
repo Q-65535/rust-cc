@@ -168,6 +168,7 @@ pub enum ExprType {
     Natural_Number(u64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
+    Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
     PreIncrement(Box<Expr>),
     PreDecrement(Box<Expr>),
     PostIncrement(Box<Expr>),
@@ -240,6 +241,7 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
         BitAndAssignment | BitXORAssignment | BitORAssignment |
         SHLAssignment | SHRAssignment => Assignment,
         Ampersand => Logical_AND,
+        QuestionMark => Conditional,
         BitXOR => Bitwise_XOR,
         BitOR => Bitwise_OR,
         SHL | SHR => Shift,
@@ -1036,7 +1038,8 @@ impl Parser {
                 LParen =>         self.parse_funcall(expr)?,
                 LSqureBracket =>  self.parse_array_indexing(expr)?,
                 // @Smell: Should have parse_infix() to handle assignment.
-                LexAssignment =>     self.parse_assign(expr)?,
+                LexAssignment =>  self.parse_assign(expr)?,
+                QuestionMark =>   self.parse_conditional(expr)?,
                 Period | Arrow => self.parse_request_struct_member(expr)?,
 
                 _ => {
@@ -1048,6 +1051,19 @@ impl Parser {
             };
         }
         Ok(expr)
+    }
+
+    fn parse_conditional(&mut self, condition_expr: Expr) -> Result<Expr, String> {
+        self.expect(&QuestionMark)?;
+        let then_expr = self.parse_expr(Precedence::Conditional, Right_To_Left)?;
+        self.expect(&Colon)?;
+        let else_expr = self.parse_expr(Precedence::Conditional, Right_To_Left)?;
+        let span = Span {
+            start_index: condition_expr.span.start_index,
+            end_index: else_expr.span.end_index,
+        };
+        let content = ExprType::Conditional(Box::new(condition_expr), Box::new(then_expr), Box::new(else_expr));
+        Ok(Expr::new(content, span))
     }
 
     fn parse_paren(&mut self) -> Result<Expr, String> {

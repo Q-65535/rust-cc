@@ -311,6 +311,18 @@ impl Generator {
                     _ => eprintln!("gen_code error: not support binary expr {:?}", content),
                 }
             }
+            Conditional{cond, then, otherwise} => {
+                let c = self.next_jump_label_count();
+                self.expr_gen(cond);
+                emit!("  cmp $0, %rax");
+                emit!("  je .L.else.{}", c);
+                self.expr_gen(then);
+                emit!("  jmp .L.end.{}", c);
+                emit!(".L.else.{}:", c);
+                self.expr_gen(otherwise);
+                emit!(".L.end.{}:", c);
+                return;
+            }
             Assign(var, val) => {
                 self.gen_addr(var);
                 self.push("%rax");

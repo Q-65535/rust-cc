@@ -33,6 +33,7 @@ pub enum ExprType {
     Natural_Number(u64),
     Binary(Box<Expr>, Box<Expr>, OP),
     Assign(Box<Expr>, Box<Expr>),
+    Conditional {cond: Box<Expr>, then: Box<Expr>, otherwise: Box<Expr>},
     Neg(Box<Expr>),
     Not(Box<Expr>),
     BitNot(Box<Expr>),
