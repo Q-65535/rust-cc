@@ -1097,8 +1097,10 @@ impl ProgramAnalyzer {
             }
             Conditional(cond_expr, then_expr, else_expr) => {
                 let cond_expr = self.analyze_expr(cond_expr);
+                // @Incomplete: Type promotion for then and else expr.
                 let then_expr = self.analyze_expr(then_expr);
                 let else_expr = self.analyze_expr(else_expr);
+                // @Problem: Really use then_expr's type as the type of this whole expr?
                 let ty = then_expr.ty.clone();
                 let content = ExprType::Conditional{cond: Box::new(cond_expr), then: Box::new(then_expr), otherwise: Box::new(else_expr)};
                 ir::Expr{content, ty, span}
@@ -1589,7 +1591,7 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                     _ => exit(1),
                 };
                 if lhs.ty != rhs.ty {
-                    print_error_at(rhs.span, "pointer arithmatic warning: type doesn't match");
+                    print_error_at(rhs.span, "pointer arithmatic error: type doesn't match");
                 }
                 // The result of "pointer - pointer" is the gap between them,
                 // measured in elements.
@@ -1617,6 +1619,7 @@ fn usual_arithmatic_conversion(lhs: ir::Expr, rhs: ir::Expr) -> (ir::Expr, ir::E
     return (casted_lhs, casted_rhs);
 }
 
+// This function implicitly treat lhs as standard.
 fn get_common_type(lhs_type: &Type, rhs_type: &Type) -> Type {
     match lhs_type {
         Pointer_To(pointee_type) => return (pointer_to(pointee_type)),
