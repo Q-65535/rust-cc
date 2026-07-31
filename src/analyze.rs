@@ -1097,12 +1097,21 @@ impl ProgramAnalyzer {
             }
             Conditional(cond_expr, then_expr, else_expr) => {
                 let cond_expr = self.analyze_expr(cond_expr);
-                // @Incomplete: Type promotion for then and else expr.
-                let then_expr = self.analyze_expr(then_expr);
-                let else_expr = self.analyze_expr(else_expr);
-                // @Problem: Really use then_expr's type as the type of this whole expr?
-                let ty = then_expr.ty.clone();
-                let content = ExprType::Conditional{cond: Box::new(cond_expr), then: Box::new(then_expr), otherwise: Box::new(else_expr)};
+                let mut then_expr = self.analyze_expr(then_expr);
+                let mut else_expr = self.analyze_expr(else_expr);
+                let mut ty: Type;
+                // @Incomplete: What if then and else expr are struct type.
+                if then_expr.ty == Void || else_expr.ty == Void {
+                    ty = Void;
+                } else {
+                    (then_expr, else_expr) = usual_arithmatic_conversion(then_expr, else_expr);
+                    ty = then_expr.ty.clone();
+                }
+                let content = ExprType::Conditional{
+                    cond: Box::new(cond_expr),
+                    then: Box::new(then_expr),
+                    otherwise: Box::new(else_expr),
+                };
                 ir::Expr{content, ty, span}
             }
             CommaExpression(lhs, rhs) => {
