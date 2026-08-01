@@ -240,10 +240,12 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
         MulAssignment | DivAssignment | ModulusAssignment |
         BitAndAssignment | BitXORAssignment | BitORAssignment |
         SHLAssignment | SHRAssignment => Assignment,
-        Ampersand => Logical_AND,
+        Ampersand => Bitwise_AND,
         QuestionMark => Conditional,
         BitXOR => Bitwise_XOR,
         BitOR => Bitwise_OR,
+        LOGAND => Logical_AND,
+        LOGOR => Logical_OR,
         SHL | SHR => Shift,
         Eq | Neq => Equality,
         LT | LE | GT | GE => Relational,
@@ -1029,7 +1031,7 @@ impl Parser {
                 MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE |
                 Modulus | ModulusAssignment | Ampersand | BitXOR | BitOR |
                 BitAndAssignment | BitXORAssignment | BitORAssignment |
-                SHL | SHLAssignment | SHR | SHRAssignment
+                SHL | SHLAssignment | SHR | SHRAssignment | LOGAND | LOGOR
                 =>                self.parse_infix(expr)?,
 
                 PlusPlus =>       self.parse_post_increment(expr)?,

@@ -1,3 +1,5 @@
+/*
+
 // pretty.rs — Human-readable output for lexer tokens and AST nodes
 //
 // Usage:
@@ -504,3 +506,5 @@ fn token_op_str(kind: &TokenKind) -> &'static str {
         _ => "?",
     }
 }
+
+*/

@@ -150,6 +150,9 @@ pub enum OP {
     SHL,
     SHR,
 
+    // logical
+    LOGAND,
+    LOGOR,
 }
 
 impl OP {

@@ -10,6 +10,7 @@ use StmtType::*;
 use TokenKind::{Plus, Minus, Mul, Div, Modulus, PlusAssignment, ModulusAssignment,
     MinusAssignment, MulAssignment, DivAssignment, Eq, Neq, LT, LE,
     GT, GE, Ampersand, BitXOR, BitOR, SHL, SHR, BitAndAssignment, BitXORAssignment, BitORAssignment,
+    LOGAND, LOGOR,
     SHLAssignment, SHRAssignment,
 };
 use BlockItem::*;
@@ -981,7 +982,7 @@ impl ProgramAnalyzer {
                 let stmt = self.analyze_stmt(stmt);
                 if let Some(cur_switch) = &mut self.cur_switch {
                     if is_constant_value(&analyzed_expr) {
-                        let matching_value = get_constant_value(&analyzed_expr);
+                        let matching_value = eval_constant(&analyzed_expr);
                         let case = ir::Case{matching_value, unique_label: unique_label.clone()};
                         cur_switch.cases.push(case.clone());
                         ir::StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
@@ -1707,6 +1708,8 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
         Ampersand => OP::BitAnd,
         BitXOR => OP::BitXOR,
         BitOR => OP::BitOR,
+        LOGAND => OP::LOGAND,
+        LOGOR => OP::LOGOR,
         SHL => OP::SHL,
         SHR => OP::SHR,
         _ => {
@@ -1760,10 +1763,10 @@ fn is_constant_value(expr: &ir::Expr) -> bool {
     }
 }
     
-fn get_constant_value(expr: &ir::Expr) -> i64 {
+fn eval_constant(expr: &ir::Expr) -> i64 {
     match &expr.content {
         ir::ExprType::Natural_Number(n) => *n as i64,
-        ir::ExprType::Neg(expr) => -get_constant_value(&expr),
+        ir::ExprType::Neg(expr) => -eval_constant(&expr),
         _ => {
             println!("this is not a costant expression");
             exit(1);

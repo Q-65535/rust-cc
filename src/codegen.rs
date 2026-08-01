@@ -277,6 +277,30 @@ impl Generator {
                     BitAnd => emit!("  and %rdi, %rax"),
                     BitOR =>  emit!("  or %rdi, %rax"),
                     BitXOR => emit!("  xor %rdi, %rax"),
+                    LOGAND => {
+                        let c = self.next_jump_label_count();
+                        emit!("  cmp $0, {}", ax);
+                        emit!("  je .L.false.{}", c);
+                        emit!("  cmp $0, {}", di);
+                        emit!("  je .L.false.{}", c);
+                        emit!("  mov $1, {}", ax);
+                        emit!("  jmp .L.end.{}", c);
+                        emit!(".L.false.{}:", c);
+                        emit!("  mov $0, {}", ax);
+                        emit!(".L.end.{}:", c);
+                    }
+                    LOGOR => {
+                        let c = self.next_jump_label_count();
+                        emit!("  cmp $0, {}", ax);
+                        emit!("  jne .L.true.{}", c);
+                        emit!("  cmp $0, {}", di);
+                        emit!("  jne .L.true.{}", c);
+                        emit!("  mov $0, {}", ax);
+                        emit!("  jmp .L.end.{}", c);
+                        emit!(".L.true.{}:", c);
+                        emit!("  mov $1, {}", ax);
+                        emit!(".L.end.{}:", c);
+                    }
                     SHL => {
                         emit!("  mov %rdi, %rcx");
                         emit!("  shl %cl, {}", ax);

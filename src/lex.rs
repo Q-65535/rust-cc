@@ -18,6 +18,7 @@ pub enum TokenKind {
     SHRAssignment,
     PlusPlus, MinusMinus,
     Ampersand, BitXOR, BitOR, 
+    LOGAND, LOGOR,
     SHL, SHR,
     LParen,
     RParen,
@@ -177,6 +178,10 @@ impl Lexer {
                 ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
                 '&' => {
                     match self.peek_char() {
+                        Some('&') => {
+                            tokens.push(Self::gen_token(LOGAND, start_index, 2));
+                            self.next_char();
+                        }
                         Some('=') => {
                             tokens.push(Self::gen_token(BitAndAssignment, start_index, 2));
                             self.next_char();
@@ -195,6 +200,10 @@ impl Lexer {
                 }
                 '|' => {
                     match self.peek_char() {
+                        Some('|') => {
+                            tokens.push(Self::gen_token(LOGOR, start_index, 2));
+                            self.next_char();
+                        }
                         Some('=') => {
                             tokens.push(Self::gen_token(BitORAssignment, start_index, 2));
                             self.next_char();
