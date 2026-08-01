@@ -982,7 +982,7 @@ impl ProgramAnalyzer {
                 let stmt = self.analyze_stmt(stmt);
                 if let Some(cur_switch) = &mut self.cur_switch {
                     if is_constant_value(&analyzed_expr) {
-                        let matching_value = eval_constant(&analyzed_expr);
+                        let matching_value = eval_constant(&analyzed_expr).unwrap();
                         let case = ir::Case{matching_value, unique_label: unique_label.clone()};
                         cur_switch.cases.push(case.clone());
                         ir::StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
@@ -1168,6 +1168,7 @@ impl ProgramAnalyzer {
                 let neg_expr = ir::Expr{content, ty, span};
                 return cast(neg_expr, &common_type);
             }
+            // !expr
             Not(val) => {
                 let span = expr.span;
                 let ty = Type::Int;
@@ -1175,6 +1176,7 @@ impl ProgramAnalyzer {
                 let content = ir::ExprType::Not(Box::new(val));
                 ir::Expr{content, ty, span}
             }
+            // ~expr
             BitNot(val) => {
                 let val = self.analyze_expr(val);
                 let span = expr.span;
@@ -1763,10 +1765,114 @@ fn is_constant_value(expr: &ir::Expr) -> bool {
     }
 }
     
-fn eval_constant(expr: &ir::Expr) -> i64 {
+fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
+    use ir::OP::*;
     match &expr.content {
-        ir::ExprType::Natural_Number(n) => *n as i64,
-        ir::ExprType::Neg(expr) => -eval_constant(&expr),
+        ir::ExprType::Natural_Number(n) => Ok(*n as i64),
+        ir::ExprType::Neg(expr) => Ok(-eval_constant(&expr)?),
+        ir::ExprType::Not(expr) => todo!(),
+        ir::ExprType::Binary(lhs, rhs, op) => {
+            match op {
+                Plus => {
+                    let result = eval_constant(lhs)? + eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                Minus => {
+                    let result = eval_constant(lhs)? - eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                Mul => {
+                    let result = eval_constant(lhs)? * eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                Div => {
+                    let result = eval_constant(lhs)? / eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                Modulus => {
+                    let result = eval_constant(lhs)? % eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                BitAnd => {
+                    let result = eval_constant(lhs)? & eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                BitXOR => {
+                    let result = eval_constant(lhs)? ^ eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                BitOR => {
+                    let result = eval_constant(lhs)? | eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                SHL => {
+                    let result = eval_constant(lhs)? << eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                SHR => {
+                    let result = eval_constant(lhs)? >> eval_constant(lhs)?;
+                    return Ok(result);
+                }
+                Eq => {
+                    let result = eval_constant(lhs)? == eval_constant(lhs)?;
+                    return Ok(result as i64);
+                }
+                Neq => {
+                    let result = eval_constant(lhs)? != eval_constant(lhs)?;
+                    return Ok(result as i64);
+                }
+                LT => {
+                    let result = eval_constant(lhs)? < eval_constant(lhs)?;
+                    return Ok(result as i64);
+                }
+                LE => {
+                    let result = eval_constant(lhs)? <= eval_constant(lhs)?;
+                    return Ok(result as i64);
+                }
+                GT => {
+                    let result = eval_constant(lhs)? > eval_constant(lhs)?;
+                    return Ok(result as i64);
+                }
+                GE => {
+                    let result = eval_constant(lhs)? >= eval_constant(lhs)?;
+                    return Ok(result as i64);
+                }
+                LOGAND => {
+                    let lhs_result = eval_constant(lhs)?;
+                    let rhs_result = eval_constant(rhs)?;
+                    if (lhs_result != 0) && (rhs_result != 0) {
+                        return Ok(1);
+                    } else {
+                        return Ok(0);
+                    }
+                }
+                LOGOR => {
+                    let lhs_result = eval_constant(lhs)?;
+                    let rhs_result = eval_constant(rhs)?;
+                    if (lhs_result != 0) || (rhs_result != 0) {
+                        return Ok(1);
+                    } else {
+                        return Ok(0);
+                    }
+                }
+            }
+        }
+        ir::ExprType::BitNot(expr) => {
+            let result = !eval_constant(expr)?;
+            return Ok(result);
+        }
+        ir::ExprType::Cast(expr, ty) => {
+            if (is_integer(ty)) {
+                match sizeof(ty) {
+                    1 => {return eval_constant(expr);}
+                    2 => {return eval_constant(expr);}
+                    4 => {return eval_constant(expr);}
+                    _ => (),
+                    
+                }
+            }
+            return eval_constant(expr);
+        }
         _ => {
             println!("this is not a costant expression");
             exit(1);

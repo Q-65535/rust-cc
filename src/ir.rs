@@ -135,6 +135,13 @@ pub enum OP {
     Div,
     Modulus,
 
+    // bitwise
+    BitAnd,
+    BitXOR,
+    BitOR,
+    SHL,
+    SHR,
+
     // compares
     Eq,
     Neq,
@@ -142,13 +149,6 @@ pub enum OP {
     LE,
     GT,
     GE,
-
-    // bitwise
-    BitAnd,
-    BitXOR,
-    BitOR,
-    SHL,
-    SHR,
 
     // logical
     LOGAND,
