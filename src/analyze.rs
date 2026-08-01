@@ -103,7 +103,7 @@ pub struct Obj {
 pub enum Symbol {
     Object(Obj),
     Typedef(Type),
-    Enum(u64),
+    Enum(i64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -222,7 +222,7 @@ impl ScopeManager {
         current_scope.symbols.insert(name.to_string(), Symbol::Object(obj));
     }
 
-    pub fn resolve_enum(&self, name: &str) -> Option<u64> {
+    pub fn resolve_enum(&self, name: &str) -> Option<i64> {
         let index = self.current_scope_index;
         for i in (0..=index).rev() {
             let current_scope = &self.scopes[i];
@@ -235,7 +235,7 @@ impl ScopeManager {
         return None
     }
 
-    pub fn resolve_enum_at_current_scope(&self, name: &str) -> Option<u64> {
+    pub fn resolve_enum_at_current_scope(&self, name: &str) -> Option<i64> {
         let current_scope = &self.scopes[self.current_scope_index];
         if let Some(symbol) = current_scope.symbols.get(name) {
             if let Symbol::Enum(number) = symbol {
@@ -245,7 +245,7 @@ impl ScopeManager {
         return None;
     }
 
-    pub fn add_enum(&mut self, name: &str, number: u64) {
+    pub fn add_enum(&mut self, name: &str, number: i64) {
         debug_assert!(!self.contains_symbol(name));
         let current_scope = &mut self.scopes[self.current_scope_index];
         current_scope.symbols.insert(name.to_string(), Symbol::Enum(number));
@@ -566,7 +566,7 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn analyze_block(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
+    fn analyze_block(&mut self, items: &Vec<BlockItem>) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in items {
             match item {
@@ -577,7 +577,7 @@ impl ProgramAnalyzer {
         stmts
     }
 
-    fn analyze_block_in_new_scope(&mut self, items: &mut Vec<BlockItem>) -> Vec<ir::StmtType> {
+    fn analyze_block_in_new_scope(&mut self, items: &Vec<BlockItem>) -> Vec<ir::StmtType> {
         self.scope_manager.enter_new_scope();
         let stmts = self.analyze_block(items);
         self.scope_manager.exit_current_scope();
@@ -605,16 +605,16 @@ impl ProgramAnalyzer {
 
 
     // After analyzation, declarations are all resolved to creating obj and assignment statement.
-    fn analyze_decl(&mut self, decl: &mut Declaration) -> Vec<ir::StmtType> {
+    fn analyze_decl(&mut self, decl: &Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
         if symbol_attribute.is_typedef {
-            for declarator in &mut decl.declarators {
+            for declarator in &decl.declarators {
                 self.analyze_typedef(&symbol_attribute, &base_type, declarator);
             }
             return stmts;
         }
-        for declarator in &mut decl.declarators {
+        for declarator in &decl.declarators {
             let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, declarator);
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
@@ -635,7 +635,7 @@ impl ProgramAnalyzer {
             // allocate space accroding to the size of the given type.
             let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_object(obj.clone());
-            if let Some(expr) = &mut declarator.init_expr {
+            if let Some(expr) = &declarator.init_expr {
                 let lhs = self.gen_expr_from_obj(&obj);
                 let rhs = self.analyze_expr(expr);
                 let assignment_expr = gen_assign_expr(lhs, rhs);
@@ -816,13 +816,16 @@ impl ProgramAnalyzer {
                 let the_type = Type::Enum;
                 if let Some(enumerators) = &enum_spec.enumerators {
                     self.scope_manager.add_tag(name, &the_type);
-                    let mut value: u64 = 0;
+                    let mut value: i64 = 0;
                     for e in enumerators {
                         if let Some(expr) = &e.constant_expr {
-                            // @Incomplete: For now, we just consider single constant number,
-                            // not actual constant expression which may involve operators.
-                            if let Natural_Number(n) = &expr.content {
-                                value = *n;
+                            let value_expr = self.analyze_expr(expr);
+                            value = match eval_constant(&value_expr) {
+                                Err(e) => {
+                                    print_error_at(expr.span, &e);
+                                    exit(1);
+                                }
+                                Ok(num) => num
                             }
                         }
                         self.scope_manager.add_enum(&e.name, value);
@@ -837,13 +840,16 @@ impl ProgramAnalyzer {
             }
         } else {
             if let Some(enumerators) = &enum_spec.enumerators {
-                let mut value: u64 = 0;
+                let mut value: i64 = 0;
                 for e in enumerators {
                     if let Some(expr) = &e.constant_expr {
-                        // @Incomplete: For now, we just consider single constant number,
-                        // not actual constant expression which may involve operators.
-                        if let Natural_Number(n) = &expr.content {
-                            value = *n;
+                        let value_expr = self.analyze_expr(expr);
+                        value = match eval_constant(&value_expr) {
+                            Err(e) => {
+                                print_error_at(expr.span, &e);
+                                exit(1);
+                            }
+                            Ok(num) => num
                         }
                     }
                     self.scope_manager.add_enum(&e.name, value);
@@ -886,7 +892,7 @@ impl ProgramAnalyzer {
         obj
     }
 
-    fn analyze_stmt(&mut self, stmt: &mut StmtType) -> ir::StmtType {
+    fn analyze_stmt(&mut self, stmt: &StmtType) -> ir::StmtType {
         use ir::StmtType;
         match stmt {
             Ex(expr) => {
@@ -923,7 +929,7 @@ impl ProgramAnalyzer {
                 self.cur_loop_continue_point_label = Some(continue_point_label.clone());
                 let mut init_stmts = Vec::new();
                 if let Some(init) = init {
-                    match init.as_mut() {
+                    match init.as_ref() {
                         Decl(decl) => {
                             let mut stmts_from_decl = self.analyze_decl(decl);
                             init_stmts.append(&mut stmts_from_decl);
@@ -976,21 +982,22 @@ impl ProgramAnalyzer {
                     exit(1);
                 }
             }
-            CaseStmt(expr, stmt) => {
-                let analyzed_expr = self.analyze_expr(expr);
+            CaseStmt(cond_expr, stmt) => {
+                let analyzed_cond_expr = self.analyze_expr(cond_expr);
                 let unique_label = self.next_case_label();
                 let stmt = self.analyze_stmt(stmt);
                 if let Some(cur_switch) = &mut self.cur_switch {
-                    if is_constant_value(&analyzed_expr) {
-                        let matching_value = eval_constant(&analyzed_expr).unwrap();
-                        let case = ir::Case{matching_value, unique_label: unique_label.clone()};
-                        cur_switch.cases.push(case.clone());
-                        ir::StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
-                    } else {
-                        let error_message = format!("this matching case is not a constant expression");
-                        print_error_at(expr.span, &error_message);
-                        exit(1);
-                    }
+                    let result = eval_constant(&analyzed_cond_expr);
+                    let cond_value = match result {
+                        Err(e) => {
+                            print_error_at(cond_expr.span, &e);
+                            exit(1);
+                        }
+                        Ok(num) => num
+                    };
+                    let case = ir::Case{cond_value, unique_label: unique_label.clone()};
+                    cur_switch.cases.push(case.clone());
+                    ir::StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
                 } else {
                     println!("this is not inside switch statement, you cannot handle case statement");
                     exit(1);
@@ -1000,7 +1007,7 @@ impl ProgramAnalyzer {
                 let unique_label = self.next_case_label();
                 let stmt = self.analyze_stmt(default_case);
                 if let Some(cur_switch) = &mut self.cur_switch {
-                    let case = ir::Case{matching_value: 0, unique_label: unique_label.clone()};
+                    let case = ir::Case{cond_value: 0, unique_label: unique_label.clone()};
                     cur_switch.default_label = Some(unique_label.clone());
                     StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
                 } else {
@@ -1070,11 +1077,11 @@ impl ProgramAnalyzer {
         return unique_loop_begin_label;
     }
 
-    fn analyze_expr(&mut self, expr: &mut Expr) -> ir::Expr {
+    fn analyze_expr(&mut self, expr: &Expr) -> ir::Expr {
         use ir::ExprType;
         use ir::OP;
         let span = expr.span;
-        match &mut expr.content {
+        match &expr.content {
             Natural_Number(n) => gen_num_expr(*n, span),
             Binary(lhs, rhs, tokenKind) => {
                 let lhs = self.analyze_expr(lhs);
@@ -1196,7 +1203,8 @@ impl ProgramAnalyzer {
                 if let Some(o) = self.scope_manager.resolve_object(s) {
                     return self.gen_expr_from_obj(o);
                 } else if let Some(number) = self.scope_manager.resolve_enum(s) {
-                    return gen_num_expr(number, span);
+                    // @Fix: Refactor all natural number to integer_64.
+                    return gen_num_expr(number as u64, span);
                 } else {
                     let err_info = format!("semantic error: symbol '{}' doesn't exist or is nither a variable nor enum constant.", s);
                     print_error_at(expr.span, &err_info);
@@ -1282,7 +1290,7 @@ impl ProgramAnalyzer {
                                     exit(1);
                                 }
                                 for arg_index in 0..args.len() {
-                                    let arg = &mut args[arg_index];
+                                    let arg = &args[arg_index];
                                     let mut analyzed_arg = self.analyze_expr(arg);
                                     if arg_index < param_types.len() {
                                         let param_type = &param_types[arg_index];
@@ -1770,71 +1778,78 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
     match &expr.content {
         ir::ExprType::Natural_Number(n) => Ok(*n as i64),
         ir::ExprType::Neg(expr) => Ok(-eval_constant(&expr)?),
-        ir::ExprType::Not(expr) => todo!(),
+        ir::ExprType::Not(expr) => {
+            let value = eval_constant(expr)?;
+            if value == 0 {
+                return Ok(1);
+            } else {
+                return Ok(0);
+            }
+        }
         ir::ExprType::Binary(lhs, rhs, op) => {
             match op {
                 Plus => {
-                    let result = eval_constant(lhs)? + eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? + eval_constant(rhs)?;
                     return Ok(result);
                 }
                 Minus => {
-                    let result = eval_constant(lhs)? - eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? - eval_constant(rhs)?;
                     return Ok(result);
                 }
                 Mul => {
-                    let result = eval_constant(lhs)? * eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? * eval_constant(rhs)?;
                     return Ok(result);
                 }
                 Div => {
-                    let result = eval_constant(lhs)? / eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? / eval_constant(rhs)?;
                     return Ok(result);
                 }
                 Modulus => {
-                    let result = eval_constant(lhs)? % eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? % eval_constant(rhs)?;
                     return Ok(result);
                 }
                 BitAnd => {
-                    let result = eval_constant(lhs)? & eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? & eval_constant(rhs)?;
                     return Ok(result);
                 }
                 BitXOR => {
-                    let result = eval_constant(lhs)? ^ eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? ^ eval_constant(rhs)?;
                     return Ok(result);
                 }
                 BitOR => {
-                    let result = eval_constant(lhs)? | eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? | eval_constant(rhs)?;
                     return Ok(result);
                 }
                 SHL => {
-                    let result = eval_constant(lhs)? << eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? << eval_constant(rhs)?;
                     return Ok(result);
                 }
                 SHR => {
-                    let result = eval_constant(lhs)? >> eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? >> eval_constant(rhs)?;
                     return Ok(result);
                 }
                 Eq => {
-                    let result = eval_constant(lhs)? == eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? == eval_constant(rhs)?;
                     return Ok(result as i64);
                 }
                 Neq => {
-                    let result = eval_constant(lhs)? != eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? != eval_constant(rhs)?;
                     return Ok(result as i64);
                 }
                 LT => {
-                    let result = eval_constant(lhs)? < eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? < eval_constant(rhs)?;
                     return Ok(result as i64);
                 }
                 LE => {
-                    let result = eval_constant(lhs)? <= eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? <= eval_constant(rhs)?;
                     return Ok(result as i64);
                 }
                 GT => {
-                    let result = eval_constant(lhs)? > eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? > eval_constant(rhs)?;
                     return Ok(result as i64);
                 }
                 GE => {
-                    let result = eval_constant(lhs)? >= eval_constant(lhs)?;
+                    let result = eval_constant(lhs)? >= eval_constant(rhs)?;
                     return Ok(result as i64);
                 }
                 LOGAND => {
@@ -1855,6 +1870,17 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
                         return Ok(0);
                     }
                 }
+            }
+        }
+        ir::ExprType::CommaExpression(lhs, rhs) => {
+            return eval_constant(rhs);
+        }
+        ir::ExprType::Conditional{cond, then, otherwise} => {
+            let cond = eval_constant(cond)?;
+            if cond != 0 {
+                return eval_constant(then);
+            } else {
+                return eval_constant(otherwise);
             }
         }
         ir::ExprType::BitNot(expr) => {

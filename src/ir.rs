@@ -24,7 +24,7 @@ pub struct Switch_Case {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Case {
-    pub matching_value: i64,
+    pub cond_value: i64,
     pub unique_label: String,
 }
 

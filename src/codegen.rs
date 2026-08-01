@@ -188,7 +188,7 @@ impl Generator {
             "%eax".to_string()
         };
         for case in &switch_case_info.cases {
-            emit!("  cmp ${}, {}", case.matching_value, reg);
+            emit!("  cmp ${}, {}", case.cond_value, reg);
             emit!("  je {}", case.unique_label);
         }
         if let Some(d) = &switch_case_info.default_label {
