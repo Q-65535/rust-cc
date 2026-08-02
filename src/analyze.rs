@@ -402,13 +402,31 @@ impl ProgramAnalyzer {
 
     fn resolve_type_with_suffix(&mut self, base_type: &Type, suffix: &DeclaratorSuffix) -> Type {
         match suffix {
-            DeclaratorSuffix::ArrayLen(len, inner_suffix) => {
+            DeclaratorSuffix::ArrayLen(constant_len_expr, inner_suffix) => {
                 let mut final_len: usize;
-                if let Some(number) = len {
-                    final_len = *number;
+
+                if let Some(constant_len_expr) = constant_len_expr {
+                    let analyzed_constant_len_expr = self.analyze_expr(constant_len_expr);
+                    let result = eval_constant(&analyzed_constant_len_expr);
+                    match result {
+                        Err(e) => {
+                            print_error_at(constant_len_expr.span, &e);
+                            exit(1);
+                        }
+                        Ok(num) => {
+                            final_len = if num >= 0 {
+                                 num as usize
+                            } else {
+                                let err_info = format!("semantic error: array size is negative");
+                                print_error_at(constant_len_expr.span, &err_info);
+                                exit(1);
+                            };
+                        }
+                    }
                 } else {
                     final_len = 0;
                 }
+
                 if let Some(inner_suffix) = inner_suffix {
                     let cur_type = self.resolve_type_with_suffix(base_type, inner_suffix);
                     return array_of(&cur_type, final_len);
@@ -1883,16 +1901,19 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
                 return eval_constant(otherwise);
             }
         }
+        // ~
         ir::ExprType::BitNot(expr) => {
-            let result = !eval_constant(expr)?;
+            let value = eval_constant(expr)?;
+            let result = !value;
             return Ok(result);
         }
         ir::ExprType::Cast(expr, ty) => {
             if (is_integer(ty)) {
                 match sizeof(ty) {
-                    1 => {return eval_constant(expr);}
-                    2 => {return eval_constant(expr);}
-                    4 => {return eval_constant(expr);}
+                    // @Question: Why this works: i8, i16 and i32 instead of u8, u16 and u32 like chibicc.
+                    1 => {return Ok((eval_constant(expr)? as i8) as i64);}
+                    2 => {return Ok((eval_constant(expr)? as i16) as i64);}
+                    4 => {return Ok((eval_constant(expr)? as i32) as i64);}
                     _ => (),
                     
                 }

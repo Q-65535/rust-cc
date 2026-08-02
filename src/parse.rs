@@ -47,7 +47,7 @@ use BlockItem::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorSuffix {
-    ArrayLen(Option<usize>, Option<Box<DeclaratorSuffix>>),
+    ArrayLen(Option<Box<Expr>>, Option<Box<DeclaratorSuffix>>),
     FunParam(Vec<Parameter>),
 }
 use DeclaratorSuffix::*;
@@ -251,7 +251,7 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
         LT | LE | GT | GE => Relational,
         Plus | Minus => Additive,
         Mul | Div | Modulus => Multiplicative,
-        Period | Arrow | LParen | LSqureBracket | PlusPlus | MinusMinus => Postfix,
+        Period | Arrow | LParen | LSquareBracket | PlusPlus | MinusMinus => Postfix,
 
         // Any other token that cannot be infix operator gets Lowest precedence.
         _ => Lowest,
@@ -395,7 +395,7 @@ impl Parser {
             self.cur_index += 1;
             // Uncomment this when you want to see where we are
             // parsing now while using a debugger by examine self.cur_parsing_context.
-            // self.cur_parsing_context = token_to_context(self.cur_token());
+            self.cur_parsing_context = token_to_context(self.cur_token());
         }
         token
     }
@@ -734,7 +734,7 @@ impl Parser {
             },
         };
 
-        let suffix = if matches!(self.cur_token().kind, LSqureBracket | LParen) {
+        let suffix = if matches!(self.cur_token().kind, LSquareBracket | LParen) {
             Some(self.parse_declarator_suffix()?)
         } else {
             None
@@ -763,25 +763,20 @@ impl Parser {
     }
 
     fn parse_declarator_suffix(&mut self) -> Result<DeclaratorSuffix, String> {
-        debug_assert!(matches!(self.cur_token().kind, LSqureBracket | LParen));
+        debug_assert!(matches!(self.cur_token().kind, LSquareBracket | LParen));
 
         match self.cur_token().kind {
             // array sizes
-            LSqureBracket => {
-                // @Cleanup: Just bump()?
-                self.expect(&LSqureBracket)?;
-                let cur_array_len = if matches!(&self.cur_token().kind, Lex_Natural_Num(_)) {
-                        Some(self.parse_raw_usize()?)
-                } else if matches!(&self.cur_token().kind, RSquareBracket) {
+            LSquareBracket => {
+                self.bump();
+                let cur_array_len = if matches!(&self.cur_token().kind, RSquareBracket) {
                     None
                 } else {
-                    return Err(error_token(
-                        self.cur_token(),
-                        "expect either an unsigned integer or empty in the square bracket in array decl",
-                    ));
+                    let expr = self.parse_expr(Lowest, Left_To_Right)?;
+                    Some(Box::new(expr))
                 };
-                self.expect(&RSqureBracket)?;
-                if matches!(self.cur_token().kind, LSqureBracket | LParen) {
+                self.expect(&RSquareBracket)?;
+                if matches!(self.cur_token().kind, LSquareBracket | LParen) {
                     let inner_suffix = self.parse_declarator_suffix()?;
                     Ok(ArrayLen(cur_array_len, Some(Box::new(inner_suffix))))
                 } else {
@@ -1038,7 +1033,7 @@ impl Parser {
                 MinusMinus =>     self.parse_post_decrement(expr)?,
                 LexComma =>       self.parse_comma_expression(expr)?,
                 LParen =>         self.parse_funcall(expr)?,
-                LSqureBracket =>  self.parse_array_indexing(expr)?,
+                LSquareBracket =>  self.parse_array_indexing(expr)?,
                 // @Smell: Should have parse_infix() to handle assignment.
                 LexAssignment =>  self.parse_assign(expr)?,
                 QuestionMark =>   self.parse_conditional(expr)?,
@@ -1208,7 +1203,7 @@ impl Parser {
     }
 
     fn starts_abstract_declarator(kind: &TokenKind) -> bool {
-        matches!(kind, Mul | LSqureBracket | LParen)
+        matches!(kind, Mul | LSquareBracket | LParen)
     }
 
     fn starts_grouped_abstract_declarator(&self) -> bool {
@@ -1234,7 +1229,7 @@ impl Parser {
             None
         };
 
-        let suffix = if matches!(self.cur_token().kind, LSqureBracket | LParen) {
+        let suffix = if matches!(self.cur_token().kind, LSquareBracket | LParen) {
             Some(self.parse_declarator_suffix()?)
         } else {
             None
@@ -1391,9 +1386,9 @@ impl Parser {
     }
 
     fn parse_array_indexing(&mut self, lhs: Expr) -> Result<Expr, String> {
-        self.expect(&LSqureBracket)?;
+        self.expect(&LSquareBracket)?;
         let the_index = self.parse_expr(Lowest, Left_To_Right)?;
-        let close_bracket = self.expect(&RSqureBracket)?;
+        let close_bracket = self.expect(&RSquareBracket)?;
 
         let span = Span {
             start_index: lhs.span.start_index,

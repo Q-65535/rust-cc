@@ -24,8 +24,8 @@ pub enum TokenKind {
     RParen,
     LBrace,
     RBrace,
-    LSqureBracket,
-    RSqureBracket,
+    LSquareBracket,
+    RSquareBracket,
     LexAssignment,
     // Compares
     Eq, Neq, LT, LE, GT, GE,
@@ -174,8 +174,8 @@ impl Lexer {
                 ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
                 '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
                 '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
-                '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
-                ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
+                '[' => tokens.push(Self::gen_token(LSquareBracket, start_index, 1)),
+                ']' => tokens.push(Self::gen_token(RSquareBracket, start_index, 1)),
                 '&' => {
                     match self.peek_char() {
                         Some('&') => {
@@ -233,8 +233,8 @@ impl Lexer {
                 ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
                 '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
                 '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
-                '[' => tokens.push(Self::gen_token(LSqureBracket, start_index, 1)),
-                ']' => tokens.push(Self::gen_token(RSqureBracket, start_index, 1)),
+                '[' => tokens.push(Self::gen_token(LSquareBracket, start_index, 1)),
+                ']' => tokens.push(Self::gen_token(RSquareBracket, start_index, 1)),
                 '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
                 '-' => {
                     match self.peek_char() {

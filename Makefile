@@ -85,4 +85,4 @@ test: clean old_test
 # file of the same name happens to exist in the directory.
 .PHONY: build rebuild test clean
 
-#   gcc -E -P -C test/pointer.c -o test/pointer.i
+#   gcc -E -P -C test/constexpr.c -o test/constexpr.i
