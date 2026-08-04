@@ -165,7 +165,7 @@ pub enum Direct_Declarator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Natural_Number(u64),
+    Natural_Number(i64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -395,7 +395,7 @@ impl Parser {
             self.cur_index += 1;
             // Uncomment this when you want to see where we are
             // parsing now while using a debugger by examine self.cur_parsing_context.
-            self.cur_parsing_context = token_to_context(self.cur_token());
+            // self.cur_parsing_context = token_to_context(self.cur_token());
         }
         token
     }
@@ -1284,7 +1284,7 @@ impl Parser {
         }
     }
 
-    fn parse_natural_number(&mut self, n: u64) -> Expr {
+    fn parse_natural_number(&mut self, n: i64) -> Expr {
         debug_assert!(matches!(self.cur_token().kind, Lex_Natural_Num(_)));
         let token = self.bump();
         Expr::new(Natural_Number(n), token.span)

@@ -48,10 +48,10 @@ test/%.exe: build test/%.c
 # `make struct`: build and run just the struct.c test.
 single_test:
 	cargo build
-	$(CC) -E -P -C test/pointer.c -o test/pointer.i
-	$(RUST_CC) -o test/pointer.s test/pointer.i
-	$(CC) -o pointer.exe test/pointer.s -xc test/common
-	echo pointer.exe; ./pointer.exe || exit 1; echo;
+	$(CC) -E -P -C test/constexpr.c -o test/constexpr.i
+	$(RUST_CC) -o test/constexpr.s test/constexpr.i
+	$(CC) -o constexpr.exe test/constexpr.s -xc test/common
+	echo constexpr.exe; ./constexpr.exe || exit 1; echo;
 
 local_test:
 	rm -f test.s

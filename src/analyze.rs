@@ -402,23 +402,24 @@ impl ProgramAnalyzer {
 
     fn resolve_type_with_suffix(&mut self, base_type: &Type, suffix: &DeclaratorSuffix) -> Type {
         match suffix {
-            DeclaratorSuffix::ArrayLen(constant_len_expr, inner_suffix) => {
+            DeclaratorSuffix::ArrayLen(len_expr, inner_suffix) => {
                 let mut final_len: usize;
 
-                if let Some(constant_len_expr) = constant_len_expr {
-                    let analyzed_constant_len_expr = self.analyze_expr(constant_len_expr);
-                    let result = eval_constant(&analyzed_constant_len_expr);
+                if let Some(len_expr) = len_expr {
+                    let analyzed_len_expr = self.analyze_expr(len_expr);
+                    let result = eval_constant(&analyzed_len_expr);
                     match result {
                         Err(e) => {
-                            print_error_at(constant_len_expr.span, &e);
+                            print_error_at(len_expr.span, &e);
                             exit(1);
                         }
                         Ok(num) => {
                             final_len = if num >= 0 {
-                                 num as usize
+                                // We must truncate i64 to i32 before use it as array length.
+                                (num as i32) as usize
                             } else {
-                                let err_info = format!("semantic error: array size is negative");
-                                print_error_at(constant_len_expr.span, &err_info);
+                                let err_info = format!("semantic error: array size is negative number: {}", num);
+                                print_error_at(len_expr.span, &err_info);
                                 exit(1);
                             };
                         }
@@ -1185,13 +1186,13 @@ impl ProgramAnalyzer {
                 let expr = gen_binary_expr(lhs, rhs, OP::Plus); // expr = ((A -= 1) + 1)
                 cast(expr, &operand_type)
             }
-            Neg(val) => {
-                let val = self.analyze_expr(val);
-                let common_type = get_common_type(&Type::Int, &val.ty);
-                let ty = val.ty.clone();
-                let content = ExprType::Neg(Box::new(val));
-                let neg_expr = ir::Expr{content, ty, span};
-                return cast(neg_expr, &common_type);
+            Neg(inner_expr) => {
+                let analyzed_inner_expr = self.analyze_expr(inner_expr);
+                let common_type = get_common_type(&Type::Int, &analyzed_inner_expr.ty);
+                let expr = cast(analyzed_inner_expr, &common_type);
+                let content = ExprType::Neg(Box::new(expr));
+                let neg_expr = ir::Expr{content, ty: common_type, span};
+                return neg_expr;
             }
             // !expr
             Not(val) => {
@@ -1221,8 +1222,7 @@ impl ProgramAnalyzer {
                 if let Some(o) = self.scope_manager.resolve_object(s) {
                     return self.gen_expr_from_obj(o);
                 } else if let Some(number) = self.scope_manager.resolve_enum(s) {
-                    // @Fix: Refactor all natural number to integer_64.
-                    return gen_num_expr(number as u64, span);
+                    return gen_num_expr(number, span);
                 } else {
                     let err_info = format!("semantic error: symbol '{}' doesn't exist or is nither a variable nor enum constant.", s);
                     print_error_at(expr.span, &err_info);
@@ -1566,9 +1566,9 @@ fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
         ir::Expr{content, ty, span}
 }
 
-fn gen_num_expr(number: u64, span: Span) -> ir::Expr {
+fn gen_num_expr(number: i64, span: Span) -> ir::Expr {
         let content = ir::ExprType::Natural_Number(number);
-        let ty = if number > i32::MAX as u64 {
+        let ty = if number > i32::MAX as i64 {
             Type::Long
         } else {
             Type::Int
@@ -1910,12 +1910,10 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
         ir::ExprType::Cast(expr, ty) => {
             if (is_integer(ty)) {
                 match sizeof(ty) {
-                    // @Question: Why this works: i8, i16 and i32 instead of u8, u16 and u32 like chibicc.
-                    1 => {return Ok((eval_constant(expr)? as i8) as i64);}
-                    2 => {return Ok((eval_constant(expr)? as i16) as i64);}
-                    4 => {return Ok((eval_constant(expr)? as i32) as i64);}
+                    1 => {return Ok((eval_constant(expr)? as u8) as i64);}
+                    2 => {return Ok((eval_constant(expr)? as u16) as i64);}
+                    4 => {return Ok((eval_constant(expr)? as u32) as i64);}
                     _ => (),
-                    
                 }
             }
             return eval_constant(expr);

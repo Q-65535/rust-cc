@@ -37,7 +37,7 @@ pub enum TokenKind {
     Semicolon,
     Colon,
     LexComma,
-    Lex_Natural_Num(u64),
+    Lex_Natural_Num(i64),
     Lex_Char(u8),
     LexIdent(String),
     StringLiteral(Vec<u8>),
@@ -341,7 +341,7 @@ impl Lexer {
                             // number whose data type is 32-bit singed integer.
                             // So, in GCC, (-128=='\x80') evaluates to 1, in this compiler, (128=='\x80') evaluates to 1.
                             // I don't known whether this difference will cause any problem, we'll see.
-                            tokens.push(Self::gen_token(Lex_Natural_Num(byte as u64), start_index, len));
+                            tokens.push(Self::gen_token(Lex_Natural_Num(byte as i64), start_index, len));
                         }
                         Err(s) => {
                             lexical_error_at(start_index, &s);
@@ -419,7 +419,7 @@ impl Lexer {
         tokens
     }
 
-    fn read_int(&mut self) -> u64 {
+    fn read_int(&mut self) -> i64 {
         debug_assert!(matches!(self.cur_char(), '0'..='9'));
         let c = self.cur_char();
         let mut base = 10;
@@ -457,10 +457,10 @@ impl Lexer {
             }
         }
 
-        let mut result: u64 = 0;
+        let mut result: i64 = 0;
         if base == 10 {
             loop {
-                let cur_digit = self.cur_char() as u64 - '0' as u64;
+                let cur_digit = self.cur_char() as i64 - '0' as i64;
                 result *= base;
                 result += cur_digit;
                 if !matches!(self.peek_char(), Some('0'..='9')) {break;}
@@ -469,7 +469,7 @@ impl Lexer {
         }
         if base == 8 {
             loop {
-                let cur_digit = self.cur_char() as u64 - '0' as u64;
+                let cur_digit = self.cur_char() as i64 - '0' as i64;
                 result *= base;
                 result += cur_digit;
                 if !matches!(self.peek_char(), Some('0'..='7')) {break;}
@@ -478,7 +478,7 @@ impl Lexer {
         }
         if base == 2 {
             loop {
-                let cur_digit = self.cur_char() as u64 - '0' as u64;
+                let cur_digit = self.cur_char() as i64 - '0' as i64;
                 result *= base;
                 result += cur_digit;
                 if !matches!(self.peek_char(), Some('0'..='1')) {break;}
@@ -487,13 +487,13 @@ impl Lexer {
         }
         if base == 16 {
             loop {
-                let mut cur_digit: u64 = 0;
+                let mut cur_digit: i64 = 0;
                 if matches!(self.cur_char(), '0'..='9') {
-                    cur_digit = self.cur_char() as u64 - '0' as u64;
+                    cur_digit = self.cur_char() as i64 - '0' as i64;
                 } else if matches!(self.cur_char(), 'a'..='f') {
-                    cur_digit = self.cur_char() as u64 - 'a' as u64 + 10;
+                    cur_digit = self.cur_char() as i64 - 'a' as i64 + 10;
                 } else if matches!(self.cur_char(), 'A'..='F') {
-                    cur_digit = self.cur_char() as u64 - 'A' as u64 + 10;
+                    cur_digit = self.cur_char() as i64 - 'A' as i64 + 10;
                 }
                 result *= base;
                 result += cur_digit;
@@ -505,6 +505,7 @@ impl Lexer {
         return result;
     }
 
+    // @Question: Should we return a u8 or i8?
     fn read_char_literal(&mut self) -> Result<u8, String> {
         debug_assert!(matches!(self.cur_char(), '\''));
         self.next_char();
