@@ -658,21 +658,68 @@ impl ProgramAnalyzer {
             let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_object(obj.clone());
             if let Some(init) = &init_declarator.init {
-                match init {
-                    Initializer::Expr(expr) => {
-                        let lhs = self.gen_expr_from_obj(&obj);
-                        let rhs = self.analyze_expr(expr);
-                        let assignment_expr = gen_assign_expr(lhs, rhs);
-                        let expr_stmt = ir::StmtType::Ex(assignment_expr);
-                        stmts.push(expr_stmt);
-                    }
-                    Initializer::Init_List(init_list) => {
-                        todo!();
-                    }
-                }
+                // @TODO: First, to normalize init to match obj's type.
+                let mut root_obj_expr = self.gen_expr_from_obj(&obj);
+                let root_position_expr = gen_addr_of_expr(root_obj_expr);
+                let assignment_expr_stmts = self.init(&root_position_expr, init_list);
+                stmts.append(assignment_expr_stmts);
+                // match init {
+                //     Initializer::Expr(expr) => {
+                //         let lhs = self.gen_expr_from_obj(&obj);
+                //         let rhs = self.analyze_expr(expr);
+                //         let assignment_expr = gen_assign_expr(lhs, rhs);
+                //         let expr_stmt = ir::StmtType::Ex(assignment_expr);
+                //         stmts.push(expr_stmt);
+                //     }
+                //     Initializer::Init_List(init_list) => {
+                //         let position_expr = self.gen_expr_from_obj(&obj);
+                //         let assignment_expr_stmts = self.init(&position_expr, init_list);
+                //         stmts.append(assignment_expr_stmts);
+                //     }
+                // }
             }
         }
         stmts
+    }
+
+    //  We must make sure that the type of position_expr is definitely a pointer type.
+    fn init(&mut self, position_expr: &ir::Expr, init: &Initializer) -> Vec<StmtType> {
+        let span = position_expr.span;
+        let stmts = Vec::new();
+        match init {
+            Initializer::Expr(expr) => {
+                let offset = gen_num_expr(0, span);
+                let address = gen_binary_expr(position_expr, offset, OP::Plus);
+                let lhs = gen_deref_expr(address);
+                let rhs = self.analyze_expr(expr);
+                let assignment_expr = gen_assign_expr(lhs, rhs);
+                let expr_stmt = ir::StmtType::Ex(assignment_expr);
+                stmts.push(expr_stmt);
+            }
+            Initializer::Init_List(init_list) => {
+                let assignment_expr_stmts = self.init_by_list(&position_expr, init_list);
+                stmts.append(assignment_expr_stmts);
+            }
+        }
+    }
+
+    fn init_by_list(&mut self, position_expr: &ir::Expr, init_list: &Vec<Initializer>) -> Vec<StmtType> {
+        let span = position_expr.span;
+        let stmts = vec::new();
+        match &position_expr.ty {
+            Pointer_To(element_type) => {
+                for (i, init) in init_list.iter().enumerate() {
+                    let array_offset = gen_num_expr(i as i64, span);
+                    let cur_position_expr = gen_binary_expr(position_expr, array_offset);
+                    let init_stmts = self.init(cur_position_expr, init);
+                    stmts.append(init_stmts);
+                }
+            }
+            Struct(st) => {
+                todo!();
+            }
+            _ => todo!(),
+        }
     }
 
     fn analyze_decl_spec(&mut self, decl_specs: &Vec<Decl_Spec>) -> (Type, Symbol_Attribute) {

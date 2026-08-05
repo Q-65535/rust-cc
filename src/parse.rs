@@ -780,7 +780,22 @@ impl Parser {
     }
 
     fn parse_init_list(&mut self) -> Result<Vec<Initializer>, String> {
-        todo!();
+        self.expect(&LBrace);
+        let mut init_list = Vec::new();
+        while self.cur_token().kind != RBrace {
+            let init = if self.cur_token().kind == LBrace {
+                Initializer::Init_List(self.parse_init_list()?)
+            } else {
+                // Commas separate initializer, so leave a comma unconsumed here.
+                Initializer::Expr(self.parse_expr(Comma, Left_To_Right)?)
+            };
+            init_list.push(init);
+            if !self.eat(&LexComma) {
+                break;
+            }
+        }
+        self.expect(&RBrace);
+        return Ok(init_list);
     }
 
     fn parse_declarator_suffix(&mut self) -> Result<DeclaratorSuffix, String> {
