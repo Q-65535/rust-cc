@@ -348,40 +348,43 @@ impl ProgramAnalyzer {
         let mut decls: Vec<ir::Declaration> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
         if symbol_attribute.is_typedef {
-            for declarator in &mut decl.declarators {
-                self.analyze_typedef(&symbol_attribute, &base_type, declarator);
+            for init_declarator in &mut decl.init_declarators {
+                self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
             }
             return decls;
         }
-        for declarator in &mut decl.declarators {
-            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, declarator);
+        for init_declarator in &mut decl.init_declarators {
+            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &init_declarator.declarator);
 
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("semantic error: {} redeclared as a symbol", name);
-                print_error_at(declarator.span, &err_info);
+                print_error_at(init_declarator.declarator.span, &err_info);
                 exit(1);
             }
             let mut init_value = None;
-            if let Some(expr) = &mut declarator.init_expr {
-                let analyzed_expr = self.analyze_expr(expr);
-                // @Future: Currently, we only support constant number assignment.
-                // We will add array and struct initialization expr assignment in the future.
-                match analyzed_expr.content {
-                    ir::ExprType::Natural_Number(n) => {
-                        if can_assign(&final_type, &analyzed_expr.ty) {
-                            let value_in_bytes = n.to_le_bytes();
-                            init_value = Some(value_in_bytes.to_vec());
+            if let Some(init) = &mut init_declarator.init {
+                match init {
+                    Initializer::Expr(expr) => {
+                        let analyzed_expr = self.analyze_expr(expr);
+                        if let Ok(num) = eval_constant(&analyzed_expr) {
+                            if can_assign(&final_type, &analyzed_expr.ty) {
+                                let value_in_bytes = num.to_le_bytes();
+                                init_value = Some(value_in_bytes.to_vec());
+                            } else {
+                                let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
+                                name, &final_type, &analyzed_expr.ty);
+                                print_error_at(init_declarator.declarator.span, &err_info);
+                                exit(1);
+                            }
                         } else {
-                            let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                            name, &final_type, &analyzed_expr.ty);
-                            print_error_at(declarator.span, &err_info);
+                            let err_info = format!("This is not a constant number expression!");
+                            print_error_at(analyzed_expr.span, &err_info);
                             exit(1);
                         }
                     }
-                    _ => {
-                        let err_info = format!("This is not a constant number expression!");
-                        print_error_at(analyzed_expr.span, &err_info);
-                        exit(1);
+                    // @Future: We will add array and struct initialization expr assignment in the future.
+                    Initializer::Init_List(init_list) => {
+                        todo!();
                     }
                 }
             }
@@ -628,16 +631,16 @@ impl ProgramAnalyzer {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
         if symbol_attribute.is_typedef {
-            for declarator in &decl.declarators {
-                self.analyze_typedef(&symbol_attribute, &base_type, declarator);
+            for init_declarator in &decl.init_declarators {
+                self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
             }
             return stmts;
         }
-        for declarator in &decl.declarators {
-            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, declarator);
+        for init_declarator in &decl.init_declarators {
+            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &init_declarator.declarator);
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
-                print_error_at(declarator.span, &err_info);
+                print_error_at(init_declarator.declarator.span, &err_info);
                 exit(1);
             }
             // If the type is an array with 0 length, i.e., incomplete array type,
@@ -646,7 +649,7 @@ impl ProgramAnalyzer {
             // It just gives a warning: array ‘xxx’ assumed to have one element.
             if matches!(&final_type, Type::ArrayOf(..)) && sizeof(&final_type) == 0 {
                 let err_info = format!("variable {} has incomplete type", name);
-                print_error_at(declarator.span, &err_info);
+                print_error_at(init_declarator.declarator.span, &err_info);
                 exit(1);
             }
             // @Fix: If it is a function declaration, we shouldn't allocate
@@ -654,12 +657,19 @@ impl ProgramAnalyzer {
             // allocate space accroding to the size of the given type.
             let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_object(obj.clone());
-            if let Some(expr) = &declarator.init_expr {
-                let lhs = self.gen_expr_from_obj(&obj);
-                let rhs = self.analyze_expr(expr);
-                let assignment_expr = gen_assign_expr(lhs, rhs);
-                let expr_stmt = ir::StmtType::Ex(assignment_expr);
-                stmts.push(expr_stmt);
+            if let Some(init) = &init_declarator.init {
+                match init {
+                    Initializer::Expr(expr) => {
+                        let lhs = self.gen_expr_from_obj(&obj);
+                        let rhs = self.analyze_expr(expr);
+                        let assignment_expr = gen_assign_expr(lhs, rhs);
+                        let expr_stmt = ir::StmtType::Ex(assignment_expr);
+                        stmts.push(expr_stmt);
+                    }
+                    Initializer::Init_List(init_list) => {
+                        todo!();
+                    }
+                }
             }
         }
         stmts

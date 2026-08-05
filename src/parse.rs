@@ -83,7 +83,7 @@ pub struct Parameter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub decl_spec: Vec<Decl_Spec>,
-    pub declarators: Vec<Declarator>,
+    pub init_declarators: Vec<Init_Declarator>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,11 +149,23 @@ pub enum Abstract_Direct_Declarator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Initializer {
+    Expr(Expr),
+    Init_List(Vec<Initializer>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Init_Declarator {
+    pub declarator: Declarator,
+    pub init: Option<Initializer>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
     pub star_count: i32,
     pub direct_declarator: Box<Direct_Declarator>,
     pub suffix: Option<DeclaratorSuffix>,
-    pub init_expr: Option<Expr>,
+    // pub init_expr: Option<Expr>,
     pub span: Span,
 }
 
@@ -494,34 +506,33 @@ impl Parser {
     }
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
-        let mut declarators: Vec<Declarator> = Vec::new();
+        let mut init_declarators: Vec<Init_Declarator> = Vec::new();
         let decl_spec = self.parse_decl_specs()?;
         let is_typedef_declaration = decl_spec.iter().any(|spec| *spec == Decl_Spec::Typedef);
 
         if !self.at(&Semicolon) {
             loop {
-                let declarator = self.parse_init_declarator()?;
+                let init_declarator = self.parse_init_declarator()?;
                 if is_typedef_declaration {
-                    let name = get_declarator_name(&declarator);
+                    let name = get_declarator_name(&init_declarator.declarator);
                     if self.scope_manager.is_typedef_name_in_current_scope(name) {
                         let err_msg = error_span(
-                            declarator.span,
+                            init_declarator.declarator.span,
                             "typedef name is already being used!",
                         );
                         return Err(err_msg);
                     }
                     self.scope_manager.add_typedef_name(name);
                 }
-                declarators.push(declarator);
+                init_declarators.push(init_declarator);
 
                 if !self.eat(&LexComma) {
                     break;
                 }
             }
         }
-
         self.expect(&Semicolon)?;
-        Ok(Declaration{decl_spec, declarators})
+        Ok(Declaration{decl_spec, init_declarators})
     }
 
     fn is_decl_spec(&self, token: &Token) -> bool {
@@ -740,7 +751,6 @@ impl Parser {
             None
         };
 
-        // This span doesn't include init_expr, just the declarator itself.
         let end_index = self.previous_token().span.end_index;
         let span = Span{start_index, end_index};
 
@@ -748,18 +758,29 @@ impl Parser {
             star_count,
             direct_declarator,
             suffix,
-            init_expr: None,
             span,
         })
     }
 
-    fn parse_init_declarator(&mut self) -> Result<Declarator, String> {
+    fn parse_init_declarator(&mut self) -> Result<Init_Declarator, String> {
         let mut declarator = self.parse_declarator()?;
         if self.eat(&LexAssignment) {
-            // Commas separate declarators, so leave a comma unconsumed here.
-            declarator.init_expr = Some(self.parse_expr(Comma, Left_To_Right)?);
+            let init = if self.cur_token().kind == LBrace {
+                let init_list = self.parse_init_list()?;
+                Some(Initializer::Init_List(init_list))
+            } else {
+                // Commas separate declarators, so leave a comma unconsumed here.
+                let expr  = self.parse_expr(Comma, Left_To_Right)?;
+                Some(Initializer::Expr(expr))
+            };
+            Ok(Init_Declarator{declarator, init})
+        } else {
+            Ok(Init_Declarator{declarator, init: None})
         }
-        Ok(declarator)
+    }
+
+    fn parse_init_list(&mut self) -> Result<Vec<Initializer>, String> {
+        todo!();
     }
 
     fn parse_declarator_suffix(&mut self) -> Result<DeclaratorSuffix, String> {
