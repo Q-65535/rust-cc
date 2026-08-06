@@ -637,29 +637,10 @@ impl Lexer {
 }
 
 fn lexical_error_at(index: usize, err_msg: &str) {
+    use crate::error_span;
     let span = Span{start_index: index, end_index: index};
     let error_stage_info = "lexical error: ".to_string();
-    report_error_at(span, &(error_stage_info+err_msg));
+    error_span(span, &(error_stage_info+err_msg));
     // Lex error is strict, once encountered, we force compilation to stop.
     exit(1);
-}
-
-// @Duplication: Duplicate with error reporter in parse.rs.
-pub fn report_error_at(span: Span, info: &str) {
-    let mut err_msg = String::new();
-    let (start_line, start_column, end_line, end_column) = span.locate();
-    let extended_error_info = format!(":{}:{}: {}\n", start_line, start_column, info.red());
-    err_msg.push_str(&extended_error_info);
-    let start_line_content = get_src_content_at_line(start_line);
-    err_msg.push_str(&start_line_content);
-    err_msg.push_str("\n");
-    let spaces = " ".repeat(start_column - 1);
-    let arrows = if start_line == end_line {
-        "^".repeat(span.end_index - span.start_index + 1)
-    // @Incomplete: Handle error across multiple lines.
-    } else {
-        "^".to_string()
-    };
-    err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
-    println!("{}", err_msg);
 }

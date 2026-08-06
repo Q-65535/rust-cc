@@ -317,8 +317,7 @@ impl ProgramAnalyzer {
                     // So we only check whether we encounter a duplicate name without considering it is function, variable or typedef name.
                     if self.scope_manager.contains_symbol_at_current_scope(&name) {
                         let err_info = format!("semantic error: {} redeclared as a symbol", name);
-                        print_error_at(fun.declarator.span, &err_info);
-                        exit(1);
+                        report_semantic_error(fun.declarator.span, &err_info);
                     }
                     let o = create_global_obj(&name, &function_type);
                     self.scope_manager.add_object(o);
@@ -358,8 +357,7 @@ impl ProgramAnalyzer {
 
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("semantic error: {} redeclared as a symbol", name);
-                print_error_at(init_declarator.declarator.span, &err_info);
-                exit(1);
+                report_semantic_error(init_declarator.declarator.span, &err_info);
             }
             let mut init_value = None;
             if let Some(init) = &mut init_declarator.init {
@@ -373,13 +371,11 @@ impl ProgramAnalyzer {
                             } else {
                                 let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                                 name, &final_type, &analyzed_expr.ty);
-                                print_error_at(init_declarator.declarator.span, &err_info);
-                                exit(1);
+                                report_semantic_error(init_declarator.declarator.span, &err_info);
                             }
                         } else {
                             let err_info = format!("This is not a constant number expression!");
-                            print_error_at(analyzed_expr.span, &err_info);
-                            exit(1);
+                            report_semantic_error(analyzed_expr.span, &err_info);
                         }
                     }
                     // @Future: We will add array and struct initialization expr assignment in the future.
@@ -413,7 +409,7 @@ impl ProgramAnalyzer {
                     let result = eval_constant(&analyzed_len_expr);
                     match result {
                         Err(e) => {
-                            print_error_at(len_expr.span, &e);
+                            report_semantic_error(len_expr.span, &e);
                             exit(1);
                         }
                         Ok(num) => {
@@ -422,7 +418,7 @@ impl ProgramAnalyzer {
                                 (num as i32) as usize
                             } else {
                                 let err_info = format!("semantic error: array size is negative number: {}", num);
-                                print_error_at(len_expr.span, &err_info);
+                                report_semantic_error(len_expr.span, &err_info);
                                 exit(1);
                             };
                         }
@@ -485,8 +481,7 @@ impl ProgramAnalyzer {
                 None => {
                     let span = Span{start_index: 0, end_index: 0};
                     let err_info = format!("storage size of {} is unkonwn", &tag_name);
-                    print_error_at(span, &err_info);
-                    exit(1);
+                    report_semantic_error(span, &err_info);
                 },
             }
         }
@@ -525,16 +520,14 @@ impl ProgramAnalyzer {
                     Some(the_type) => cur_type = the_type.clone(),
                     None => {
                         let err_info = format!("storage size of {} is unkonwn", &tag_name);
-                        print_error_at(declarator.span, &err_info);
-                        exit(1);
+                        report_semantic_error(declarator.span, &err_info);
                     },
                 }
             }
 
             if cur_type == Void {
                 let err_info = format!("variable declared void!");
-                print_error_at(declarator.span, &err_info);
-                exit(1);
+                report_semantic_error(declarator.span, &err_info);
             }
         }
         return (cur_type, name);
@@ -559,8 +552,7 @@ impl ProgramAnalyzer {
         } else {
             let err_info = format!("compiler bug: we are analyzing a function definition,
             but the data type resolved is not function!.");
-            print_error_at(fun.declarator.span, &err_info);
-            exit(1);
+            report_semantic_error(fun.declarator.span, &err_info);
         }
         // We must enter scope before analyzing function
         // parameters since function parameters are also in
@@ -574,8 +566,7 @@ impl ProgramAnalyzer {
             }
         } else {
             let err_info = format!("compiler bug: the function doesn't have parameter field.");
-            print_error_at(fun.declarator.span, &err_info);
-            exit(1);
+            report_semantic_error(fun.declarator.span, &err_info);
         }
         let mut stmts = self.analyze_block(&mut fun.items);
         let stack_size = self.current_local_var_offset;
@@ -616,7 +607,7 @@ impl ProgramAnalyzer {
         
         if self.scope_manager.contains_symbol_at_current_scope(&name) {
             let err_info = format!("fatal error: parameter variable {} already defined", &name);
-            print_error_at(param.declarator.span, &err_info);
+            report_semantic_error(param.declarator.span, &err_info);
             exit(1);
         } else {
             let obj = self.create_local_obj(&final_type, &name);
@@ -640,8 +631,7 @@ impl ProgramAnalyzer {
             let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &init_declarator.declarator);
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
-                print_error_at(init_declarator.declarator.span, &err_info);
-                exit(1);
+                report_semantic_error(init_declarator.declarator.span, &err_info);
             }
             // If the type is an array with 0 length, i.e., incomplete array type,
             // this declaration is not allowed.
@@ -649,8 +639,7 @@ impl ProgramAnalyzer {
             // It just gives a warning: array ‘xxx’ assumed to have one element.
             if matches!(&final_type, Type::ArrayOf(..)) && sizeof(&final_type) == 0 {
                 let err_info = format!("variable {} has incomplete type", name);
-                print_error_at(init_declarator.declarator.span, &err_info);
-                exit(1);
+                report_semantic_error(init_declarator.declarator.span, &err_info);
             }
             // @Fix: If it is a function declaration, we shouldn't allocate
             // stack space to it? But currently create_local_obj() will definitely
@@ -685,8 +674,7 @@ impl ProgramAnalyzer {
                     }
                 } else {
                     let err_info = format!("semantic error: trying to init an array variable with scalar data.");
-                    print_error_at(span, &err_info);
-                    exit(1);
+                    report_semantic_error(span, &err_info);
                 }
             }
             _ => {
@@ -697,8 +685,7 @@ impl ProgramAnalyzer {
                     stmts.push(assignment_expr_stmt);
                 } else {
                     let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
-                    print_error_at(span, &err_info);
-                    exit(1);
+                    report_semantic_error(span, &err_info);
                 }
             }
         }
@@ -848,8 +835,7 @@ impl ProgramAnalyzer {
                 if self.scope_manager.resolve_tag_at_current_scope(name).is_some() {
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
                     // @TODO add span info to declaration specifier
-                    print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
-                    exit(1);
+                    report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
                 } else {
                     self.scope_manager.add_tag(name, &the_type);
                 }
@@ -866,7 +852,7 @@ impl ProgramAnalyzer {
                 // current scope, enumerator list shall not appear, otherwise it is an semantic error.
                 if enum_spec.enumerators.is_some() {
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
-                    print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
+                    report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
                     exit(1);
                 } else {
                     return the_type.clone();
@@ -881,7 +867,7 @@ impl ProgramAnalyzer {
                             let value_expr = self.analyze_expr(expr);
                             value = match eval_constant(&value_expr) {
                                 Err(e) => {
-                                    print_error_at(expr.span, &e);
+                                    report_semantic_error(expr.span, &e);
                                     exit(1);
                                 }
                                 Ok(num) => num
@@ -893,7 +879,7 @@ impl ProgramAnalyzer {
                     return the_type;
                 } else {
                     let err_info = format!("semantic error: undefined tag name: '{}'", name);
-                    print_error_at(Span{start_index: 0, end_index: 0}, &err_info);
+                    report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
                     exit(1);
                 }
             }
@@ -905,7 +891,7 @@ impl ProgramAnalyzer {
                         let value_expr = self.analyze_expr(expr);
                         value = match eval_constant(&value_expr) {
                             Err(e) => {
-                                print_error_at(expr.span, &e);
+                                report_semantic_error(expr.span, &e);
                                 exit(1);
                             }
                             Ok(num) => num
@@ -1049,7 +1035,7 @@ impl ProgramAnalyzer {
                     let result = eval_constant(&analyzed_cond_expr);
                     let cond_value = match result {
                         Err(e) => {
-                            print_error_at(cond_expr.span, &e);
+                            report_semantic_error(cond_expr.span, &e);
                             exit(1);
                         }
                         Ok(num) => num
@@ -1265,7 +1251,7 @@ impl ProgramAnalyzer {
                     return gen_num_expr(number, span);
                 } else {
                     let err_info = format!("semantic error: symbol '{}' doesn't exist or is nither a variable nor enum constant.", s);
-                    print_error_at(expr.span, &err_info);
+                    report_semantic_error(expr.span, &err_info);
                     exit(1);
                 };
             }
@@ -1283,7 +1269,7 @@ impl ProgramAnalyzer {
                         cur_ty = the_type.clone();
                     } else {
                         let err_info = format!("it has incomplete struct or union type definition.");
-                        print_error_at(struct_expr.span, &err_info);
+                        report_semantic_error(struct_expr.span, &err_info);
                         exit(1);
                     }
                 }
@@ -1298,13 +1284,13 @@ impl ProgramAnalyzer {
 
                         },
                         Err(err) => {
-                            print_error_at(expr.span, &err);
+                            report_semantic_error(expr.span, &err);
                             exit(1);
                         }
                     }
                 } else {
                     let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
-                    print_error_at(struct_expr.span, &err_info);
+                    report_semantic_error(struct_expr.span, &err_info);
                     exit(1);
                 }
             }
@@ -1316,12 +1302,10 @@ impl ProgramAnalyzer {
                 }
                 // type checking
                 if !base_position.is_pointer_or_array() {
-                    print_error_at(base_position.span, "subscripted value is neither array nor pointer nor vector");
-                    exit(1);
+                    report_semantic_error(base_position.span, "subscripted value is neither array nor pointer nor vector");
                 }
                 if !index.is_integer() {
-                    print_error_at(index.span, "array subscript is not an integer");
-                    exit(1);
+                    report_semantic_error(index.span, "array subscript is not an integer");
                 }
                 let pointer_arithmatic_expr = gen_binary_expr(base_position, index, OP::Plus);
                 return gen_deref_expr(pointer_arithmatic_expr);
@@ -1340,12 +1324,11 @@ impl ProgramAnalyzer {
 
                                 // @Future: Add these judgements.
                                 // if args.len() > param_types.len() {
-                                //     print_error_at(span, "Too many arguments to call this function.");
+                                //     report_semantic_error(span, "Too many arguments to call this function.");
                                 //     exit(1);
                                 // }
                                 if args.len() < param_types.len() {
-                                    print_error_at(span, "Too few arguments to call this function.");
-                                    exit(1);
+                                    report_semantic_error(span, "Too few arguments to call this function.");
                                 }
                                 for arg_index in 0..args.len() {
                                     let arg = &args[arg_index];
@@ -1353,8 +1336,7 @@ impl ProgramAnalyzer {
                                     if arg_index < param_types.len() {
                                         let param_type = &param_types[arg_index];
                                         if matches!(param_type, Type::Struct(..) | Type::Union(..) | Type::Tag(..)) {
-                                            print_error_at(span, "passing struct or union is not supported yet");
-                                            exit(1);
+                                            report_semantic_error(span, "passing struct or union is not supported yet");
                                         }
                                         analyzed_arg = cast(analyzed_arg, param_type);
                                         casted_analyzed_args.push(analyzed_arg);
@@ -1369,20 +1351,20 @@ impl ProgramAnalyzer {
                             }
                             else {
                                 let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &obj_ty);
-                                print_error_at(ident.span, &error_message);
+                                report_semantic_error(ident.span, &error_message);
                                 exit(1);
                             }
                         } else {
                             if self.scope_manager.contains_symbol(name) {
-                                print_error_at(ident.span, "This symbol is not a function name!");
+                                report_semantic_error(ident.span, "This symbol is not a function name!");
                             } else {
-                                print_error_at(ident.span, "This is an unknown symbol");
+                                report_semantic_error(ident.span, "This is an unknown symbol");
                             }
                             exit(1);
                         }
                     }
                     _ => {
-                        print_error_at(ident.span, "currently only support function name as call reference");
+                        report_semantic_error(ident.span, "currently only support function name as call reference");
                         exit(1);
                     }
                 }
@@ -1436,7 +1418,7 @@ impl ProgramAnalyzer {
                 let ty = match stmts.last() {
                     Some(ir::StmtType::Ex(e)) => e.ty.clone(),
                     _ => {
-                        print_error_at(span, "a statement expression must end with an expression statement");
+                        report_semantic_error(span, "a statement expression must end with an expression statement");
                         ty_none
                     }
                 };
@@ -1482,7 +1464,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
         return expr;
     }
     if matches!(to_type, ArrayOf(..)) {
-        print_error_at(span, "the cast-to type must not be array type!");
+        report_semantic_error(span, "the cast-to type must not be array type!");
     }
     if !is_scalar_type(&from_type) || !is_scalar_type(&to_type) {
         println!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
@@ -1589,12 +1571,12 @@ pub fn is_array(t: &Type) -> bool {
 fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
         if !can_be_lvalue(&lhs) {
             let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
-            print_error_at(lhs.span, &err_info);
+            report_semantic_error(lhs.span, &err_info);
         }
         if !can_assign(&lhs.ty, &rhs.ty) {
             let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
             &rhs.ty, &lhs.ty);
-            print_error_at(lhs.span, &err_info);
+            report_semantic_error(lhs.span, &err_info);
         }
         // Cast rhs to match lhs when they are not struct type.
         if !matches!(lhs.ty, Struct(..) | Union(..) | Tag(..) ) {
@@ -1634,8 +1616,8 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
         OP::Plus => {
             if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
                 println!();
-                print_error_at(lhs.span, "error: both lhs and rhs are of ptr type");
-                print_error_at(rhs.span, "error: both lhs and rhs are of ptr type");
+                report_semantic_error(lhs.span, "error: both lhs and rhs are of ptr type");
+                report_semantic_error(rhs.span, "error: both lhs and rhs are of ptr type");
             }
             if lhs.is_integer() && rhs.is_pointer_or_array() {
                 swap(&mut lhs, &mut rhs);
@@ -1652,7 +1634,7 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
         }
         OP::Minus => {
             if lhs.is_integer() && rhs.is_pointer_or_array() {
-                print_error_at(rhs.span, "error: integer - ptr");
+                report_semantic_error(rhs.span, "error: integer - ptr");
             }
             if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
                 let scale = match &lhs.ty {
@@ -1669,7 +1651,7 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                     _ => exit(1),
                 };
                 if lhs.ty != rhs.ty {
-                    print_error_at(rhs.span, "pointer arithmatic error: type doesn't match");
+                    report_semantic_error(rhs.span, "pointer arithmatic error: type doesn't match");
                 }
                 // The result of "pointer - pointer" is the gap between them,
                 // measured in elements.
@@ -1734,14 +1716,14 @@ fn gen_deref_expr(expr: ir::Expr) -> ir::Expr {
     let dereferenced_type = match &expr.ty {
         Pointer_To(pointee_type) => {
             if **pointee_type == Void {
-                print_error_at(expr.span, "Hey bro no, you are trying to dereference a void pointer!");
+                report_semantic_error(expr.span, "Hey bro no, you are trying to dereference a void pointer!");
                 exit(1);
             }
             *pointee_type.clone()
         },
         ArrayOf(element_type, _) => *element_type.clone(),
         _ => {
-            print_error_at(expr.span, "unable to generate deference of this expression, because it is
+            report_semantic_error(expr.span, "unable to generate deference of this expression, because it is
             nither a pointer nor array.");
             exit(1);
         },
@@ -1794,23 +1776,10 @@ fn create_global_obj(name: &str, base_type: &Type) -> Obj {
     obj
 }
 
-// @Duplication: Duplicate with error reporter in parse.rs.
-fn print_error_at(span: Span, info: &str) {
-    let mut err_msg = String::new();
-    let (start_line, start_column, end_line, end_column) = span.locate();
-    let extended_error_info = format!(":{}:{}: {}\n", start_line, start_column, info.red());
-    err_msg.push_str(&extended_error_info);
-    let start_line_content = get_src_content_at_line(start_line);
-    err_msg.push_str(&start_line_content);
-    err_msg.push_str("\n");
-    let spaces = " ".repeat(start_column - 1);
-    let arrows = if start_line == end_line {
-        "^".repeat(span.end_index - span.start_index + 1)
-    } else {
-        "^".to_string()
-    };
-    err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
-    println!("{}", err_msg);
+fn report_semantic_error(span: Span, err_msg: &str) {
+    let error_stage_info = "semantic error: ".to_string();
+    let error_info = error_span(span, &(error_stage_info+err_msg));
+    println!("{}", error_info);
     exit(1);
 }
 
