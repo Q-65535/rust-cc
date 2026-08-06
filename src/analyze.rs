@@ -659,67 +659,50 @@ impl ProgramAnalyzer {
             self.scope_manager.add_object(obj.clone());
             if let Some(init) = &init_declarator.init {
                 // @TODO: First, to normalize init to match obj's type.
+                // @Smell: Too many clone of init. Maybe we can introduce an analyzed init
+                // in which all exprs are already analyzed.
+                let init = normalize_init(init, &obj.ty);
                 let mut root_obj_expr = self.gen_expr_from_obj(&obj);
-                let root_position_expr = gen_addr_of_expr(root_obj_expr);
-                let assignment_expr_stmts = self.init(&root_position_expr, init_list);
-                stmts.append(assignment_expr_stmts);
-                // match init {
-                //     Initializer::Expr(expr) => {
-                //         let lhs = self.gen_expr_from_obj(&obj);
-                //         let rhs = self.analyze_expr(expr);
-                //         let assignment_expr = gen_assign_expr(lhs, rhs);
-                //         let expr_stmt = ir::StmtType::Ex(assignment_expr);
-                //         stmts.push(expr_stmt);
-                //     }
-                //     Initializer::Init_List(init_list) => {
-                //         let position_expr = self.gen_expr_from_obj(&obj);
-                //         let assignment_expr_stmts = self.init(&position_expr, init_list);
-                //         stmts.append(assignment_expr_stmts);
-                //     }
-                // }
+                let mut assignment_expr_stmts = self.init(root_obj_expr, &init);
+                stmts.append(&mut assignment_expr_stmts);
             }
         }
         stmts
     }
 
-    //  We must make sure that the type of position_expr is definitely a pointer type.
-    fn init(&mut self, position_expr: &ir::Expr, init: &Initializer) -> Vec<StmtType> {
-        let span = position_expr.span;
-        let stmts = Vec::new();
-        match init {
-            Initializer::Expr(expr) => {
-                let offset = gen_num_expr(0, span);
-                let address = gen_binary_expr(position_expr, offset, OP::Plus);
-                let lhs = gen_deref_expr(address);
-                let rhs = self.analyze_expr(expr);
-                let assignment_expr = gen_assign_expr(lhs, rhs);
-                let expr_stmt = ir::StmtType::Ex(assignment_expr);
-                stmts.push(expr_stmt);
-            }
-            Initializer::Init_List(init_list) => {
-                let assignment_expr_stmts = self.init_by_list(&position_expr, init_list);
-                stmts.append(assignment_expr_stmts);
-            }
-        }
-    }
-
-    fn init_by_list(&mut self, position_expr: &ir::Expr, init_list: &Vec<Initializer>) -> Vec<StmtType> {
-        let span = position_expr.span;
-        let stmts = vec::new();
-        match &position_expr.ty {
-            Pointer_To(element_type) => {
-                for (i, init) in init_list.iter().enumerate() {
-                    let array_offset = gen_num_expr(i as i64, span);
-                    let cur_position_expr = gen_binary_expr(position_expr, array_offset);
-                    let init_stmts = self.init(cur_position_expr, init);
-                    stmts.append(init_stmts);
+    fn init(&mut self, target_expr: ir::Expr, init: &Initializer) -> Vec<ir::StmtType> {
+        let span = target_expr.span;
+        let mut stmts = Vec::new();
+        match &target_expr.ty {
+            ArrayOf(element_type, size) => {
+                if let Initializer::Init_List(init_list) = init {
+                    for (index, init) in init_list.iter().enumerate() {
+                        let array_offset_expr = gen_num_expr(index as i64, span);
+                        let pointer_arithmatic_expr = gen_binary_expr(target_expr.clone(), array_offset_expr, OP::Plus);
+                        let sub_target_expr = gen_deref_expr(pointer_arithmatic_expr);
+                        let mut init_stmts = self.init(sub_target_expr, init);
+                        stmts.append(&mut init_stmts);
+                    }
+                } else {
+                    let err_info = format!("semantic error: trying to init an array variable with scalar data.");
+                    print_error_at(span, &err_info);
+                    exit(1);
                 }
             }
-            Struct(st) => {
-                todo!();
+            _ => {
+                if let Initializer::Expr(init_expr) = init {
+                    let analyzed_init_expr = self.analyze_expr(init_expr);
+                    let assignment_expr = gen_assign_expr(target_expr, analyzed_init_expr);
+                    let assignment_expr_stmt = ir::StmtType::Ex(assignment_expr);
+                    stmts.push(assignment_expr_stmt);
+                } else {
+                    let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
+                    print_error_at(span, &err_info);
+                    exit(1);
+                }
             }
-            _ => todo!(),
         }
+        return stmts;
     }
 
     fn analyze_decl_spec(&mut self, decl_specs: &Vec<Decl_Spec>) -> (Type, Symbol_Attribute) {
@@ -1978,6 +1961,79 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
         _ => {
             println!("this is not a costant expression");
             exit(1);
+        }
+    }
+}
+
+fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
+    match ty {
+        ArrayOf(element_type, size) => {
+            let mut new_init_list = Vec::new();
+            if let Initializer::Init_List(old_init_list) = init {
+                if old_init_list.len() > *size {
+                    println!("excess elements in array initializer");
+                    exit(1);
+                }
+                for i in 0..*size {
+                    let cur_old_init = if i < old_init_list.len() {
+                        let new_init = normalize_init(&old_init_list[i], element_type);
+                        new_init_list.push(new_init);
+                    } else {
+                        let new_zero_init = create_zerolized_init(element_type);
+                        new_init_list.push(new_zero_init);
+                    };
+                }
+                return Initializer::Init_List(new_init_list);
+            } else {
+                println!("you are trying to use scalar initiaizer to init an array variable.");
+                exit(1);
+            }
+        }
+        Struct(st) => {
+            todo!();
+        }
+        // Scalar type:
+        _ => {
+            match init {
+                Initializer::Expr(ref expr) => {
+                    return init.clone();
+                }
+                Initializer::Init_List(init_list) => {
+                    if init_list.len() > 1 {
+                        println!("excess elements in array initializer");
+                        exit(1);
+                    }
+                    if init_list.len() == 0 {
+                        return create_zerolized_init(ty);
+                    } else {
+                        return normalize_init(&init_list[0], ty);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn create_zerolized_init(ty: &Type) -> Initializer {
+    let span = Span{start_index: 0, end_index: 0};
+    match ty {
+        ArrayOf(element_type, size) => {
+            let mut init_list = Vec::new();
+            for i in 0..*size {
+                let cur_init = create_zerolized_init(element_type);
+                init_list.push(cur_init);
+            }
+            return Initializer::Init_List(init_list);
+        }
+        Struct(st) => {
+            todo!();
+        }
+        _ => {
+            // @Smell: Maybe we should make the normalized init to use ir::Expr instead
+            // of parse::Expr?
+            let content = ExprType::Natural_Number(0);
+            let zero_value_expr = Expr {content, span};
+            return Initializer::Expr(zero_value_expr);
         }
     }
 }
