@@ -1496,6 +1496,7 @@ fn syntax_error(span: Span, err_msg: &str) -> String {
     error_span(span, &(error_stage_info+err_msg))
 }
 
+// @Smell: Create a new error_reporter.rs file?
 pub fn error_span(span: Span, info: &str) -> String {
     let mut err_msg = String::new();
     let (start_line, start_column, end_line, end_column) = span.locate();

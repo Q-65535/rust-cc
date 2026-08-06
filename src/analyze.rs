@@ -834,7 +834,8 @@ impl ProgramAnalyzer {
             if let Some(members) = &st.members {
                 if self.scope_manager.resolve_tag_at_current_scope(name).is_some() {
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
-                    // @TODO add span info to declaration specifier
+                    // @TODO add span info to name so we can report correct error position.
+                    // Maybe something like Struct Symbol{span: Span, name: String}.
                     report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
                 } else {
                     self.scope_manager.add_tag(name, &the_type);
@@ -851,6 +852,8 @@ impl ProgramAnalyzer {
                 // If it has a tag name, and the tag name is already registerd at
                 // current scope, enumerator list shall not appear, otherwise it is an semantic error.
                 if enum_spec.enumerators.is_some() {
+                    // @TODO add span info to name so we can report correct error position.
+                    // Maybe something like Struct Symbol{span: Span, name: String}.
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
                     report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
                     exit(1);
@@ -878,6 +881,8 @@ impl ProgramAnalyzer {
                     }
                     return the_type;
                 } else {
+                    // @TODO add span info to name so we can report correct error position.
+                    // Maybe something like Struct Symbol{span: Span, name: String}.
                     let err_info = format!("semantic error: undefined tag name: '{}'", name);
                     report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
                     exit(1);
@@ -919,6 +924,7 @@ impl ProgramAnalyzer {
         }
     }
 
+    // @TODO: Pass span argument so we can get a expr with span from this function.
     fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {
         let content = ir::ExprType::Object(o.clone());
         let span = Span{start_index: 0, end_index: 0};
@@ -1934,12 +1940,14 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
     }
 }
 
+// @TODO: Add span info to Initializer and report Err(e) if encountered something wrong.
 fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
     match ty {
         ArrayOf(element_type, size) => {
             let mut new_init_list = Vec::new();
             if let Initializer::Init_List(old_init_list) = init {
                 if old_init_list.len() > *size {
+                    // @TODO: Report error info with span.
                     println!("excess elements in array initializer");
                     exit(1);
                 }
@@ -1948,12 +1956,14 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                         let new_init = normalize_init(&old_init_list[i], element_type);
                         new_init_list.push(new_init);
                     } else {
+                        // @TODO: Add span to Initializer and pass span info to create_zerolized_init.
                         let new_zero_init = create_zerolized_init(element_type);
                         new_init_list.push(new_zero_init);
                     };
                 }
                 return Initializer::Init_List(new_init_list);
             } else {
+                // @TODO: Report error info with span.
                 println!("you are trying to use scalar initiaizer to init an array variable.");
                 exit(1);
             }
@@ -1969,6 +1979,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                 }
                 Initializer::Init_List(init_list) => {
                     if init_list.len() > 1 {
+                        // @TODO: Report error info with span.
                         println!("excess elements in array initializer");
                         exit(1);
                     }
