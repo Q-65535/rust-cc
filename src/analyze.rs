@@ -647,7 +647,6 @@ impl ProgramAnalyzer {
             let obj = self.create_local_obj(&final_type, &name);
             self.scope_manager.add_object(obj.clone());
             if let Some(init) = &init_declarator.init {
-                // @TODO: First, to normalize init to match obj's type.
                 // @Smell: Too many clone of init. Maybe we can introduce an analyzed init
                 // in which all exprs are already analyzed.
                 let init = normalize_init(init, &obj.ty);
@@ -915,7 +914,7 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
-        let (base_type, symbol_attribute) = self.analyze_decl_spec(&member.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_spec(&member.decl_specs);
         let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &member.declarator);
         ir::Member{
             ty: final_type,
@@ -1026,6 +1025,7 @@ impl ProgramAnalyzer {
                 self.cur_end_label = backup_end_label;
                 self.cur_switch = backup_switch;
 
+                debug_assert!(result_switch.is_some());
                 if let Some(switch) = result_switch {
                     StmtType::Switch{switch_case_info: switch, body: Box::new(stmt), end_label}
                 } else {
@@ -1050,7 +1050,8 @@ impl ProgramAnalyzer {
                     cur_switch.cases.push(case.clone());
                     ir::StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
                 } else {
-                    println!("this is not inside switch statement, you cannot handle case statement");
+                    let error_info = format!("this is not inside switch statement, you cannot handle case statement");
+                    report_semantic_error(cond_expr.span, &error_info);
                     exit(1);
                 }
             }
@@ -1454,8 +1455,8 @@ impl ProgramAnalyzer {
 
     fn resolve_type_name(&mut self, type_name: &Type_Name) -> Type {
         let (base_type, _) = self.analyze_decl_spec(&type_name.decl_specs);
-        let final_type = self.resolve_abstract_declarator(&base_type, &type_name.declarator);
-        if let Some(abstract_declarator) = &type_name.declarator {
+        let final_type = self.resolve_abstract_declarator(&base_type, &type_name.abstract_declarator);
+        if let Some(abstract_declarator) = &type_name.abstract_declarator {
         }
         return final_type;
     }
@@ -1473,9 +1474,9 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
         report_semantic_error(span, "the cast-to type must not be array type!");
     }
     if !is_scalar_type(&from_type) || !is_scalar_type(&to_type) {
-        println!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
+        let error_info = format!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
         when doing type casting! Don't blame me, ChatGPT told me that.");
-        println!("from_type is: {:?}, to_type is: {:?}", from_type, to_type);
+        report_semantic_error(span, &error_info);
         exit(1);
     } else {
         return expr;
@@ -1621,7 +1622,6 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
     match op {
         OP::Plus => {
             if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
-                println!();
                 report_semantic_error(lhs.span, "error: both lhs and rhs are of ptr type");
                 report_semantic_error(rhs.span, "error: both lhs and rhs are of ptr type");
             }
@@ -1769,7 +1769,8 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
         SHL => OP::SHL,
         SHR => OP::SHR,
         _ => {
-            println!("semantic error: trying to convert {:?} to binary operator", tokenkind);
+            println!("compiler bug: binary operator should not be other kinds other than the above ones.
+            but we got {:?} as binary operator, this must be incorrectly handled in parse phase.", tokenkind);
             exit(1);
         }
     }

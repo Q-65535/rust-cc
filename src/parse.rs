@@ -88,7 +88,7 @@ pub struct Declaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
-    pub decl_spec: Vec<Decl_Spec>,
+    pub decl_specs: Vec<Decl_Spec>,
     pub declarator: Declarator,
 }
 
@@ -273,8 +273,7 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Type_Name {
     pub decl_specs: Vec<Decl_Spec>,
-    // @TODO: rename to abstract_declarator
-    pub declarator: Option<Abstract_Declarator>,
+    pub abstract_declarator: Option<Abstract_Declarator>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -668,7 +667,7 @@ impl Parser {
             // parse declarators separated by ','
             loop {
                 let declarator = self.parse_declarator()?;
-                let m = Member{decl_spec: decl_spec.clone(), declarator};
+                let m = Member{decl_specs: decl_spec.clone(), declarator};
                 members.push(m);
                 if !self.eat(&LexComma) {
                     break;
@@ -1235,7 +1234,7 @@ impl Parser {
             None
         };
 
-        Ok(Type_Name{decl_specs, declarator})
+        Ok(Type_Name{decl_specs, abstract_declarator: declarator})
     }
 
     fn starts_abstract_declarator(kind: &TokenKind) -> bool {
