@@ -1943,30 +1943,71 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
 
 // @TODO: Add span info to Initializer and report Err(e) if encountered something wrong.
 fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
+    // @TODO: get rid of dummy span.
+    let dummy_span = Span{start_index: 0, end_index: 0};
     match ty {
         ArrayOf(element_type, size) => {
             let mut new_init_list = Vec::new();
-            if let Initializer::Init_List(old_init_list) = init {
-                if old_init_list.len() > *size {
-                    // @TODO: Report error info with span.
-                    println!("excess elements in array initializer");
-                    exit(1);
-                }
-                for i in 0..*size {
-                    let cur_old_init = if i < old_init_list.len() {
-                        let new_init = normalize_init(&old_init_list[i], element_type);
-                        new_init_list.push(new_init);
+            match init {
+                Initializer::Expr(init_expr) => {
+                    // String literal initializer is a special case, we transform string literal to initializer list.
+                    // For expamle, in this declaration: char a[3] = "abc", string literal "abc" is
+                    // transformed to {'a', 'b', 'c'}.
+                    // Some thing we should keep in mind when dealing with string litreal initializer:
+                    // char a[3] = "a";   is equivalent to: char a[3] = {'a', '\0', '\0'};.
+                    // char a[3] = "ab";  is equivalent to: char a[3] = {'a', 'b', '\0'};.
+                    // char a[3] = "abc"; is equivalent to: char a[3] = {'a', 'b', 'c'};.
+                    // char a[3] = "abcd"; is a compile error: initializer-string for this array of is too long.
+                    // Note that the 3rd case is allowed! When evaluating whether string length exceeds array length,
+                    // it just simply ignore the ending '\0' in the string literal.
+                    if let Str(s) = &init_expr.content {
+                        if **element_type == Char {
+                            if s.len() > *size {
+                                let error_info = format!("initializer-string for array of {:?} is too long", element_type);
+                                println!("{}", error_info);
+                                exit(1);
+                            }
+                            for i in 0..*size {
+                                if i < s.len() {
+                                    let char_init_expr_content = Natural_Number(s[i].clone() as i64);
+                                    let char_init_expr = Expr{content: char_init_expr_content, span: dummy_span};
+                                    let new_init = Initializer::Expr(char_init_expr);
+                                    new_init_list.push(new_init);
+                                } else {
+                                    // @TODO: Add span to Initializer and pass span info to create_zerolized_init.
+                                    let new_zero_init = create_zerolized_init(element_type);
+                                    new_init_list.push(new_zero_init);
+                                }
+                            }
+                            return Initializer::Init_List(new_init_list);
+                        } else {
+                            let error_info = format!("cannot initialize array of {:?} from a string literal with type array of ‘char’", element_type);
+                            println!("{}", error_info);
+                            exit(1);
+                        }
                     } else {
-                        // @TODO: Add span to Initializer and pass span info to create_zerolized_init.
-                        let new_zero_init = create_zerolized_init(element_type);
-                        new_init_list.push(new_zero_init);
-                    };
+                        println!("you are trying to use scalar initiaizer to init an array variable.");
+                        exit(1);
+                    }
                 }
-                return Initializer::Init_List(new_init_list);
-            } else {
-                // @TODO: Report error info with span.
-                println!("you are trying to use scalar initiaizer to init an array variable.");
-                exit(1);
+                Initializer::Init_List(old_init_list) => {
+                    if old_init_list.len() > *size {
+                        // @TODO: Report error info with span.
+                        println!("excess elements in array initializer");
+                        exit(1);
+                    }
+                    for i in 0..*size {
+                        if i < old_init_list.len() {
+                            let new_init = normalize_init(&old_init_list[i], element_type);
+                            new_init_list.push(new_init);
+                        } else {
+                            // @TODO: Add span to Initializer and pass span info to create_zerolized_init.
+                            let new_zero_init = create_zerolized_init(element_type);
+                            new_init_list.push(new_zero_init);
+                        }
+                    }
+                    return Initializer::Init_List(new_init_list);
+                }
             }
         }
         Struct(st) => {
