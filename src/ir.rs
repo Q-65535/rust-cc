@@ -30,7 +30,7 @@ pub struct Case {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Natural_Number(i64),
+    Integer(i64),
     Binary(Box<Expr>, Box<Expr>, OP),
     Assign(Box<Expr>, Box<Expr>),
     Conditional {cond: Box<Expr>, then: Box<Expr>, otherwise: Box<Expr>},

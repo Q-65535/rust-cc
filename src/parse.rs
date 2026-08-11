@@ -177,7 +177,7 @@ pub enum Direct_Declarator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Natural_Number(i64),
+    Integer(i64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -1124,7 +1124,7 @@ impl Parser {
                     return self.parse_paren();
                 }
             },
-            Lex_Natural_Num(n) => Ok(self.parse_natural_number(n)),
+            Lex_Integer(n) => Ok(self.parse_natural_number(n)),
             Exclamation => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
@@ -1320,14 +1320,14 @@ impl Parser {
     }
 
     fn parse_natural_number(&mut self, n: i64) -> Expr {
-        debug_assert!(matches!(self.cur_token().kind, Lex_Natural_Num(_)));
+        debug_assert!(matches!(self.cur_token().kind, Lex_Integer(_)));
         let token = self.bump();
-        Expr::new(Natural_Number(n), token.span)
+        Expr::new(Integer(n), token.span)
     }
 
     fn parse_raw_usize(&mut self) -> Result<usize, String> {
         let token = self.bump();
-        if let Lex_Natural_Num(n) = token.kind {
+        if let Lex_Integer(n) = token.kind {
             Ok(n.try_into().unwrap())
         } else {
             Err(error_token(&token, "expect a number"))

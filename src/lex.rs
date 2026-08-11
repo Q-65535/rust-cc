@@ -37,7 +37,7 @@ pub enum TokenKind {
     Semicolon,
     Colon,
     LexComma,
-    Lex_Natural_Num(i64),
+    Lex_Integer(i64),
     Lex_Char(u8),
     LexIdent(String),
     StringLiteral(Vec<u8>),
@@ -323,7 +323,7 @@ impl Lexer {
                 '0'..='9' => {
                     let num = self.read_int();
                     let num_str = num.to_string();
-                    tokens.push(Self::gen_token(Lex_Natural_Num(num), start_index, num_str.len()));
+                    tokens.push(Self::gen_token(Lex_Integer(num), start_index, num_str.len()));
                 },
                 '\'' => {
                     let character = self.read_char_literal();
@@ -341,7 +341,7 @@ impl Lexer {
                             // number whose data type is 32-bit singed integer.
                             // So, in GCC, (-128=='\x80') evaluates to 1, in this compiler, (128=='\x80') evaluates to 1.
                             // I don't known whether this difference will cause any problem, we'll see.
-                            tokens.push(Self::gen_token(Lex_Natural_Num(byte as i64), start_index, len));
+                            tokens.push(Self::gen_token(Lex_Integer(byte as i64), start_index, len));
                         }
                         Err(s) => {
                             lexical_error_at(start_index, &s);

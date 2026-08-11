@@ -628,31 +628,37 @@ impl ProgramAnalyzer {
             return stmts;
         }
         for init_declarator in &decl.init_declarators {
-            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &init_declarator.declarator);
+            let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &init_declarator.declarator);
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
                 report_semantic_error(init_declarator.declarator.span, &err_info);
             }
-            // If the type is an array with 0 length, i.e., incomplete array type,
-            // this declaration is not allowed.
-            // @Incomplete: But...GCC allows variable with incomplete array type.
-            // It just gives a warning: array ‘xxx’ assumed to have one element.
-            if matches!(&final_type, Type::ArrayOf(..)) && sizeof(&final_type) == 0 {
-                let err_info = format!("variable {} has incomplete type", name);
-                report_semantic_error(init_declarator.declarator.span, &err_info);
-            }
-            // @Fix: If it is a function declaration, we shouldn't allocate
-            // stack space to it? But currently create_local_obj() will definitely
-            // allocate space accroding to the size of the given type.
-            let obj = self.create_local_obj(&final_type, &name);
-            self.scope_manager.add_object(obj.clone());
             if let Some(init) = &init_declarator.init {
-                // @Smell: Too many clone of init. Maybe we can introduce an analyzed init
-                // in which all exprs are already analyzed.
-                let init = normalize_init(init, &obj.ty);
-                let mut root_obj_expr = self.gen_expr_from_obj(&obj);
-                let mut assignment_expr_stmts = self.init(root_obj_expr, &init);
+                if let ArrayOf(element_type, size) = &final_type {
+                    if *size == 0 {
+                        let final_size = resolve_array_size_from_init(init);
+                        final_type = ArrayOf(element_type.clone(), final_size);
+                    }
+                }
+                let obj = self.create_local_obj(&final_type, &name);
+                self.scope_manager.add_object(obj.clone());
+
+                let normalized_init = normalize_init(init, &obj.ty);
+                let mut obj_expr = self.gen_expr_from_obj(&obj);
+                let mut assignment_expr_stmts = self.init(obj_expr, &normalized_init);
                 stmts.append(&mut assignment_expr_stmts);
+            } else {
+                // If the type is an array with 0 length, i.e., incomplete array type,
+                // and without initializer, this declaration is not allowed.
+                if matches!(&final_type, Type::ArrayOf(..)) && sizeof(&final_type) == 0 {
+                    let err_info = format!("variable {} has incomplete type", name);
+                    report_semantic_error(init_declarator.declarator.span, &err_info);
+                }
+                // @Fix: If it is a function declaration, we shouldn't allocate
+                // stack space to it? But currently create_local_obj() will definitely
+                // allocate space accroding to the size of the given type.
+                let obj = self.create_local_obj(&final_type, &name);
+                self.scope_manager.add_object(obj.clone());
             }
         }
         stmts
@@ -1134,7 +1140,7 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &expr.content {
-            Natural_Number(n) => gen_num_expr(*n, span),
+            Integer(n) => gen_num_expr(*n, span),
             Binary(lhs, rhs, tokenKind) => {
                 let lhs = self.analyze_expr(lhs);
                 let rhs = self.analyze_expr(rhs);
@@ -1382,14 +1388,14 @@ impl ProgramAnalyzer {
                 let size = sizeof(&content.ty);
                 // @Future: The data type of sizeof expression is u64.
                 let ty = Type::Int;
-                let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
+                let content = ir::ExprType::Integer(size.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Sizeof_Type_Name(type_name) => {
                 let the_type = self.resolve_type_name(type_name);
                 let size = sizeof(&the_type);
                 let ty = Type::Int;
-                let content = ir::ExprType::Natural_Number(size.try_into().unwrap());
+                let content = ir::ExprType::Integer(size.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Cast(to_be_casted_expr, type_name) => {
@@ -1596,7 +1602,7 @@ fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
 }
 
 fn gen_num_expr(number: i64, span: Span) -> ir::Expr {
-        let content = ir::ExprType::Natural_Number(number);
+        let content = ir::ExprType::Integer(number);
         let ty = if number > i32::MAX as i64 {
             Type::Long
         } else {
@@ -1608,7 +1614,7 @@ fn gen_num_expr(number: i64, span: Span) -> ir::Expr {
 fn scale_expr(expr: ir::Expr, factor: usize, op: ir::OP) -> ir::Expr {
     // expr for scale num
     let span = expr.span;
-    let factor_expr_content = ir::ExprType::Natural_Number(factor.try_into().unwrap());
+    let factor_expr_content = ir::ExprType::Integer(factor.try_into().unwrap());
     let factor_expr = ir::Expr {
         content: factor_expr_content,
         ty: Type::Long,
@@ -1801,7 +1807,7 @@ pub fn align_to(n: usize, align: usize) -> usize {
 
 fn is_constant_value(expr: &ir::Expr) -> bool {
     match &expr.content {
-        ir::ExprType::Natural_Number(..) => true,
+        ir::ExprType::Integer(..) => true,
         ir::ExprType::Neg(expr) => is_constant_value(&expr),
         _ => false,
     }
@@ -1810,7 +1816,7 @@ fn is_constant_value(expr: &ir::Expr) -> bool {
 fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
     use ir::OP::*;
     match &expr.content {
-        ir::ExprType::Natural_Number(n) => Ok(*n as i64),
+        ir::ExprType::Integer(n) => Ok(*n as i64),
         ir::ExprType::Neg(expr) => Ok(-eval_constant(&expr)?),
         ir::ExprType::Not(expr) => {
             let value = eval_constant(expr)?;
@@ -1941,12 +1947,29 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
     }
 }
 
+fn resolve_array_size_from_init(init: &Initializer) -> usize {
+    match init {
+        Initializer::Expr(init_expr) => {
+            if let Str(s) = &init_expr.content {
+                // Extra +1 length for the ending "\0" character.
+                return s.len() + 1;
+            } else {
+                return 1;
+            }
+        }
+        Initializer::Init_List(init_list) => {
+            return init_list.len();
+        }
+    }
+}
+
 // @TODO: Add span info to Initializer and report Err(e) if encountered something wrong.
 fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
     // @TODO: get rid of dummy span.
     let dummy_span = Span{start_index: 0, end_index: 0};
     match ty {
         ArrayOf(element_type, size) => {
+            let size = *size;
             let mut new_init_list = Vec::new();
             match init {
                 Initializer::Expr(init_expr) => {
@@ -1962,24 +1985,19 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     // it just simply ignore the ending '\0' in the string literal.
                     if let Str(s) = &init_expr.content {
                         if **element_type == Char {
-                            if s.len() > *size {
+                            if s.len() > size {
                                 let error_info = format!("initializer-string for array of {:?} is too long", element_type);
                                 println!("{}", error_info);
                                 exit(1);
                             }
-                            for i in 0..*size {
-                                if i < s.len() {
-                                    let char_init_expr_content = Natural_Number(s[i].clone() as i64);
-                                    let char_init_expr = Expr{content: char_init_expr_content, span: dummy_span};
-                                    let new_init = Initializer::Expr(char_init_expr);
-                                    new_init_list.push(new_init);
-                                } else {
-                                    // @TODO: Add span to Initializer and pass span info to create_zerolized_init.
-                                    let new_zero_init = create_zerolized_init(element_type);
-                                    new_init_list.push(new_zero_init);
-                                }
+                            for i in 0..s.len() {
+                                let char_init_expr_content = Integer(s[i].clone() as i64);
+                                let char_init_expr = Expr{content: char_init_expr_content, span: dummy_span};
+                                let element_init = Initializer::Expr(char_init_expr);
+                                new_init_list.push(element_init);
                             }
-                            return Initializer::Init_List(new_init_list);
+                            let new_init = Initializer::Init_List(new_init_list);
+                            return normalize_init(&new_init, ty);
                         } else {
                             let error_info = format!("cannot initialize array of {:?} from a string literal with type array of ‘char’", element_type);
                             println!("{}", error_info);
@@ -1991,12 +2009,12 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     }
                 }
                 Initializer::Init_List(old_init_list) => {
-                    if old_init_list.len() > *size {
+                    if old_init_list.len() > size {
                         // @TODO: Report error info with span.
                         println!("excess elements in array initializer");
                         exit(1);
                     }
-                    for i in 0..*size {
+                    for i in 0..size {
                         if i < old_init_list.len() {
                             let new_init = normalize_init(&old_init_list[i], element_type);
                             new_init_list.push(new_init);
@@ -2053,7 +2071,7 @@ fn create_zerolized_init(ty: &Type) -> Initializer {
         _ => {
             // @Smell: Maybe we should make the normalized init to use ir::Expr instead
             // of parse::Expr?
-            let content = ExprType::Natural_Number(0);
+            let content = ExprType::Integer(0);
             let zero_value_expr = Expr {content, span};
             return Initializer::Expr(zero_value_expr);
         }
