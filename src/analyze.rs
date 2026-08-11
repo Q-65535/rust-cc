@@ -83,8 +83,7 @@ pub fn sizeof(ty: &Type) -> usize {
             println!("{}", error_info);
             exit(1);
         },
-        // @TODO This should return 0.
-        ty_none => 8,
+        ty_none => 0,
     }
 }
 
@@ -361,8 +360,8 @@ impl ProgramAnalyzer {
             }
             let mut init_value = None;
             if let Some(init) = &mut init_declarator.init {
-                match init {
-                    Initializer::Expr(expr) => {
+                match &init.content {
+                    Initializer_Type::Expr(expr) => {
                         let analyzed_expr = self.analyze_expr(expr);
                         if let Ok(num) = eval_constant(&analyzed_expr) {
                             if can_assign(&final_type, &analyzed_expr.ty) {
@@ -379,7 +378,7 @@ impl ProgramAnalyzer {
                         }
                     }
                     // @Future: We will add array and struct initialization expr assignment in the future.
-                    Initializer::Init_List(init_list) => {
+                    Initializer_Type::Init_List(init_list) => {
                         todo!();
                     }
                 }
@@ -669,7 +668,7 @@ impl ProgramAnalyzer {
         let mut stmts = Vec::new();
         match &target_expr.ty {
             ArrayOf(element_type, size) => {
-                if let Initializer::Init_List(init_list) = init {
+                if let Initializer_Type::Init_List(init_list) = &init.content {
                     for (index, init) in init_list.iter().enumerate() {
                         let array_offset_expr = gen_num_expr(index as i64, span);
                         let pointer_arithmatic_expr = gen_binary_expr(target_expr.clone(), array_offset_expr, OP::Plus);
@@ -683,7 +682,7 @@ impl ProgramAnalyzer {
                 }
             }
             _ => {
-                if let Initializer::Expr(init_expr) = init {
+                if let Initializer_Type::Expr(init_expr) = &init.content {
                     let analyzed_init_expr = self.analyze_expr(init_expr);
                     let assignment_expr = gen_assign_expr(target_expr, analyzed_init_expr);
                     let assignment_expr_stmt = ir::StmtType::Ex(assignment_expr);
@@ -1789,9 +1788,9 @@ fn create_global_obj(name: &str, base_type: &Type) -> Obj {
     obj
 }
 
-fn report_semantic_error(span: Span, err_msg: &str) {
+fn report_semantic_error(span: Span, error_info: &str) {
     let error_stage_info = "semantic error: ".to_string();
-    let error_info = error_span(span, &(error_stage_info+err_msg));
+    let error_info = error_span(span, &(error_stage_info+error_info));
     println!("{}", error_info);
     exit(1);
 }
@@ -1805,14 +1804,6 @@ pub fn align_to(n: usize, align: usize) -> usize {
     }
 }
 
-fn is_constant_value(expr: &ir::Expr) -> bool {
-    match &expr.content {
-        ir::ExprType::Integer(..) => true,
-        ir::ExprType::Neg(expr) => is_constant_value(&expr),
-        _ => false,
-    }
-}
-    
 fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
     use ir::OP::*;
     match &expr.content {
@@ -1948,8 +1939,8 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
 }
 
 fn resolve_array_size_from_init(init: &Initializer) -> usize {
-    match init {
-        Initializer::Expr(init_expr) => {
+    match &init.content {
+        Initializer_Type::Expr(init_expr) => {
             if let Str(s) = &init_expr.content {
                 // Extra +1 length for the ending "\0" character.
                 return s.len() + 1;
@@ -1957,22 +1948,20 @@ fn resolve_array_size_from_init(init: &Initializer) -> usize {
                 return 1;
             }
         }
-        Initializer::Init_List(init_list) => {
+        Initializer_Type::Init_List(init_list) => {
             return init_list.len();
         }
     }
 }
 
-// @TODO: Add span info to Initializer and report Err(e) if encountered something wrong.
 fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
-    // @TODO: get rid of dummy span.
-    let dummy_span = Span{start_index: 0, end_index: 0};
+    let span = init.span;
     match ty {
         ArrayOf(element_type, size) => {
             let size = *size;
             let mut new_init_list = Vec::new();
-            match init {
-                Initializer::Expr(init_expr) => {
+            match &init.content {
+                Initializer_Type::Expr(init_expr) => {
                     // String literal initializer is a special case, we transform string literal to initializer list.
                     // For expamle, in this declaration: char a[3] = "abc", string literal "abc" is
                     // transformed to {'a', 'b', 'c'}.
@@ -1992,11 +1981,12 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             }
                             for i in 0..s.len() {
                                 let char_init_expr_content = Integer(s[i].clone() as i64);
-                                let char_init_expr = Expr{content: char_init_expr_content, span: dummy_span};
-                                let element_init = Initializer::Expr(char_init_expr);
-                                new_init_list.push(element_init);
+                                let char_init_expr = Expr{content: char_init_expr_content, span};
+                                let element_init_content = Initializer_Type::Expr(char_init_expr);
+                                new_init_list.push(Initializer{content: element_init_content, span});
                             }
-                            let new_init = Initializer::Init_List(new_init_list);
+                            let new_init_content = Initializer_Type::Init_List(new_init_list);
+                            let new_init = Initializer{content: new_init_content, span};
                             return normalize_init(&new_init, ty);
                         } else {
                             let error_info = format!("cannot initialize array of {:?} from a string literal with type array of ‘char’", element_type);
@@ -2008,23 +1998,22 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                         exit(1);
                     }
                 }
-                Initializer::Init_List(old_init_list) => {
+                Initializer_Type::Init_List(old_init_list) => {
                     if old_init_list.len() > size {
-                        // @TODO: Report error info with span.
-                        println!("excess elements in array initializer");
-                        exit(1);
+                        let error_info = format!("excess elements in array initializer"); 
+                        report_semantic_error(span, &error_info);
                     }
                     for i in 0..size {
                         if i < old_init_list.len() {
                             let new_init = normalize_init(&old_init_list[i], element_type);
                             new_init_list.push(new_init);
                         } else {
-                            // @TODO: Add span to Initializer and pass span info to create_zerolized_init.
-                            let new_zero_init = create_zerolized_init(element_type);
+                            let new_zero_init = create_zerolized_init(element_type, span);
                             new_init_list.push(new_zero_init);
                         }
                     }
-                    return Initializer::Init_List(new_init_list);
+                    let content = Initializer_Type::Init_List(new_init_list);
+                    return Initializer {content, span};
                 }
             }
         }
@@ -2033,18 +2022,17 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
         }
         // Scalar type:
         _ => {
-            match init {
-                Initializer::Expr(ref expr) => {
+            match &init.content {
+                Initializer_Type::Expr(ref expr) => {
                     return init.clone();
                 }
-                Initializer::Init_List(init_list) => {
+                Initializer_Type::Init_List(init_list) => {
                     if init_list.len() > 1 {
-                        // @TODO: Report error info with span.
-                        println!("excess elements in array initializer");
-                        exit(1);
+                        let error_info = format!("excess elements in array initializer");
+                        report_semantic_error(span, &error_info);
                     }
                     if init_list.len() == 0 {
-                        return create_zerolized_init(ty);
+                        return create_zerolized_init(ty, span);
                     } else {
                         return normalize_init(&init_list[0], ty);
                     }
@@ -2054,16 +2042,16 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
     }
 }
 
-fn create_zerolized_init(ty: &Type) -> Initializer {
-    let span = Span{start_index: 0, end_index: 0};
+fn create_zerolized_init(ty: &Type, span: Span) -> Initializer {
     match ty {
         ArrayOf(element_type, size) => {
             let mut init_list = Vec::new();
             for i in 0..*size {
-                let cur_init = create_zerolized_init(element_type);
+                let cur_init = create_zerolized_init(element_type, span);
                 init_list.push(cur_init);
             }
-            return Initializer::Init_List(init_list);
+            let content = Initializer_Type::Init_List(init_list);
+            return Initializer{content, span};
         }
         Struct(st) => {
             todo!();
@@ -2073,7 +2061,8 @@ fn create_zerolized_init(ty: &Type) -> Initializer {
             // of parse::Expr?
             let content = ExprType::Integer(0);
             let zero_value_expr = Expr {content, span};
-            return Initializer::Expr(zero_value_expr);
+            let content = Initializer_Type::Expr(zero_value_expr);
+            return Initializer{content, span};
         }
     }
 }

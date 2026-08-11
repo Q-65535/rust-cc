@@ -149,9 +149,15 @@ pub enum Abstract_Direct_Declarator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Initializer {
+pub enum Initializer_Type {
     Expr(Expr),
     Init_List(Vec<Initializer>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Initializer {
+    pub content: Initializer_Type,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,7 +171,6 @@ pub struct Declarator {
     pub star_count: i32,
     pub direct_declarator: Box<Direct_Declarator>,
     pub suffix: Option<DeclaratorSuffix>,
-    // pub init_expr: Option<Expr>,
     pub span: Span,
 }
 
@@ -764,14 +769,18 @@ impl Parser {
     fn parse_init_declarator(&mut self) -> Result<Init_Declarator, String> {
         let mut declarator = self.parse_declarator()?;
         if self.eat(&LexAssignment) {
-            let init = if self.cur_token().kind == LBrace {
+            let start_index = self.cur_token().span.start_index;
+            let content = if self.cur_token().kind == LBrace {
                 let init_list = self.parse_init_list()?;
-                Some(Initializer::Init_List(init_list))
+                Initializer_Type::Init_List(init_list)
             } else {
-                // Commas separate declarators, so leave a comma unconsumed here.
-                let expr  = self.parse_expr(Comma, Left_To_Right)?;
-                Some(Initializer::Expr(expr))
+                // Commas separate initializer, so leave a comma unconsumed here.
+                let expr = self.parse_expr(Comma, Left_To_Right)?;
+                Initializer_Type::Expr(expr)
             };
+            let end_index = self.previous_token().span.end_index;
+            let span = Span{start_index, end_index};
+            let init = Some(Initializer{content, span});
             Ok(Init_Declarator{declarator, init})
         } else {
             Ok(Init_Declarator{declarator, init: None})
@@ -782,12 +791,18 @@ impl Parser {
         self.expect(&LBrace);
         let mut init_list = Vec::new();
         while self.cur_token().kind != RBrace {
-            let init = if self.cur_token().kind == LBrace {
-                Initializer::Init_List(self.parse_init_list()?)
+            let start_index = self.cur_token().span.start_index;
+            let content = if self.cur_token().kind == LBrace {
+                let init_list = self.parse_init_list()?;
+                Initializer_Type::Init_List(init_list)
             } else {
                 // Commas separate initializer, so leave a comma unconsumed here.
-                Initializer::Expr(self.parse_expr(Comma, Left_To_Right)?)
+                let expr = self.parse_expr(Comma, Left_To_Right)?;
+                Initializer_Type::Expr(expr)
             };
+            let end_index = self.previous_token().span.end_index;
+            let span = Span{start_index, end_index};
+            let init = Initializer{content, span};
             init_list.push(init);
             if !self.eat(&LexComma) {
                 break;
