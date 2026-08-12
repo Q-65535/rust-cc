@@ -119,19 +119,19 @@ use Struct_Or_Union::*;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct_Union_Specifier {
     pub kind: Struct_Or_Union,
-    pub name: Option<String>,
+    pub ident: Option<Identifier>,
     pub members: Option<Vec<Member>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enum_Specifier {
-    pub name: Option<String>,
+    pub ident: Option<Identifier>,
     pub enumerators: Option<Vec<Enumerator>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enumerator {
-    pub name: String,
+    pub ident: Identifier,
     pub constant_expr: Option<Expr>,
 }
 
@@ -175,8 +175,14 @@ pub struct Declarator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Identifier {
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Direct_Declarator {
-    Identifier(String),
+    Identifier(Identifier),
     Paren_Enclosed_Declarator(Declarator),
 }
 
@@ -623,16 +629,17 @@ impl Parser {
             _ => return Err(error_token(&keyword, "expected 'struct' or 'union'")),
         };
 
-        let mut struct_specifier = Struct_Union_Specifier{kind, name: None, members: None};
+        let mut struct_specifier = Struct_Union_Specifier{kind, ident: None, members: None};
 
         if let LexIdent(name) = self.cur_token().kind.clone() {
+            let ident = gen_identifier_from_token(self.cur_token());
             self.bump();
-            struct_specifier.name = Some(name);
+            struct_specifier.ident = Some(ident);
         }
 
         if self.at(&LBrace) {
             struct_specifier.members = Some(self.parse_struct_decl_list()?);
-        } else if struct_specifier.name.is_none() {
+        } else if struct_specifier.ident.is_none() {
             return Err(error_token(
                 self.cur_token(),
                 "parsing struct specifier error: expected a tag or member list",
@@ -645,9 +652,10 @@ impl Parser {
     fn parse_enum_specifier(&mut self) -> Result<Enum_Specifier, String> {
         debug_assert!(matches!(self.cur_token().kind, LexEnum));
         self.bump();
-        let mut enum_specifier = Enum_Specifier{name: None, enumerators: None};
+        let mut enum_specifier = Enum_Specifier{ident: None, enumerators: None};
         if let LexIdent(name) = &self.cur_token().kind {
-            enum_specifier.name = Some(name.clone());
+            let ident = gen_identifier_from_token(self.cur_token());
+            enum_specifier.ident = Some(ident);
             self.bump();
         }
         if self.at(&LBrace) {
@@ -657,7 +665,7 @@ impl Parser {
                 return Err(error_message);
             }
             enum_specifier.enumerators = Some(enumerators);
-        } else if enum_specifier.name.is_none() {
+        } else if enum_specifier.ident.is_none() {
             let error_message = error_token(self.cur_token(), "parsing struct specifier error: expected a tag or member list");
             return Err(error_message);
         }
@@ -691,8 +699,8 @@ impl Parser {
 
         let mut enumerators = Vec::new();
         while !matches!(self.cur_token().kind, RBrace | Eof) {
-            let name = if let LexIdent(name) = &self.cur_token().kind {
-                name.clone()
+            let ident = if let LexIdent(name) = &self.cur_token().kind {
+                gen_identifier_from_token(self.cur_token())
             } else {
                 let error_message = error_token(self.cur_token(),
                 "trying to parse enumerator constant, but this is not a identifier!");
@@ -710,7 +718,7 @@ impl Parser {
             } else {
                 None
             };
-            let new_enumerator = Enumerator{name, constant_expr};
+            let new_enumerator = Enumerator{ident, constant_expr};
             enumerators.push(new_enumerator);
 
             if self.at(&RBrace) {
@@ -732,6 +740,9 @@ impl Parser {
 
         let direct_declarator = match self.cur_token().kind.clone() {
             LexIdent(ident) => {
+                let name = ident.clone();
+                let span = self.cur_token().span;
+                let ident = Identifier {name, span};
                 self.bump();
                 Box::new(Direct_Declarator::Identifier(ident))
             },
@@ -1491,7 +1502,7 @@ impl Parser {
 
 fn get_declarator_name(declarator: &Declarator) -> &str {
     match &*declarator.direct_declarator {
-        Direct_Declarator::Identifier(name) => {return name;}
+        Direct_Declarator::Identifier(ident) => {return &ident.name;}
         Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
             return get_declarator_name(inner_declarator);
         }
@@ -1502,6 +1513,17 @@ fn is_type_qualifier(token: &Token) -> bool {
     match &token.kind {
         (TokenKind::_Atomic) => true,
         _ => false,
+    }
+}
+
+fn gen_identifier_from_token(token: &Token) -> Identifier {
+    if let LexIdent(name) = &token.kind {
+        let name = name.clone();
+        let span = token.span;
+        return Identifier{name, span};
+    } else {
+        println!("you are trying to get an identifier from {:?} token", token.kind);
+        exit(1);
     }
 }
 

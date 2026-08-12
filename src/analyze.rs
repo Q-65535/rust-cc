@@ -107,6 +107,7 @@ pub enum Symbol {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
+    // @Smell: Keys in hashmap should be Identifier which have span info?
     pub symbols: HashMap<String, Symbol>,
     pub tags:    HashMap<String, Type>,
 }
@@ -500,7 +501,7 @@ impl ProgramAnalyzer {
         }
         match &*declarator.direct_declarator {
             Direct_Declarator::Identifier(ident) => {
-                name = ident.clone();
+                name = ident.name.clone();
             },
             Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
                 (cur_type, name) = self.resolve_declarator(attribute, &cur_type, &inner_declarator);
@@ -821,11 +822,11 @@ impl ProgramAnalyzer {
                 Is_Union => Union(the_struct),
             };
         } else {
-            if let Some(name) = &st.name {
-                the_type = if let Some(the_type) = self.scope_manager.resolve_tag(name) {
+            if let Some(ident) = &st.ident {
+                the_type = if let Some(the_type) = self.scope_manager.resolve_tag(&ident.name) {
                     the_type.clone()
                 } else {
-                    Tag(name.clone())
+                    Tag(ident.name.clone())
                 };
             } else {
                 println!("fatal compiler bug: the strcut_union specifier have nither name nor member list!");
@@ -834,15 +835,13 @@ impl ProgramAnalyzer {
         }
 
         // Deal with scope stuff.
-        if let Some(name) = &st.name {
+        if let Some(ident) = &st.ident {
             if let Some(members) = &st.members {
-                if self.scope_manager.resolve_tag_at_current_scope(name).is_some() {
-                    let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
-                    // @TODO add span info to name so we can report correct error position.
-                    // Maybe something like Struct Symbol{span: Span, name: String}.
-                    report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
+                if self.scope_manager.resolve_tag_at_current_scope(&ident.name).is_some() {
+                    let err_info = format!("semantic error: redefinition of tag name: '{}'", ident.name);
+                    report_semantic_error(ident.span, &err_info);
                 } else {
-                    self.scope_manager.add_tag(name, &the_type);
+                    self.scope_manager.add_tag(&ident.name, &the_type);
                 }
             }
         }
@@ -851,15 +850,13 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_enum(&mut self, enum_spec: &Enum_Specifier) -> Type {
-        if let Some(name) = &enum_spec.name {
-            if let Some(the_type) = self.scope_manager.resolve_tag_at_current_scope(name) {
+        if let Some(ident) = &enum_spec.ident {
+            if let Some(the_type) = self.scope_manager.resolve_tag_at_current_scope(&ident.name) {
                 // If it has a tag name, and the tag name is already registerd at
                 // current scope, enumerator list shall not appear, otherwise it is an semantic error.
                 if enum_spec.enumerators.is_some() {
-                    // @TODO add span info to name so we can report correct error position.
-                    // Maybe something like Struct Symbol{span: Span, name: String}.
-                    let err_info = format!("semantic error: redefinition of tag name: '{}'", name);
-                    report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
+                    let err_info = format!("semantic error: redefinition of tag name: '{}'", ident.name);
+                    report_semantic_error(ident.span, &err_info);
                     exit(1);
                 } else {
                     return the_type.clone();
@@ -867,7 +864,7 @@ impl ProgramAnalyzer {
             } else {
                 let the_type = Type::Enum;
                 if let Some(enumerators) = &enum_spec.enumerators {
-                    self.scope_manager.add_tag(name, &the_type);
+                    self.scope_manager.add_tag(&ident.name, &the_type);
                     let mut value: i64 = 0;
                     for e in enumerators {
                         if let Some(expr) = &e.constant_expr {
@@ -880,15 +877,13 @@ impl ProgramAnalyzer {
                                 Ok(num) => num
                             }
                         }
-                        self.scope_manager.add_enum(&e.name, value);
+                        self.scope_manager.add_enum(&e.ident.name, value);
                         value += 1;
                     }
                     return the_type;
                 } else {
-                    // @TODO add span info to name so we can report correct error position.
-                    // Maybe something like Struct Symbol{span: Span, name: String}.
-                    let err_info = format!("semantic error: undefined tag name: '{}'", name);
-                    report_semantic_error(Span{start_index: 0, end_index: 0}, &err_info);
+                    let err_info = format!("semantic error: undefined tag name: '{}'", ident.name);
+                    report_semantic_error(ident.span, &err_info);
                     exit(1);
                 }
             }
@@ -906,7 +901,7 @@ impl ProgramAnalyzer {
                             Ok(num) => num
                         }
                     }
-                    self.scope_manager.add_enum(&e.name, value);
+                    self.scope_manager.add_enum(&e.ident.name, value);
                     value += 1;
                 }
                 let the_type = Type::Enum;
