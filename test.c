@@ -18,6 +18,9 @@ int main() {
         char identifier;
     } coord;
 
+
+    sizeof(struct w);
+
     coord location;
     coord *location_pointer = &location;
     location.x = 11;
@@ -58,10 +61,6 @@ int foo() {
     printf("foo being called.\n");
 
     int i = 0;
-    for (i = 0; i < 10; i++) {
-        printf("haha i=%d\n", i);
-    }
-    printf("after loop, i=%d\n", i);
 
 
     return 88;

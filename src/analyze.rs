@@ -353,11 +353,12 @@ impl ProgramAnalyzer {
             return decls;
         }
         for init_declarator in &mut decl.init_declarators {
-            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &init_declarator.declarator);
+            let cur_declarator = &init_declarator.declarator;
+            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_declarator);
 
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("semantic error: {} redeclared as a symbol", name);
-                report_semantic_error(init_declarator.declarator.span, &err_info);
+                report_semantic_error(cur_declarator.span, &err_info);
             }
             let mut init_value = None;
             if let Some(init) = &mut init_declarator.init {
@@ -371,7 +372,7 @@ impl ProgramAnalyzer {
                             } else {
                                 let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
                                 name, &final_type, &analyzed_expr.ty);
-                                report_semantic_error(init_declarator.declarator.span, &err_info);
+                                report_semantic_error(cur_declarator.span, &err_info);
                             }
                         } else {
                             let err_info = format!("This is not a constant number expression!");
@@ -452,7 +453,7 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn resolve_abstract_declarator(&mut self, base_type: &Type, declarator: &Option<Abstract_Declarator>) -> Type {
+    fn resolve_abstract_declarator(&mut self, base_type: &Type, declarator: &Option<Abstract_Declarator>) -> Result<Type, String> {
         let mut cur_type = base_type.clone();
         if let Some(declarator)  = declarator {
             // deal with pointers
@@ -469,7 +470,7 @@ impl ProgramAnalyzer {
                 // @Cleanup
                 // @Cleanup
                 // @Cleanup
-                cur_type = self.resolve_abstract_declarator(&cur_type, &Some(*inner_declarator.clone()));
+                cur_type = self.resolve_abstract_declarator(&cur_type, &Some(*inner_declarator.clone()))?;
             }
         }
 
@@ -479,13 +480,12 @@ impl ProgramAnalyzer {
             match self.scope_manager.resolve_tag(&tag_name) {
                 Some(the_type) => cur_type = the_type.clone(),
                 None => {
-                    let span = Span{start_index: 0, end_index: 0};
-                    let err_info = format!("storage size of {} is unkonwn", &tag_name);
-                    report_semantic_error(span, &err_info);
-                },
+                    let err_info = format!("Storage size of '{}' is unkonwn.", &tag_name);
+                    return Err(err_info);
+                }
             }
         }
-        return cur_type;
+        return Ok(cur_type);
     }
 
     fn resolve_declarator(&mut self, attribute: &Symbol_Attribute, base_type: &Type, declarator: &Declarator) -> (Type, String) {
@@ -628,10 +628,11 @@ impl ProgramAnalyzer {
             return stmts;
         }
         for init_declarator in &decl.init_declarators {
-            let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &init_declarator.declarator);
+            let cur_declarator = &init_declarator.declarator;
+            let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_declarator);
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
-                report_semantic_error(init_declarator.declarator.span, &err_info);
+                report_semantic_error(cur_declarator.span, &err_info);
             }
             if let Some(init) = &init_declarator.init {
                 if let ArrayOf(element_type, size) = &final_type {
@@ -644,7 +645,7 @@ impl ProgramAnalyzer {
                 self.scope_manager.add_object(obj.clone());
 
                 let normalized_init = normalize_init(init, &obj.ty);
-                let mut obj_expr = self.gen_expr_from_obj(&obj);
+                let mut obj_expr = self.gen_expr_from_obj(&obj, cur_declarator.span);
                 let mut assignment_expr_stmts = self.init(obj_expr, &normalized_init);
                 stmts.append(&mut assignment_expr_stmts);
             } else {
@@ -652,7 +653,7 @@ impl ProgramAnalyzer {
                 // and without initializer, this declaration is not allowed.
                 if matches!(&final_type, Type::ArrayOf(..)) && sizeof(&final_type) == 0 {
                     let err_info = format!("variable {} has incomplete type", name);
-                    report_semantic_error(init_declarator.declarator.span, &err_info);
+                    report_semantic_error(cur_declarator.span, &err_info);
                 }
                 // @Fix: If it is a function declaration, we shouldn't allocate
                 // stack space to it? But currently create_local_obj() will definitely
@@ -724,6 +725,7 @@ impl ProgramAnalyzer {
                     if let Some(ty) = result {
                         cur_type = ty.clone();
                     } else {
+                        // @TODO: here we should report an error. return Err().
                         println!("unknown typedef name :{}", name);
                         exit(1);
                     }
@@ -924,9 +926,8 @@ impl ProgramAnalyzer {
     }
 
     // @TODO: Pass span argument so we can get a expr with span from this function.
-    fn gen_expr_from_obj(&self, o: &Obj) -> ir::Expr {
+    fn gen_expr_from_obj(&self, o: &Obj, span: Span) -> ir::Expr {
         let content = ir::ExprType::Object(o.clone());
-        let span = Span{start_index: 0, end_index: 0};
         ir::Expr{content, ty: o.ty.clone(), span}
     }
 
@@ -1063,6 +1064,7 @@ impl ProgramAnalyzer {
                     cur_switch.default_label = Some(unique_label.clone());
                     StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
                 } else {
+                    // @Robustness: This should report where the error location.
                     println!("this is not inside switch statement, you cannot handle case statement");
                     exit(1);
                 }
@@ -1071,6 +1073,7 @@ impl ProgramAnalyzer {
                 if let Some(label) = &self.cur_loop_continue_point_label {
                     StmtType::Goto(label.clone())
                 } else {
+                    // @Robustness: This should report where the error location.
                     println!("this is not inside for or while loop, you cannot continue");
                     exit(1);
                 }
@@ -1079,6 +1082,7 @@ impl ProgramAnalyzer {
                 if let Some(label) = &self.cur_end_label {
                     StmtType::Goto(label.clone())
                 } else {
+                    // @Robustness: This should report where the error location.
                     println!("this is not inside for or while loop or switch case body, you cannot break");
                     exit(1);
                 }
@@ -1088,6 +1092,7 @@ impl ProgramAnalyzer {
                 if let Some(unique_goto_label) = unique_goto_label {
                     StmtType::Goto(unique_goto_label.clone())
                 } else {
+                    // @Robustness: This should report where the error location.
                     println!("unknown goto label: {}", label);
                     exit(1);
                 }
@@ -1253,7 +1258,7 @@ impl ProgramAnalyzer {
             }
             Ident(s) => {
                 if let Some(o) = self.scope_manager.resolve_object(s) {
-                    return self.gen_expr_from_obj(o);
+                    return self.gen_expr_from_obj(o, span);
                 } else if let Some(number) = self.scope_manager.resolve_enum(s) {
                     return gen_num_expr(number, span);
                 } else {
@@ -1441,7 +1446,7 @@ impl ProgramAnalyzer {
         let span = Span::merge(lhs.span, rhs.span);
         let lhs_addr_expr = gen_addr_of_expr(lhs);
         let temp_obj = self.create_local_obj(&lhs_addr_expr.ty, "");
-        let temp_obj_expr = self.gen_expr_from_obj(&temp_obj);
+        let temp_obj_expr = self.gen_expr_from_obj(&temp_obj, span);
         let expr_1 = gen_assign_expr(temp_obj_expr.clone(), lhs_addr_expr); // tmp = &A
 
         let deref_temp_expr = gen_deref_expr(temp_obj_expr);
@@ -1455,10 +1460,15 @@ impl ProgramAnalyzer {
 
     fn resolve_type_name(&mut self, type_name: &Type_Name) -> Type {
         let (base_type, _) = self.analyze_decl_spec(&type_name.decl_specs);
-        let final_type = self.resolve_abstract_declarator(&base_type, &type_name.abstract_declarator);
-        if let Some(abstract_declarator) = &type_name.abstract_declarator {
+        let resolved_result = self.resolve_abstract_declarator(&base_type, &type_name.abstract_declarator);
+        let final_type: Type;
+        match resolved_result {
+            Ok(ty) => return ty,
+            Err(error_info) => {
+                report_semantic_error(type_name.span, &error_info);
+                exit(1);
+            }
         }
-        return final_type;
     }
 }
 
@@ -1646,7 +1656,11 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                 let scale = match &lhs.ty {
                     Pointer_To(pointee_type) => sizeof(pointee_type),
                     ArrayOf(element_type, _) => sizeof(element_type),
-                    _ => exit(1),
+                    _ => {
+                        println!("compiler bug: lhs evaluated to be pointer or array, but it doesn't
+                        'match' to either array or pointer, is_pointer_or_array() might be doing somthing wrong!");
+                        exit(1);
+                    }
                 };
                 rhs = scale_expr(rhs, scale, ir::OP::Mul);
                 gen_promoted_binary_expr(lhs, rhs, ir::OP::Minus)
@@ -1654,7 +1668,11 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                 let basic_ty = match &lhs.ty {
                     ArrayOf(basic, _) => *basic.clone(),
                     Pointer_To(basic) => *basic.clone(),
-                    _ => exit(1),
+                    _ => {
+                        println!("compiler bug: lhs evaluated to be pointer or array, but it doesn't
+                        'match' to either array or pointer, is_pointer_or_array() might be doing somthing wrong!");
+                        exit(1);
+                    }
                 };
                 if lhs.ty != rhs.ty {
                     report_semantic_error(rhs.span, "pointer arithmatic error: type doesn't match");
@@ -1784,7 +1802,7 @@ fn create_global_obj(name: &str, base_type: &Type) -> Obj {
 }
 
 fn report_semantic_error(span: Span, error_info: &str) {
-    let error_stage_info = "semantic error: ".to_string();
+    let error_stage_info = "Semantic error: ".to_string();
     let error_info = error_span(span, &(error_stage_info+error_info));
     println!("{}", error_info);
     exit(1);
@@ -1927,7 +1945,8 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
             return eval_constant(expr);
         }
         _ => {
-            println!("this is not a costant expression");
+            let error_info = format!("this is not a costant expression");
+            report_semantic_error(expr.span, &error_info);
             exit(1);
         }
     }
@@ -1971,7 +1990,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                         if **element_type == Char {
                             if s.len() > size {
                                 let error_info = format!("initializer-string for array of {:?} is too long", element_type);
-                                println!("{}", error_info);
+                                report_semantic_error(span, &error_info);
                                 exit(1);
                             }
                             for i in 0..s.len() {
@@ -1985,11 +2004,12 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             return normalize_init(&new_init, ty);
                         } else {
                             let error_info = format!("cannot initialize array of {:?} from a string literal with type array of ‘char’", element_type);
-                            println!("{}", error_info);
+                            report_semantic_error(span, &error_info);
                             exit(1);
                         }
                     } else {
-                        println!("you are trying to use scalar initiaizer to init an array variable.");
+                        let error_info = format!("you are trying to use scalar initiaizer to init an array variable.");
+                        report_semantic_error(span, &error_info);
                         exit(1);
                     }
                 }

@@ -285,6 +285,7 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
 pub struct Type_Name {
     pub decl_specs: Vec<Decl_Spec>,
     pub abstract_declarator: Option<Abstract_Declarator>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1253,22 +1254,21 @@ impl Parser {
     }
 
     fn parse_type_name(&mut self) -> Result<Type_Name, String> {
+        let start_index = self.cur_token().span.start_index;
         let decl_specs = self.parse_decl_specs()?;
-        let declarator = if Self::starts_abstract_declarator(&self.cur_token().kind) {
+        let abstract_declarator = if starts_abstract_declarator(&self.cur_token().kind) {
             Some(self.parse_abstract_declarator()?)
         } else {
             None
         };
+        let end_index = self.previous_token().span.end_index;
+        let span = Span{start_index, end_index};
 
-        Ok(Type_Name{decl_specs, abstract_declarator: declarator})
-    }
-
-    fn starts_abstract_declarator(kind: &TokenKind) -> bool {
-        matches!(kind, Mul | LSquareBracket | LParen)
+        Ok(Type_Name{decl_specs, abstract_declarator, span})
     }
 
     fn starts_grouped_abstract_declarator(&self) -> bool {
-        self.at(&LParen) && Self::starts_abstract_declarator(&self.peek_token().kind)
+        self.at(&LParen) && starts_abstract_declarator(&self.peek_token().kind)
     }
 
     // Enters on the first token of the abstract declarator and returns on the
@@ -1526,6 +1526,11 @@ fn gen_identifier_from_token(token: &Token) -> Identifier {
         exit(1);
     }
 }
+
+fn starts_abstract_declarator(kind: &TokenKind) -> bool {
+    matches!(kind, Mul | LSquareBracket | LParen)
+}
+
 
 fn syntax_error(span: Span, err_msg: &str) -> String {
     let error_stage_info = "syntax error: ".to_string();
