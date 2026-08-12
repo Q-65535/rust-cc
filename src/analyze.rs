@@ -1064,7 +1064,7 @@ impl ProgramAnalyzer {
                     cur_switch.default_label = Some(unique_label.clone());
                     StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
                 } else {
-                    // @Robustness: This should report where the error location.
+                    // @Robustness: This should report the error location.
                     println!("this is not inside switch statement, you cannot handle case statement");
                     exit(1);
                 }
@@ -1073,7 +1073,7 @@ impl ProgramAnalyzer {
                 if let Some(label) = &self.cur_loop_continue_point_label {
                     StmtType::Goto(label.clone())
                 } else {
-                    // @Robustness: This should report where the error location.
+                    // @Robustness: This should report the error location.
                     println!("this is not inside for or while loop, you cannot continue");
                     exit(1);
                 }
@@ -1082,7 +1082,7 @@ impl ProgramAnalyzer {
                 if let Some(label) = &self.cur_end_label {
                     StmtType::Goto(label.clone())
                 } else {
-                    // @Robustness: This should report where the error location.
+                    // @Robustness: This should report the error location.
                     println!("this is not inside for or while loop or switch case body, you cannot break");
                     exit(1);
                 }
@@ -1092,7 +1092,7 @@ impl ProgramAnalyzer {
                 if let Some(unique_goto_label) = unique_goto_label {
                     StmtType::Goto(unique_goto_label.clone())
                 } else {
-                    // @Robustness: This should report where the error location.
+                    // @Robustness: This should report the error location.
                     println!("unknown goto label: {}", label);
                     exit(1);
                 }
