@@ -311,7 +311,7 @@ impl ProgramAnalyzer {
         for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
-                    let (mut base_type, mut symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
+                    let (mut base_type, mut symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
                     let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
                     // It is not allowed that function, variable or typedef name have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering it is function, variable or typedef name.
@@ -345,7 +345,7 @@ impl ProgramAnalyzer {
 
     pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<ir::Declaration> {
         let mut decls: Vec<ir::Declaration> = Vec::new();
-        let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_spec);
         if symbol_attribute.is_typedef {
             for init_declarator in &mut decl.init_declarators {
                 self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
@@ -439,7 +439,7 @@ impl ProgramAnalyzer {
                 let return_type = base_type.clone();
                 let mut param_types = Vec::new();
                 for param in params {
-                    let (param_base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
+                    let (param_base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_spec);
                     let (mut param_final_type, _) = self.resolve_declarator(&symbol_attribute, &param_base_type, &param.declarator);
                     // Function accepts parameters with array type, but treat it as a pointer.
                     if let ArrayOf(ref element_ty, _) = param_final_type {
@@ -545,7 +545,7 @@ impl ProgramAnalyzer {
 
         
 
-        let (base_type, symbol_attribute) = self.analyze_decl_spec(&fun.return_type_specifier);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
         let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
         if let Func{return_type, ..} = final_type {
             self.current_function_return_type = *return_type;
@@ -598,7 +598,7 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
-        let (base_type, symbol_attribute) = self.analyze_decl_spec(&param.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_spec);
         let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &param.declarator);
         // Function accepts parameters with array type, but treat it as a pointer.
         if let ArrayOf(ref element_ty, _) = final_type {
@@ -620,7 +620,7 @@ impl ProgramAnalyzer {
     // After analyzation, declarations are all resolved to creating obj and assignment statement.
     fn analyze_decl(&mut self, decl: &Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
-        let (base_type, symbol_attribute) = self.analyze_decl_spec(&decl.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_spec);
         if symbol_attribute.is_typedef {
             for init_declarator in &decl.init_declarators {
                 self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
@@ -698,7 +698,7 @@ impl ProgramAnalyzer {
         return stmts;
     }
 
-    fn analyze_decl_spec(&mut self, decl_specs: &Vec<Decl_Spec>) -> (Type, Symbol_Attribute) {
+    fn analyze_decl_specs(&mut self, decl_specs: &Vec<Decl_Spec>) -> (Type, Symbol_Attribute) {
         const VOID:  u32 = 1 << 0;
         const BOOL:  u32 = 1 << 2;
         const CHAR:  u32 = 1 << 4;
@@ -916,7 +916,7 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
-        let (base_type, symbol_attribute) = self.analyze_decl_spec(&member.decl_specs);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&member.decl_specs);
         let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &member.declarator);
         ir::Member{
             ty: final_type,
@@ -1459,7 +1459,7 @@ impl ProgramAnalyzer {
     }
 
     fn resolve_type_name(&mut self, type_name: &Type_Name) -> Type {
-        let (base_type, _) = self.analyze_decl_spec(&type_name.decl_specs);
+        let (base_type, _) = self.analyze_decl_specs(&type_name.decl_specs);
         let resolved_result = self.resolve_abstract_declarator(&base_type, &type_name.abstract_declarator);
         let final_type: Type;
         match resolved_result {
