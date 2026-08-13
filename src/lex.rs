@@ -397,7 +397,7 @@ impl Lexer {
                     }
                 },
                 _ => {
-                    let err_msg = format!("unknown character: '{}'", c);
+                    let err_msg = format!("Unknown character: '{}'.", c);
                     lexical_error_at(start_index, &err_msg);
                 },
             }
@@ -639,8 +639,9 @@ impl Lexer {
 fn lexical_error_at(index: usize, err_msg: &str) {
     use crate::error_span;
     let span = Span{start_index: index, end_index: index};
-    let error_stage_info = "lexical error: ".to_string();
-    error_span(span, &(error_stage_info+err_msg));
-    // Lex error is strict, once encountered, we force compilation to stop.
+    let error_stage_info = "Lexical error: ".to_string();
+    let error_result = error_span(span, &(error_stage_info+err_msg));
+    println!("{}", error_result);
+    // Lex error is strict, once encountered, we force the compilation to stop.
     exit(1);
 }
