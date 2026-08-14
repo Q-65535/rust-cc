@@ -345,7 +345,7 @@ impl ProgramAnalyzer {
 
     pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<ir::Declaration> {
         let mut decls: Vec<ir::Declaration> = Vec::new();
-        let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
         if symbol_attribute.is_typedef {
             for init_declarator in &mut decl.init_declarators {
                 self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
@@ -439,7 +439,7 @@ impl ProgramAnalyzer {
                 let return_type = base_type.clone();
                 let mut param_types = Vec::new();
                 for param in params {
-                    let (param_base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_spec);
+                    let (param_base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_specs);
                     let (mut param_final_type, _) = self.resolve_declarator(&symbol_attribute, &param_base_type, &param.declarator);
                     // Function accepts parameters with array type, but treat it as a pointer.
                     if let ArrayOf(ref element_ty, _) = param_final_type {
@@ -598,7 +598,7 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_param(&mut self, param: &Parameter) -> Obj {
-        let (base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_specs);
         let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &param.declarator);
         // Function accepts parameters with array type, but treat it as a pointer.
         if let ArrayOf(ref element_ty, _) = final_type {
@@ -620,7 +620,7 @@ impl ProgramAnalyzer {
     // After analyzation, declarations are all resolved to creating obj and assignment statement.
     fn analyze_decl(&mut self, decl: &Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
-        let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_spec);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
         if symbol_attribute.is_typedef {
             for init_declarator in &decl.init_declarators {
                 self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
@@ -699,6 +699,11 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_decl_specs(&mut self, decl_specs: &Vec<Decl_Spec>) -> (Type, Symbol_Attribute) {
+        debug_assert!(decl_specs.len() > 0);
+        let whole_span = Span{
+            start_index: decl_specs[0].span.start_index,
+            end_index: decl_specs[decl_specs.len()-1].span.end_index,
+        };
         const VOID:  u32 = 1 << 0;
         const BOOL:  u32 = 1 << 2;
         const CHAR:  u32 = 1 << 4;
@@ -711,51 +716,50 @@ impl ProgramAnalyzer {
         let mut count: u32 = 0;
         let mut cur_type = Type::Int;
         for spec in decl_specs {
-            match spec {
-                Decl_Spec::Typedef => {
+            match &spec.content {
+                Decl_Spec_Kind::Typedef => {
                     var_attribute.is_typedef = true;
                     continue;
                 },
-                Decl_Spec::Static => {
+                Decl_Spec_Kind::Static => {
                     var_attribute.is_static = true;
                     continue;
                 },
-                Decl_Spec::Typedef_Name(name) => {
+                Decl_Spec_Kind::Typedef_Name(name) => {
                     let result = self.scope_manager.resolve_typedef_alias(name);
                     if let Some(ty) = result {
                         cur_type = ty.clone();
                     } else {
-                        // @TODO: here we should report an error. return Err().
-                        println!("unknown typedef name :{}", name);
-                        exit(1);
+                        let error_info = format!("unknown typedef name :{}", name);
+                        report_semantic_error(spec.span, &error_info);
                     }
                     count += OTHER;
                     continue;
                 },
-                Decl_Spec::Int => {
+                Decl_Spec_Kind::Int => {
                     count += INT;
                 },
-                Decl_Spec::Long => {
+                Decl_Spec_Kind::Long => {
                     count += LONG;
                 },
-                Decl_Spec::Short => {
+                Decl_Spec_Kind::Short => {
                     count += SHORT;
                 },
-                Decl_Spec::Char => {
+                Decl_Spec_Kind::Char => {
                     count += CHAR;
                 },
-                Decl_Spec::Bool => {
+                Decl_Spec_Kind::Bool => {
                     count += BOOL;
                 },
-                Decl_Spec::Void => {
+                Decl_Spec_Kind::Void => {
                     count += VOID;
                 },
-                Decl_Spec::Struct_Union(st) => {
+                Decl_Spec_Kind::Struct_Union(st) => {
                     cur_type = self.analyze_struct_union(st);
                     count += OTHER;
                     continue;
                 },
-                Decl_Spec::Enum(enum_spec) => {
+                Decl_Spec_Kind::Enum(enum_spec) => {
                     cur_type = self.analyze_enum(enum_spec);
                     count += OTHER;
                     continue;
@@ -774,14 +778,15 @@ impl ProgramAnalyzer {
                 _ if count == LONG + LONG       => Type::Long,
                 _ if count == LONG + LONG + INT => Type::Long,
                 _ => {
-                    println!("invalid type");
+                    let error_info = format!("Invalid type.");
+                    report_semantic_error(whole_span, &error_info);
                     exit(1);
                 }
             };
         }
         if var_attribute.is_static && var_attribute.is_typedef {
-            println!("typedef and static may not be used together");
-            exit(1);
+            let error_info = format!("typedef and static may not be used together.");
+            report_semantic_error(whole_span, &error_info);
         }
         return (cur_type, var_attribute);
     }
@@ -1508,16 +1513,6 @@ fn pointer_to(ty: &Type) -> Type {
 fn array_of(ty: &Type, len: usize) -> Type {
     let base = Box::new(ty.clone());
     ArrayOf(base, len)
-}
-
-fn dimension_of(ty: &Type) -> i32 {
-    let mut cur_ty = ty;
-    let mut res = 0;
-    while let ArrayOf(inner, _) = cur_ty {
-        res += 1;
-        cur_ty = inner;
-    }
-    res
 }
 
 // evaluate whether a expression of right type can be assigned to a "stuff"
