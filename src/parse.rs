@@ -75,14 +75,14 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
-    pub decl_spec: Vec<Decl_Spec>,
+    pub decl_specs: Vec<Decl_Spec>,
     // @Future: Parameter may have declarator or Option<Abstract_Declarator>
     pub declarator: Declarator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
-    pub decl_spec: Vec<Decl_Spec>,
+    pub decl_specs: Vec<Decl_Spec>,
     pub init_declarators: Vec<Init_Declarator>,
 }
 
@@ -94,7 +94,7 @@ pub struct Member {
 
 #[derive(Debug, Clone, PartialEq)]
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
-pub enum Decl_Spec {
+pub enum Decl_Spec_Kind {
     // Storage class specifiers
     Typedef, Static,
 
@@ -107,6 +107,12 @@ pub enum Decl_Spec {
     Void,
     Struct_Union(Struct_Union_Specifier),
     Enum(Enum_Specifier),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decl_Spec {
+    pub content: Decl_Spec_Kind,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -518,8 +524,8 @@ impl Parser {
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
         let mut init_declarators: Vec<Init_Declarator> = Vec::new();
-        let decl_spec = self.parse_decl_specs()?;
-        let is_typedef_declaration = decl_spec.iter().any(|spec| *spec == Decl_Spec::Typedef);
+        let decl_specs = self.parse_decl_specs()?;
+        let is_typedef_declaration = decl_specs.iter().any(|spec| spec.content == Decl_Spec_Kind::Typedef);
 
         if !self.at(&Semicolon) {
             loop {
@@ -543,7 +549,7 @@ impl Parser {
             }
         }
         self.expect(&Semicolon)?;
-        Ok(Declaration{decl_spec, init_declarators})
+        Ok(Declaration{decl_specs, init_declarators})
     }
 
     fn is_decl_spec(&self, token: &Token) -> bool {
@@ -566,57 +572,61 @@ impl Parser {
         debug_assert!(self.is_decl_spec(self.cur_token()));
         let mut decl_specs = Vec::new();
         while self.is_decl_spec(self.cur_token()) {
-            let cur_decl_spec = match self.cur_token().kind.clone() {
+            let start_index = self.cur_token().span.start_index;
+            let cur_decl_spec_kind = match self.cur_token().kind.clone() {
                 TokenKind::Typedef => {
                     self.bump();
-                    Decl_Spec::Typedef
+                    Decl_Spec_Kind::Typedef
                 },
                 TokenKind::Static => {
                     self.bump();
-                    Decl_Spec::Static
+                    Decl_Spec_Kind::Static
                 },
                 TokenKind::LexIdent(name) => {
                     self.bump();
-                    Decl_Spec::Typedef_Name(name)
+                    Decl_Spec_Kind::Typedef_Name(name)
                 },
                 TokenKind::Int => {
                     self.bump();
-                    Decl_Spec::Int
+                    Decl_Spec_Kind::Int
                 },
                 TokenKind::Long => {
                     self.bump();
-                    Decl_Spec::Long
+                    Decl_Spec_Kind::Long
                 },
                 TokenKind::Short => {
                     self.bump();
-                    Decl_Spec::Short
+                    Decl_Spec_Kind::Short
                 },
                 TokenKind::Char => {
                     self.bump();
-                    Decl_Spec::Char
+                    Decl_Spec_Kind::Char
                 },
                 TokenKind::_Bool => {
                     self.bump();
-                    Decl_Spec::Bool
+                    Decl_Spec_Kind::Bool
                 },
                 TokenKind::Void => {
                     self.bump();
-                    Decl_Spec::Void
+                    Decl_Spec_Kind::Void
                 },
                 TokenKind::Struct | TokenKind::Union => {
                     let struct_spec = self.parse_struct_union_specifier()?;
-                    Decl_Spec::Struct_Union(struct_spec)
+                    Decl_Spec_Kind::Struct_Union(struct_spec)
                 },
                 TokenKind::LexEnum => {
                     let enum_specifier = self.parse_enum_specifier()?;
-                    Decl_Spec::Enum(enum_specifier)
+                    Decl_Spec_Kind::Enum(enum_specifier)
                 },
                 _ => {
                     let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
                     return Err(err_msg);
                 }
             };
-            decl_specs.push(cur_decl_spec);
+            let end_index = self.previous_token().span.end_index;
+            let span = Span{start_index, end_index};
+            let decl_spec = Decl_Spec{content: cur_decl_spec_kind, span};
+            decl_specs.push(decl_spec);
         }
         Ok(decl_specs)
     }
@@ -677,11 +687,11 @@ impl Parser {
         self.expect(&LBrace)?;
         let mut members = Vec::new();
         while !matches!(self.cur_token().kind, RBrace | Eof) {
-            let decl_spec = self.parse_decl_specs()?;
+            let decl_specs = self.parse_decl_specs()?;
             // parse declarators separated by ','
             loop {
                 let declarator = self.parse_declarator()?;
-                let m = Member{decl_specs: decl_spec.clone(), declarator};
+                let m = Member{decl_specs: decl_specs.clone(), declarator};
                 members.push(m);
                 if !self.eat(&LexComma) {
                     break;
@@ -851,9 +861,9 @@ impl Parser {
                 let mut params: Vec<Parameter> = Vec::new();
 
                 while !matches!(self.cur_token().kind, RParen | Eof) {
-                    let decl_spec = self.parse_decl_specs()?;
+                    let decl_specs = self.parse_decl_specs()?;
                     let declarator = self.parse_declarator()?;
-                    let param = Parameter{decl_spec, declarator};
+                    let param = Parameter{decl_specs, declarator};
                     params.push(param);
 
                     if !self.eat(&LexComma) {
