@@ -519,7 +519,7 @@ impl ProgramAnalyzer {
                 match self.scope_manager.resolve_tag(&tag_name) {
                     Some(the_type) => cur_type = the_type.clone(),
                     None => {
-                        let err_info = format!("storage size of {} is unkonwn", &tag_name);
+                        let err_info = format!("Storage size of {} is Unkonwn.", &tag_name);
                         report_semantic_error(declarator.span, &err_info);
                     },
                 }
@@ -671,6 +671,9 @@ impl ProgramAnalyzer {
         match &target_expr.ty {
             ArrayOf(element_type, size) => {
                 if let Initializer_Type::Init_List(init_list) = &init.content {
+                    // The init argument passed to this function must be normalized,
+                    // so we do the assertion:
+                    debug_assert!(init_list.len() == *size);
                     for (index, init) in init_list.iter().enumerate() {
                         let array_offset_expr = gen_num_expr(index as i64, span);
                         let pointer_arithmatic_expr = gen_binary_expr(target_expr.clone(), array_offset_expr, OP::Plus);
@@ -680,6 +683,26 @@ impl ProgramAnalyzer {
                     }
                 } else {
                     let err_info = format!("semantic error: trying to init an array variable with scalar data.");
+                    report_semantic_error(span, &err_info);
+                }
+            }
+            // @Note: We don't need to consider Tag(tag_name) situation, because
+            // at this point tag is already resolved to a concrete struct type.
+            Struct(st) => {
+                if let Initializer_Type::Init_List(init_list) = &init.content {
+                    // The init argument passed to this function must be normalized,
+                    // so we do the assertion:
+                    debug_assert!(init_list.len() == st.members.len());
+                    for (index, init) in init_list.iter().enumerate() {
+                        let cur_member_offset = st.members[index].offset;
+                        let cur_member_type = st.members[index].ty.clone();
+                        let content = ir::ExprType::RequestStructMember(Box::new(target_expr.clone()), cur_member_offset);
+                        let requrst_struct_member_expr = ir::Expr{content, ty: cur_member_type, span};
+                        let mut init_stmts = self.init(requrst_struct_member_expr, init);
+                        stmts.append(&mut init_stmts);
+                    }
+                } else {
+                    let err_info = format!("semantic error: trying to init a struct variable with scalar data.");
                     report_semantic_error(span, &err_info);
                 }
             }
@@ -1286,7 +1309,6 @@ impl ProgramAnalyzer {
                     }
                 }
 
-                let mut offset: i32 = 0;
                 let mut ty = ty_none;
                 if let Union(st) | Struct(st) = &cur_ty {
                     match st.get_member(&member_name) {
@@ -2033,7 +2055,34 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
             }
         }
         Struct(st) => {
-            todo!();
+            let member_count = st.members.len();
+            let mut new_init_list = Vec::new();
+            match &init.content {
+                Initializer_Type::Init_List(old_init_list) => {
+                    if old_init_list.len() > member_count {
+                        let error_info = format!("Excess elements in struct initializer: The struct
+                        only has {} members, but you provide {} init list element here.", member_count, old_init_list.len());
+                        report_semantic_error(span, &error_info);
+                    }
+                    for i in 0..member_count {
+                        let cur_member_type = &st.members[i].ty;
+                        if i < old_init_list.len() {
+                            let new_init = normalize_init(&old_init_list[i], cur_member_type);
+                            new_init_list.push(new_init);
+                        } else {
+                            let new_zero_init = create_zerolized_init(cur_member_type, span);
+                            new_init_list.push(new_zero_init);
+                        }
+                    }
+                    let content = Initializer_Type::Init_List(new_init_list);
+                    return Initializer {content, span};
+                }
+                _ => {
+                    let error_info = format!("you are trying to use scalar initiaizer to init a struct variable.");
+                    report_semantic_error(span, &error_info);
+                    exit(1);
+                }
+            }
         }
         // Scalar type:
         _ => {
@@ -2068,8 +2117,19 @@ fn create_zerolized_init(ty: &Type, span: Span) -> Initializer {
             let content = Initializer_Type::Init_List(init_list);
             return Initializer{content, span};
         }
+        // @Duplication
+        // @Duplication
+        // @Duplication
         Struct(st) => {
-            todo!();
+            let member_count = st.members.len();
+            let mut init_list = Vec::new();
+            for i in 0..member_count {
+                let cur_member_type = &st.members[i].ty;
+                let cur_init = create_zerolized_init(cur_member_type, span);
+                init_list.push(cur_init);
+            }
+            let content = Initializer_Type::Init_List(init_list);
+            return Initializer{content, span};
         }
         _ => {
             // @Smell: Maybe we should make the normalized init to use ir::Expr instead
