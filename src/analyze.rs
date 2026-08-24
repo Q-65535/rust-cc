@@ -689,27 +689,48 @@ impl ProgramAnalyzer {
             // @Note: We don't need to consider Tag(tag_name) situation, because
             // at this point tag is already resolved to a concrete struct type.
             Struct(st) => {
-                if let Initializer_Type::Init_List(init_list) = &init.content {
-                    // The init argument passed to this function must be normalized,
-                    // so we do the assertion:
-                    debug_assert!(init_list.len() == st.members.len());
-                    for (index, init) in init_list.iter().enumerate() {
-                        let cur_member_offset = st.members[index].offset;
-                        let cur_member_type = st.members[index].ty.clone();
-                        let content = ir::ExprType::RequestStructMember(Box::new(target_expr.clone()), cur_member_offset);
-                        let requrst_struct_member_expr = ir::Expr{content, ty: cur_member_type, span};
-                        let mut init_stmts = self.init(requrst_struct_member_expr, init);
+                match &init.content {
+                    Initializer_Type::Init_List(init_list) => {
+                        // The init argument passed to this function must be normalized,
+                        // so we do the assertion:
+                        debug_assert!(init_list.len() == st.members.len());
+                        for (index, init) in init_list.iter().enumerate() {
+                            let cur_member_offset = st.members[index].offset;
+                            let cur_member_type = st.members[index].ty.clone();
+                            let content = ir::ExprType::RequestStructMember(Box::new(target_expr.clone()), cur_member_offset);
+                            let requrst_struct_member_expr = ir::Expr{content, ty: cur_member_type, span};
+                            let mut init_stmts = self.init(requrst_struct_member_expr, init);
+                            stmts.append(&mut init_stmts);
+                        }
+                    }
+                    Initializer_Type::Expr(init_expr) => {
+                        // @Duplication_1
+                        let analyzed_init_expr = self.analyze_expr(init_expr);
+                        let assignment_expr = gen_assign_expr(target_expr, analyzed_init_expr);
+                        let assignment_expr_stmt = ir::StmtType::Ex(assignment_expr);
+                        stmts.push(assignment_expr_stmt);
+                    }
+                }
+            }
+            Union(st) => {
+                match &init.content {
+                    Initializer_Type::Init_List(init_list) => {
+                        // For union initializer, the length must be 1, just init the first element in the union.
+                        debug_assert!(init_list.len() == 1);
+                        let first_member_type = st.members[0].ty.clone();
+                        let first_init = &init_list[0];
+                        let content = ir::ExprType::RequestStructMember(Box::new(target_expr.clone()), 0);
+                        let requrst_struct_member_expr = ir::Expr{content, ty: first_member_type, span};
+                        let mut init_stmts = self.init(requrst_struct_member_expr, first_init);
                         stmts.append(&mut init_stmts);
                     }
-                } else if let Initializer_Type::Expr(init_expr) = &init.content {
-                    // @Duplication_1
-                    let analyzed_init_expr = self.analyze_expr(init_expr);
-                    let assignment_expr = gen_assign_expr(target_expr, analyzed_init_expr);
-                    let assignment_expr_stmt = ir::StmtType::Ex(assignment_expr);
-                    stmts.push(assignment_expr_stmt);
-                } else {
-                    let err_info = format!("semantic error: trying to init a struct variable with scalar data.");
-                    report_semantic_error(span, &err_info);
+                    Initializer_Type::Expr(init_expr) => {
+                        // @Duplication_1
+                        let analyzed_init_expr = self.analyze_expr(init_expr);
+                        let assignment_expr = gen_assign_expr(target_expr, analyzed_init_expr);
+                        let assignment_expr_stmt = ir::StmtType::Ex(assignment_expr);
+                        stmts.push(assignment_expr_stmt);
+                    }
                 }
             }
             _ => {
@@ -2084,6 +2105,26 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                 }
             }
         }
+        Union(st) => {
+            let mut new_init_list = Vec::new();
+            match &init.content {
+                Initializer_Type::Init_List(old_init_list) => {
+                    if old_init_list.len() > 1 {
+                        let error_info = format!("Excess elements in union initializer: The union initialzer
+                        can only have 1 members for initializing the first member of the union, but you provide {} elements in the init_list here.", old_init_list.len());
+                        report_semantic_error(span, &error_info);
+                    }
+                    let first_member_type = &st.members[0].ty;
+                    let new_init = normalize_init(&old_init_list[0], first_member_type);
+                    new_init_list.push(new_init);
+                    let content = Initializer_Type::Init_List(new_init_list);
+                    return Initializer {content, span};
+                }
+                Initializer_Type::Expr(expr) => {
+                    return init.clone();
+                }
+            }
+        }
         // Scalar type:
         _ => {
             match &init.content {
@@ -2128,6 +2169,14 @@ fn create_zerolized_init(ty: &Type, span: Span) -> Initializer {
                 let cur_init = create_zerolized_init(cur_member_type, span);
                 init_list.push(cur_init);
             }
+            let content = Initializer_Type::Init_List(init_list);
+            return Initializer{content, span};
+        }
+        Union(st) => {
+            let mut init_list = Vec::new();
+            let first_memeber_type = &st.members[0].ty;
+            let first_member_init = create_zerolized_init(first_memeber_type, span);
+            init_list.push(first_member_init);
             let content = Initializer_Type::Init_List(init_list);
             return Initializer{content, span};
         }
