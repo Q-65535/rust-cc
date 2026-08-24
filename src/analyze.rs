@@ -338,6 +338,52 @@ impl ProgramAnalyzer {
         ir::AnalyzedProgram{afuns, global_decls: self.global_decls}
     }
 
+    pub fn analyze_function(&mut self, fun: &mut Function) -> ir::Function {
+        // current_local_var_offset will be used to determine the position of all local variables in current
+        // to-be-analyzed function. Thus, at the start of each function analyzation, we must reset it.
+        self.current_local_var_offset = 0;
+        self.unique_stmt_labels_map_in_cur_function.clear();
+        for label in &fun.stmt_labels {
+            let unique_label = self.transform_to_unique_goto_label(label);
+            self.unique_stmt_labels_map_in_cur_function.insert(label.clone(), unique_label);
+        }
+
+        
+
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
+        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
+        if let Func{return_type, ..} = final_type {
+            self.current_function_return_type = *return_type;
+        } else {
+            let err_info = format!("compiler bug: we are analyzing a function definition,
+            but the data type resolved is not function!.");
+            report_semantic_error(fun.declarator.span, &err_info);
+        }
+        // We must enter scope before analyzing function
+        // parameters since function parameters are also in
+        // the function body scope.
+        self.scope_manager.enter_new_scope();
+        let mut analyzed_params: Vec<Obj> = Vec::new();
+        if let Some(DeclaratorSuffix::FunParam(params)) = &fun.declarator.suffix {
+            for param in params {
+                let p = self.analyze_param(param);
+                analyzed_params.push(p);
+            }
+        } else {
+            let err_info = format!("compiler bug: the function doesn't have parameter field.");
+            report_semantic_error(fun.declarator.span, &err_info);
+        }
+        let mut stmts = self.analyze_block(&mut fun.items);
+        let stack_size = self.current_local_var_offset;
+        self.scope_manager.exit_current_scope();
+        ir::Function{
+            name,
+            params: analyzed_params,
+            stmts, stack_size,
+            is_static: symbol_attribute.is_static
+        }
+    }
+
     pub fn analyze_typedef(&mut self, symbol_attribute: &Symbol_Attribute, base_type: &Type, declarator: &Declarator) {
         let (final_type, name) = self.resolve_declarator(symbol_attribute, base_type, declarator);
         self.scope_manager.add_typedef_alias(&name, final_type);
@@ -533,52 +579,6 @@ impl ProgramAnalyzer {
         return (cur_type, name);
     }
 
-    pub fn analyze_function(&mut self, fun: &mut Function) -> ir::Function {
-        // current_local_var_offset will be used to determine the position of all local variables in current
-        // to-be-analyzed function. Thus, at the start of each function analyzation, we must reset it.
-        self.current_local_var_offset = 0;
-        self.unique_stmt_labels_map_in_cur_function.clear();
-        for label in &fun.stmt_labels {
-            let unique_label = self.transform_to_unique_goto_label(label);
-            self.unique_stmt_labels_map_in_cur_function.insert(label.clone(), unique_label);
-        }
-
-        
-
-        let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
-        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
-        if let Func{return_type, ..} = final_type {
-            self.current_function_return_type = *return_type;
-        } else {
-            let err_info = format!("compiler bug: we are analyzing a function definition,
-            but the data type resolved is not function!.");
-            report_semantic_error(fun.declarator.span, &err_info);
-        }
-        // We must enter scope before analyzing function
-        // parameters since function parameters are also in
-        // the function body scope.
-        self.scope_manager.enter_new_scope();
-        let mut analyzed_params: Vec<Obj> = Vec::new();
-        if let Some(DeclaratorSuffix::FunParam(params)) = &fun.declarator.suffix {
-            for param in params {
-                let p = self.analyze_param(param);
-                analyzed_params.push(p);
-            }
-        } else {
-            let err_info = format!("compiler bug: the function doesn't have parameter field.");
-            report_semantic_error(fun.declarator.span, &err_info);
-        }
-        let mut stmts = self.analyze_block(&mut fun.items);
-        let stack_size = self.current_local_var_offset;
-        self.scope_manager.exit_current_scope();
-        ir::Function{
-            name,
-            params: analyzed_params,
-            stmts, stack_size,
-            is_static: symbol_attribute.is_static
-        }
-    }
-
     fn analyze_block(&mut self, items: &Vec<BlockItem>) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         for item in items {
@@ -701,6 +701,12 @@ impl ProgramAnalyzer {
                         let mut init_stmts = self.init(requrst_struct_member_expr, init);
                         stmts.append(&mut init_stmts);
                     }
+                } else if let Initializer_Type::Expr(init_expr) = &init.content {
+                    // @Duplication_1
+                    let analyzed_init_expr = self.analyze_expr(init_expr);
+                    let assignment_expr = gen_assign_expr(target_expr, analyzed_init_expr);
+                    let assignment_expr_stmt = ir::StmtType::Ex(assignment_expr);
+                    stmts.push(assignment_expr_stmt);
                 } else {
                     let err_info = format!("semantic error: trying to init a struct variable with scalar data.");
                     report_semantic_error(span, &err_info);
@@ -708,6 +714,7 @@ impl ProgramAnalyzer {
             }
             _ => {
                 if let Initializer_Type::Expr(init_expr) = &init.content {
+                    // @Duplication_1
                     let analyzed_init_expr = self.analyze_expr(init_expr);
                     let assignment_expr = gen_assign_expr(target_expr, analyzed_init_expr);
                     let assignment_expr_stmt = ir::StmtType::Ex(assignment_expr);
@@ -2072,10 +2079,8 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     let content = Initializer_Type::Init_List(new_init_list);
                     return Initializer {content, span};
                 }
-                _ => {
-                    let error_info = format!("you are trying to use scalar initiaizer to init a struct variable.");
-                    report_semantic_error(span, &error_info);
-                    exit(1);
+                Initializer_Type::Expr(expr) => {
+                    return init.clone();
                 }
             }
         }
