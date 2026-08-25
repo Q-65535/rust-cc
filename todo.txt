@@ -1,3 +1,8 @@
+2026.8.26:
+1. The normalized initializer should have type info. During the
+normalization, we should check whether the type of init and the type
+of init target exprssion are compatible.
+
 2026.8.7:
 1. Add span info to stmt and initializer.
 
