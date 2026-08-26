@@ -455,17 +455,6 @@ impl Parser {
         }
     }
 
-    fn find_LBrace_before_encounter_semicolon(&self) -> Result<bool, String> {
-        let mut index = self.cur_index;
-        while index != self.tokens.len() {
-            if self.tokens[index].kind == LBrace {return Ok(true)};
-            if self.tokens[index].kind == Semicolon {return Ok(false)};
-            index += 1;
-        }
-        let error_message = format!("From here to eof, can't find ';' or '{{' to start parse!");
-        return Err(error_token(self.cur_token(), &error_message));
-    }
-
     pub fn sync_parse_point(&mut self) {
         while !matches!(self.cur_token().kind, Semicolon | RBrace | Eof) {
             self.bump();
@@ -480,41 +469,34 @@ impl Parser {
         let mut translation_units: Vec<TranslationUnit> = Vec::new();
         while !self.at(&Eof) {
             let start_index = self.cur_index;
-            let result = self.find_LBrace_before_encounter_semicolon();
-            let find_LBrace: bool;
-            match result {
-                Err(e) => {
-                    self.syntax_errors.push(e);
-                    return (Program{translation_units}, self.syntax_errors);
+            /*
+               @Speed: This is how we estimate whether we should start parsing
+               function definition or global declaration: we first try to parse
+               declaration directly, if the parsing fails, we then reset the current
+               index and start parsing function definition. However, this way of
+               estimation causes performance waste when the try fails.
+               The rule is that the more failure tries, the more inefficient.
+               Thus, to reduce the waste, we should try to first parse the type of translation
+               unit whose count is more than the other. This strategy can increase
+               the success rate of the first parse try.
+            */
+            match self.parse_decl() {
+                Err(..) => {
+                    self.cur_index = start_index;
+                    match self.parse_fun_def() {
+                        Err(error_message) => {
+                            self.syntax_errors.push(error_message);
+                            self.sync_parse_point();
+                            if self.at(&RBrace) || self.cur_index == start_index {
+                                self.bump();
+                            }
+                            continue;
+                        },
+                        Ok(fun) => translation_units.push(FunctionDef(fun)),
+                    }
                 }
-                Ok(find) => find_LBrace = find,
-            }
-            // @Temporary: Not the final correct way to evaluate wthether this is a function def or declaration.
-            // Only function definition have LBrace, so if we hit LBrace then just start parsing function def.
-            if find_LBrace {
-                match self.parse_fun_def() {
-                    Err(error_message) => {
-                        self.syntax_errors.push(error_message);
-                        self.sync_parse_point();
-                        if self.at(&RBrace) || self.cur_index == start_index {
-                            self.bump();
-                        }
-                        continue;
-                    },
-                    Ok(fun) => translation_units.push(FunctionDef(fun)),
-                }
-            // Others are all declarations.
-            } else {
-                match self.parse_decl() {
-                    Err(error_message) => {
-                        self.syntax_errors.push(error_message);
-                        self.sync_parse_point();
-                        if self.at(&RBrace) || self.cur_index == start_index {
-                            self.bump();
-                        }
-                        continue;
-                    },
-                    Ok(decl) => translation_units.push(GlobalDecl(decl)),
+                Ok(decl) => {
+                    translation_units.push(GlobalDecl(decl));
                 }
             }
             debug_assert!(self.cur_index > start_index);

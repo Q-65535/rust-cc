@@ -6,7 +6,7 @@
 # ============================================================================
 
 # Path to the compiler binary that `cargo build` produces.
-RUST_CC=./target/debug/rust-cc
+RUST_CC=RUST_BACKTRACE=1 ./target/debug/rust-cc
 
 # Every C file under test/ is a test program. $(wildcard) expands the glob to:
 #   test/arith.c test/control.c ... test/variable.c

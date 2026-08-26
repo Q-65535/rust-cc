@@ -432,10 +432,11 @@ impl ProgramAnalyzer {
     fn gen_init_data(&mut self, init: &Initializer, ty: &Type) -> Vec::<u8> {
         let span = init.span;
         match ty {
+            // @Naming: count is a better name than size?
             ArrayOf(element_type, size) => {
                 if let Initializer_Type::Init_List(init_list) = &init.content {
                     debug_assert!(init_list.len() == *size);
-                    let mut init_data = Vec::new();
+                    let mut init_data = Vec::with_capacity(*size);
                     for (index, init) in init_list.iter().enumerate() {
                         let mut cur_init_data = self.gen_init_data(init, element_type);
                         init_data.append(&mut cur_init_data);
@@ -443,6 +444,25 @@ impl ProgramAnalyzer {
                     return init_data;
                 } else {
                     let err_info = format!("semantic error: trying to init an array variable with scalar data.");
+                    report_semantic_error(span, &err_info);
+                    exit(1);
+                }
+            }
+            Struct(st) => {
+                if let Initializer_Type::Init_List(init_list) = &init.content {
+                    debug_assert!(init_list.len() == st.members.len());
+                    let mut init_data = Vec::with_capacity(st.size);
+                    for (index, init) in init_list.iter().enumerate() {
+                        // @Speed: This way of filling data is inefficient.
+                        while st.members[index].offset != init_data.len() {
+                            init_data.push(0);
+                        }
+                        let mut cur_init_data = self.gen_init_data(init, &st.members[index].ty);
+                        init_data.append(&mut cur_init_data);
+                    }
+                    return init_data;
+                } else {
+                    let err_info = format!("semantic error: trying to init a struct variable with scalar data.");
                     report_semantic_error(span, &err_info);
                     exit(1);
                 }
