@@ -1,6 +1,21 @@
 #include "test.h"
 
+char g3 = 3;
+short g4 = 4;
+int g5 = 5;
+long g6 = 6;
+char gc[4] = "qwer";
+
 int main() {
+  ASSERT('q', gc[0]);
+  ASSERT('w', gc[1]);
+  ASSERT('e', gc[2]);
+  ASSERT('r', gc[3]);
+  ASSERT(3, g3);
+  ASSERT(4, g4);
+  ASSERT(5, g5);
+  ASSERT(6, g6);
+
   ASSERT(1, ({ int x[3]={1,2,3}; x[0]; }));
   ASSERT(2, ({ int x[3]={1,2,3}; x[1]; }));
   ASSERT(3, ({ int x[3]={1,2,3}; x[2]; }));

@@ -408,29 +408,11 @@ impl ProgramAnalyzer {
             }
             let mut init_value = None;
             if let Some(init) = &mut init_declarator.init {
-                match &init.content {
-                    Initializer_Type::Expr(expr) => {
-                        let analyzed_expr = self.analyze_expr(expr);
-                        if let Ok(num) = eval_constant(&analyzed_expr) {
-                            if can_assign(&final_type, &analyzed_expr.ty) {
-                                let value_in_bytes = num.to_le_bytes();
-                                init_value = Some(value_in_bytes.to_vec());
-                            } else {
-                                let err_info = format!("mismatch types: {} type is {:?}, but expression type is {:?}",
-                                name, &final_type, &analyzed_expr.ty);
-                                report_semantic_error(cur_declarator.span, &err_info);
-                            }
-                        } else {
-                            let err_info = format!("This is not a constant number expression!");
-                            report_semantic_error(analyzed_expr.span, &err_info);
-                        }
-                    }
-                    // @Future: We will add array and struct initialization expr assignment in the future.
-                    Initializer_Type::Init_List(init_list) => {
-                        todo!();
-                    }
-                }
+                let normalized_init = normalize_init(init, &final_type);
+                let init_data = self.gen_init_data(&normalized_init, &final_type);
+                init_value = Some(init_data);
             }
+            
             let object = create_global_obj(&name, &final_type);
             self.scope_manager.add_object(object.clone());
             // A function declarator with no body (e.g. `int printf();`) is a
@@ -444,6 +426,63 @@ impl ProgramAnalyzer {
             decls.push(analyzed_decl);
         }
         decls
+    }
+
+    // @Maybe: Make this to be function instead of method.
+    fn gen_init_data(&mut self, init: &Initializer, ty: &Type) -> Vec::<u8> {
+        let span = init.span;
+        match ty {
+            ArrayOf(element_type, size) => {
+                if let Initializer_Type::Init_List(init_list) = &init.content {
+                    debug_assert!(init_list.len() == *size);
+                    let mut init_data = Vec::new();
+                    for (index, init) in init_list.iter().enumerate() {
+                        let mut cur_init_data = self.gen_init_data(init, element_type);
+                        init_data.append(&mut cur_init_data);
+                    }
+                    return init_data;
+                } else {
+                    let err_info = format!("semantic error: trying to init an array variable with scalar data.");
+                    report_semantic_error(span, &err_info);
+                    exit(1);
+                }
+            }
+            _ => {
+                if let Initializer_Type::Expr(init_expr) = &init.content {
+                    let analyzed_init_expr = self.analyze_expr(init_expr);
+                    if let Ok(num) = eval_constant(&analyzed_init_expr) {
+                        if can_assign(ty, &analyzed_init_expr.ty) {
+                            let value_in_bytes = match sizeof(ty) {
+                                1 => (num as u8).to_le_bytes().to_vec(),
+                                2 => (num as u16).to_le_bytes().to_vec(),
+                                4 => (num as u32).to_le_bytes().to_vec(),
+                                8 => (num as u64).to_le_bytes().to_vec(),
+                                _ => {
+                                    let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
+                                    &analyzed_init_expr.ty, ty);
+                                    report_semantic_error(init.span, &err_info);
+                                    exit(1);
+                                }
+                            };
+                            return value_in_bytes;
+                        } else {
+                            let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
+                            ty, &analyzed_init_expr.ty);
+                            report_semantic_error(init.span, &err_info);
+                            exit(1);
+                        }
+                    } else {
+                        let err_info = format!("This is not a constant number expression!");
+                        report_semantic_error(analyzed_init_expr.span, &err_info);
+                        exit(1);
+                    }
+                } else {
+                    let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
+                    report_semantic_error(span, &err_info);
+                    exit(1);
+                }
+            }
+        }
     }
 
     fn resolve_type_with_suffix(&mut self, base_type: &Type, suffix: &DeclaratorSuffix) -> Type {

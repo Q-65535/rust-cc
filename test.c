@@ -17,11 +17,11 @@ int main() {
         int y;
         char identifier;
     } coord;
-
-
-    sizeof(struct w);
-
     coord location;
+
+    char ee[3] = {2, "saf", 4};
+
+
     coord *location_pointer = &location;
     location.x = 11;
     location.y = 22;
@@ -52,7 +52,7 @@ int main() {
         if (i == 4) {
             return 0;
         }
-        k: sleep(1);
+        // k: sleep(1);
     }
     return 0;
 }
