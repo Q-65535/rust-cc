@@ -471,6 +471,25 @@ impl ProgramAnalyzer {
                     exit(1);
                 }
             }
+            Union(st) => {
+                match &init.content {
+                    Initializer_Type::Init_List(init_list) => {
+                        // For union initializer, the length must be 1, just init the first element in the union.
+                        debug_assert!(init_list.len() == 1);
+                        let mut init_data = self.gen_init_data(&init_list[0], &st.members[0].ty);
+                        // Fill the trailing padding for this struct.
+                        while init_data.len() != st.size {
+                            init_data.push(0);
+                        }
+                        return init_data;
+                    }
+                    Initializer_Type::Expr(init_expr) => {
+                        let err_info = format!("You can only use init_list to initiaize a global union variable, but this is not a init_list.");
+                        report_semantic_error(span, &err_info);
+                        exit(1);
+                    }
+                }
+            }
             _ => {
                 if let Initializer_Type::Expr(init_expr) = &init.content {
                     let analyzed_init_expr = self.analyze_expr(init_expr);
@@ -2123,7 +2142,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                 }
                 Initializer_Type::Init_List(old_init_list) => {
                     if old_init_list.len() > size {
-                        let error_info = format!("excess elements in array initializer"); 
+                        let error_info = format!("Excess elements in array initializer: array size is {}, but the number of elements in the initializer is {}.", size, old_init_list.len()); 
                         report_semantic_error(span, &error_info);
                     }
                     for i in 0..size {
@@ -2196,7 +2215,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                 }
                 Initializer_Type::Init_List(init_list) => {
                     if init_list.len() > 1 {
-                        let error_info = format!("excess elements in array initializer");
+                        let error_info = format!("Excess elements for initialize a scalar variable: you can provide at most 1 element in the init_list, but the number of elements in the init_list you given is {}.", init_list.len());
                         report_semantic_error(span, &error_info);
                     }
                     if init_list.len() == 0 {

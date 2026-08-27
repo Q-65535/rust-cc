@@ -6,10 +6,17 @@ int g5 = 5;
 long g6 = 6;
 char gc[4] = "qwer";
 int g9[3] = {0, 1, 2};
+struct {long a; char b;} qwzsax = {2, 3};
 struct {char a; int b;} g11[2] = {{1, 2}, {3, 4}};
 struct {int a[2];} g12[2] = {{{1, 2}}};
+union { int a; char b[8]; } g13[2] = {{0x01020304}, {0x05060708}};
 
 int main() {
+  ASSERT(4, g13[0].b[0]);
+  ASSERT(3, g13[0].b[1]);
+  ASSERT(8, g13[1].b[0]);
+  ASSERT(7, g13[1].b[1]);
+
   ASSERT('q', gc[0]);
   ASSERT('w', gc[1]);
   ASSERT('e', gc[2]);
