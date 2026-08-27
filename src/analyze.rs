@@ -436,7 +436,7 @@ impl ProgramAnalyzer {
             ArrayOf(element_type, size) => {
                 if let Initializer_Type::Init_List(init_list) = &init.content {
                     debug_assert!(init_list.len() == *size);
-                    let mut init_data = Vec::with_capacity(*size);
+                    let mut init_data = Vec::with_capacity(*size * sizeof(element_type));
                     for (index, init) in init_list.iter().enumerate() {
                         let mut cur_init_data = self.gen_init_data(init, element_type);
                         init_data.append(&mut cur_init_data);
@@ -459,6 +459,10 @@ impl ProgramAnalyzer {
                         }
                         let mut cur_init_data = self.gen_init_data(init, &st.members[index].ty);
                         init_data.append(&mut cur_init_data);
+                    }
+                    // Fill the trailing padding for this struct.
+                    while init_data.len() != st.size {
+                        init_data.push(0);
                     }
                     return init_data;
                 } else {
