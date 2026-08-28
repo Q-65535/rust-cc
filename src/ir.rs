@@ -77,7 +77,17 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub obj: Obj,
-    pub init_value: Option<Vec<u8>>,
+    pub init_data: Option<Vec<Data_Directive>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Data_Directive {
+    ASM_Byte(i64),
+    ASM_Word(i64),
+    ASM_Long(i64),
+    ASM_Quad(i64),
+    ASM_Labeled_Quad(String, i64),
+    ASM_String(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

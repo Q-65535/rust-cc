@@ -4,6 +4,7 @@ use crate::parse::{self, *};
 use crate::lex::{self, *};
 use crate::ir;
 use ir::OP;
+use ir::Data_Directive::{self, *};
 use ExprType::*;
 use Struct_Or_Union::*;
 use StmtType::*;
@@ -400,17 +401,22 @@ impl ProgramAnalyzer {
         }
         for init_declarator in &mut decl.init_declarators {
             let cur_declarator = &init_declarator.declarator;
-            let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_declarator);
+            let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_declarator);
 
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("semantic error: {} redeclared as a symbol", name);
                 report_semantic_error(cur_declarator.span, &err_info);
             }
-            let mut init_value = None;
+            let mut init_data = None;
             if let Some(init) = &mut init_declarator.init {
                 let normalized_init = normalize_init(init, &final_type);
-                let init_data = self.gen_init_data(&normalized_init, &final_type);
-                init_value = Some(init_data);
+                if let ArrayOf(element_type, size) = &final_type {
+                    if *size == 0 {
+                        let infered_array_len = resolve_array_size_from_init(&normalized_init);
+                        final_type = ArrayOf(element_type.clone(), infered_array_len);
+                    }
+                }
+                init_data = Some(self.gen_init_data(&normalized_init, &final_type));
             }
             
             let object = create_global_obj(&name, &final_type);
@@ -422,20 +428,22 @@ impl ProgramAnalyzer {
             if let Type::Func{..} = final_type {
                 continue;
             }
-            let analyzed_decl = ir::Declaration{obj: object.clone(), init_value};
+            let analyzed_decl = ir::Declaration{obj: object.clone(), init_data};
             decls.push(analyzed_decl);
         }
         decls
     }
 
-    // @Maybe: Make this to be function instead of method.
-    fn gen_init_data(&mut self, init: &Initializer, ty: &Type) -> Vec::<u8> {
+    fn gen_init_data(&mut self, init: &Initializer, ty: &Type) -> Vec::<Data_Directive> {
         let span = init.span;
         match ty {
             // @Naming: count is a better name than size?
             ArrayOf(element_type, size) => {
                 if let Initializer_Type::Init_List(init_list) = &init.content {
-                    debug_assert!(init_list.len() == *size);
+                    if *size != 0 {
+                        debug_assert!(init_list.len() == *size);
+                    }
+                    // @WasteSpace: Actually the initial capacity is much larger than we need.
                     let mut init_data = Vec::with_capacity(*size * sizeof(element_type));
                     for (index, init) in init_list.iter().enumerate() {
                         let mut cur_init_data = self.gen_init_data(init, element_type);
@@ -454,15 +462,15 @@ impl ProgramAnalyzer {
                     let mut init_data = Vec::with_capacity(st.size);
                     for (index, init) in init_list.iter().enumerate() {
                         // @Speed: This way of filling data is inefficient.
-                        while st.members[index].offset != init_data.len() {
-                            init_data.push(0);
+                        while st.members[index].offset != data_bytes_count(&init_data) {
+                            init_data.push(ASM_Byte(0));
                         }
                         let mut cur_init_data = self.gen_init_data(init, &st.members[index].ty);
                         init_data.append(&mut cur_init_data);
                     }
                     // Fill the trailing padding for this struct.
-                    while init_data.len() != st.size {
-                        init_data.push(0);
+                    while data_bytes_count(&init_data) != st.size {
+                        init_data.push(ASM_Byte(0));
                     }
                     return init_data;
                 } else {
@@ -478,8 +486,8 @@ impl ProgramAnalyzer {
                         debug_assert!(init_list.len() == 1);
                         let mut init_data = self.gen_init_data(&init_list[0], &st.members[0].ty);
                         // Fill the trailing padding for this struct.
-                        while init_data.len() != st.size {
-                            init_data.push(0);
+                        while data_bytes_count(&init_data) != st.size {
+                            init_data.push(ASM_Byte(0));
                         }
                         return init_data;
                     }
@@ -493,13 +501,26 @@ impl ProgramAnalyzer {
             _ => {
                 if let Initializer_Type::Expr(init_expr) = &init.content {
                     let analyzed_init_expr = self.analyze_expr(init_expr);
-                    if let Ok(num) = eval_constant(&analyzed_init_expr) {
-                        if can_assign(ty, &analyzed_init_expr.ty) {
-                            let value_in_bytes = match sizeof(ty) {
-                                1 => (num as u8).to_le_bytes().to_vec(),
-                                2 => (num as u16).to_le_bytes().to_vec(),
-                                4 => (num as u32).to_le_bytes().to_vec(),
-                                8 => (num as u64).to_le_bytes().to_vec(),
+                    // @TODO: switch to eval_label_constant
+                    if let Ok((label, num)) = eval_label_constant(&analyzed_init_expr) {
+                        if !can_assign(ty, &analyzed_init_expr.ty) {
+                            let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
+                            ty, &analyzed_init_expr.ty);
+                            report_semantic_error(init.span, &err_info);
+                            exit(1);
+                        }
+                        let mut init_data = Vec::new();
+                        if let Some(label) = label {
+                            // Label can only be applied to quad.
+                            debug_assert!(sizeof(ty) == 8);
+                            init_data.push(ASM_Labeled_Quad(label, num));
+                            return init_data;
+                        } else {
+                            let data_directive = match sizeof(ty) {
+                                1 => ASM_Byte(num),
+                                2 => ASM_Word(num),
+                                4 => ASM_Long(num),
+                                8 => ASM_Quad(num),
                                 _ => {
                                     let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
                                     &analyzed_init_expr.ty, ty);
@@ -507,12 +528,8 @@ impl ProgramAnalyzer {
                                     exit(1);
                                 }
                             };
-                            return value_in_bytes;
-                        } else {
-                            let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
-                            ty, &analyzed_init_expr.ty);
-                            report_semantic_error(init.span, &err_info);
-                            exit(1);
+                            init_data.push(data_directive);
+                            return init_data;
                         }
                     } else {
                         let err_info = format!("This is not a constant number expression!");
@@ -535,7 +552,7 @@ impl ProgramAnalyzer {
 
                 if let Some(len_expr) = len_expr {
                     let analyzed_len_expr = self.analyze_expr(len_expr);
-                    let result = eval_constant(&analyzed_len_expr);
+                    let result = eval_pure_constant(&analyzed_len_expr);
                     match result {
                         Err(e) => {
                             report_semantic_error(len_expr.span, &e);
@@ -717,16 +734,16 @@ impl ProgramAnalyzer {
                 report_semantic_error(cur_declarator.span, &err_info);
             }
             if let Some(init) = &init_declarator.init {
+                let normalized_init = normalize_init(init, &final_type);
                 if let ArrayOf(element_type, size) = &final_type {
                     if *size == 0 {
-                        let final_size = resolve_array_size_from_init(init);
-                        final_type = ArrayOf(element_type.clone(), final_size);
+                        let infered_array_len = resolve_array_size_from_init(&normalized_init);
+                        final_type = ArrayOf(element_type.clone(), infered_array_len);
                     }
                 }
                 let obj = self.create_local_obj(&final_type, &name);
                 self.scope_manager.add_object(obj.clone());
 
-                let normalized_init = normalize_init(init, &obj.ty);
                 let mut obj_expr = self.gen_expr_from_obj(&obj, cur_declarator.span);
                 let mut assignment_expr_stmts = self.init(obj_expr, &normalized_init);
                 stmts.append(&mut assignment_expr_stmts);
@@ -1009,7 +1026,7 @@ impl ProgramAnalyzer {
                     for e in enumerators {
                         if let Some(expr) = &e.constant_expr {
                             let value_expr = self.analyze_expr(expr);
-                            value = match eval_constant(&value_expr) {
+                            value = match eval_pure_constant(&value_expr) {
                                 Err(e) => {
                                     report_semantic_error(expr.span, &e);
                                     exit(1);
@@ -1033,7 +1050,7 @@ impl ProgramAnalyzer {
                 for e in enumerators {
                     if let Some(expr) = &e.constant_expr {
                         let value_expr = self.analyze_expr(expr);
-                        value = match eval_constant(&value_expr) {
+                        value = match eval_pure_constant(&value_expr) {
                             Err(e) => {
                                 report_semantic_error(expr.span, &e);
                                 exit(1);
@@ -1177,7 +1194,7 @@ impl ProgramAnalyzer {
                 let unique_label = self.next_case_label();
                 let stmt = self.analyze_stmt(stmt);
                 if let Some(cur_switch) = &mut self.cur_switch {
-                    let result = eval_constant(&analyzed_cond_expr);
+                    let result = eval_pure_constant(&analyzed_cond_expr);
                     let cond_value = match result {
                         Err(e) => {
                             report_semantic_error(cond_expr.span, &e);
@@ -1553,9 +1570,13 @@ impl ProgramAnalyzer {
                 // Although the content of this obj is stored in .data section, it can only be accessed
                 // at current scope. So we add the obj in current scope.
                 self.scope_manager.add_object(global_obj.clone());
-                let mut value_in_bytes = s.clone();
-                value_in_bytes.push(b'\0');
-                let global_decl = ir::Declaration{obj: global_obj.clone(), init_value: Some(value_in_bytes)};
+                let mut data_directive_vec = Vec::new();
+                for char in s {
+                    data_directive_vec.push(ASM_Byte(*char as i64));
+                }
+                // extra \0 character at the end of the string.
+                data_directive_vec.push(ASM_Byte(0 as i64));
+                let global_decl = ir::Declaration{obj: global_obj.clone(), init_data: Some(data_directive_vec)};
                 self.global_decls.push(global_decl);
 
                 let unique_symbol = ExprType::Object(global_obj);
@@ -1944,132 +1965,132 @@ pub fn align_to(n: usize, align: usize) -> usize {
     }
 }
 
-fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
+fn eval_pure_constant(expr: &ir::Expr) -> Result<i64, String> {
+    let (_, num) = eval_label_constant(expr)?;
+    return Ok(num);
+}
+
+fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String> {
     use ir::OP::*;
     match &expr.content {
-        ir::ExprType::Integer(n) => Ok(*n as i64),
-        ir::ExprType::Neg(expr) => Ok(-eval_constant(&expr)?),
+        ir::ExprType::Integer(n) => Ok((None, (*n as i64))),
+        ir::ExprType::Neg(expr) => {
+            let (label, num) = eval_label_constant(&expr)?;
+            return Ok((label, -num));
+        }
         ir::ExprType::Not(expr) => {
-            let value = eval_constant(expr)?;
+            let value = eval_pure_constant(expr)?;
             if value == 0 {
-                return Ok(1);
+                return Ok((None, 1));
             } else {
-                return Ok(0);
+                return Ok((None, 0));
             }
         }
         ir::ExprType::Binary(lhs, rhs, op) => {
+            let (label, left_num) = eval_label_constant(lhs)?;
+            let right_num = eval_pure_constant(rhs)?;
             match op {
                 Plus => {
-                    let result = eval_constant(lhs)? + eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num + right_num));
                 }
                 Minus => {
-                    let result = eval_constant(lhs)? - eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num - right_num));
                 }
                 Mul => {
-                    let result = eval_constant(lhs)? * eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num * right_num));
                 }
                 Div => {
-                    let result = eval_constant(lhs)? / eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num / right_num));
                 }
                 Modulus => {
-                    let result = eval_constant(lhs)? % eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num % right_num));
                 }
                 BitAnd => {
-                    let result = eval_constant(lhs)? & eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num & right_num));
                 }
                 BitXOR => {
-                    let result = eval_constant(lhs)? ^ eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num ^ right_num));
                 }
                 BitOR => {
-                    let result = eval_constant(lhs)? | eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num | right_num));
                 }
                 SHL => {
-                    let result = eval_constant(lhs)? << eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num << right_num));
                 }
                 SHR => {
-                    let result = eval_constant(lhs)? >> eval_constant(rhs)?;
-                    return Ok(result);
+                    return Ok((label, left_num >> right_num));
                 }
                 Eq => {
-                    let result = eval_constant(lhs)? == eval_constant(rhs)?;
-                    return Ok(result as i64);
+                    return Ok((label, (left_num == right_num) as i64));
                 }
                 Neq => {
-                    let result = eval_constant(lhs)? != eval_constant(rhs)?;
-                    return Ok(result as i64);
+                    return Ok((label, (left_num != right_num) as i64));
                 }
                 LT => {
-                    let result = eval_constant(lhs)? < eval_constant(rhs)?;
-                    return Ok(result as i64);
+                    return Ok((label, (left_num < right_num) as i64));
                 }
                 LE => {
-                    let result = eval_constant(lhs)? <= eval_constant(rhs)?;
-                    return Ok(result as i64);
+                    return Ok((label, (left_num <= right_num) as i64));
                 }
                 GT => {
-                    let result = eval_constant(lhs)? > eval_constant(rhs)?;
-                    return Ok(result as i64);
+                    return Ok((label, (left_num > right_num) as i64));
                 }
                 GE => {
-                    let result = eval_constant(lhs)? >= eval_constant(rhs)?;
-                    return Ok(result as i64);
+                    return Ok((label, (left_num >= right_num) as i64));
                 }
                 LOGAND => {
-                    let lhs_result = eval_constant(lhs)?;
-                    let rhs_result = eval_constant(rhs)?;
-                    if (lhs_result != 0) && (rhs_result != 0) {
-                        return Ok(1);
+                    if (left_num != 0) && (right_num != 0) {
+                        return Ok((label, 1));
                     } else {
-                        return Ok(0);
+                        return Ok((label, 0));
                     }
                 }
                 LOGOR => {
-                    let lhs_result = eval_constant(lhs)?;
-                    let rhs_result = eval_constant(rhs)?;
-                    if (lhs_result != 0) || (rhs_result != 0) {
-                        return Ok(1);
+                    if (left_num != 0) || (right_num != 0) {
+                        return Ok((label, 1));
                     } else {
-                        return Ok(0);
+                        return Ok((label, 0));
                     }
                 }
             }
         }
         ir::ExprType::CommaExpression(lhs, rhs) => {
-            return eval_constant(rhs);
+            return eval_label_constant(rhs);
         }
         ir::ExprType::Conditional{cond, then, otherwise} => {
-            let cond = eval_constant(cond)?;
+            let cond = eval_pure_constant(cond)?;
             if cond != 0 {
-                return eval_constant(then);
+                return eval_label_constant(then);
             } else {
-                return eval_constant(otherwise);
+                return eval_label_constant(otherwise);
             }
         }
         // ~
         ir::ExprType::BitNot(expr) => {
-            let value = eval_constant(expr)?;
+            let value = eval_pure_constant(expr)?;
             let result = !value;
-            return Ok(result);
+            return Ok((None, result));
         }
         ir::ExprType::Cast(expr, ty) => {
             if (is_integer(ty)) {
-                match sizeof(ty) {
-                    1 => {return Ok((eval_constant(expr)? as u8) as i64);}
-                    2 => {return Ok((eval_constant(expr)? as u16) as i64);}
-                    4 => {return Ok((eval_constant(expr)? as u32) as i64);}
-                    _ => (),
-                }
+                let (label, num) = eval_label_constant(expr)?;
+                let truncated_num = match sizeof(ty) {
+                    1 => (num as u8) as i64,
+                    2 => (num as u16) as i64,
+                    4 => (num as u32) as i64,
+                    _ => num,
+                };
+                return Ok((label, truncated_num));
+            } else {
+                return eval_label_constant(expr);
             }
-            return eval_constant(expr);
+        }
+        ir::ExprType::Object(obj) => {
+            if !matches!(obj.ty, ArrayOf(..) | Func{..}) {
+                let error_info = format!("invalid initializer");
+                return Err(error_info);
+            }
+            return Ok((Some(obj.name.clone()), 0));
         }
         _ => {
             let error_info = format!("this is not a costant expression");
@@ -2081,16 +2102,13 @@ fn eval_constant(expr: &ir::Expr) -> Result<i64, String> {
 
 fn resolve_array_size_from_init(init: &Initializer) -> usize {
     match &init.content {
-        Initializer_Type::Expr(init_expr) => {
-            if let Str(s) = &init_expr.content {
-                // Extra +1 length for the ending "\0" character.
-                return s.len() + 1;
-            } else {
-                return 1;
-            }
-        }
         Initializer_Type::Init_List(init_list) => {
             return init_list.len();
+        }
+        _ => {
+            let error_info = format!("Compiler bug: After normalization, this init should be a init list.");
+            report_semantic_error(init.span, &error_info);
+            exit(1);
         }
     }
 }
@@ -2115,13 +2133,23 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     // it just simply ignore the ending '\0' in the string literal.
                     if let Str(s) = &init_expr.content {
                         if **element_type == Char {
-                            if s.len() > size {
+                            if s.len() > size && size != 0 {
                                 let error_info = format!("initializer-string for array of {:?} is too long", element_type);
                                 report_semantic_error(span, &error_info);
                                 exit(1);
                             }
                             for i in 0..s.len() {
+                                // @Duplication_2
                                 let char_init_expr_content = Integer(s[i].clone() as i64);
+                                let char_init_expr = Expr{content: char_init_expr_content, span};
+                                let element_init_content = Initializer_Type::Expr(char_init_expr);
+                                new_init_list.push(Initializer{content: element_init_content, span});
+                            }
+                            // If the array length left unspecified, we manually add an extra '\0' at the end of the initializer.
+                            // Then, the arary length actually is s.len()+1.
+                            if size == 0 {
+                                // @Duplication_2
+                                let char_init_expr_content = Integer(0);
                                 let char_init_expr = Expr{content: char_init_expr_content, span};
                                 let element_init_content = Initializer_Type::Expr(char_init_expr);
                                 new_init_list.push(Initializer{content: element_init_content, span});
@@ -2141,17 +2169,26 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     }
                 }
                 Initializer_Type::Init_List(old_init_list) => {
-                    if old_init_list.len() > size {
+                    // We intentionaly ignore the case where the given array size is 0,
+                    // because we allow array length left unspecified: int arr[] = {3, 4 ,6};
+                    if old_init_list.len() > size && size != 0 {
                         let error_info = format!("Excess elements in array initializer: array size is {}, but the number of elements in the initializer is {}.", size, old_init_list.len()); 
                         report_semantic_error(span, &error_info);
                     }
-                    for i in 0..size {
-                        if i < old_init_list.len() {
-                            let new_init = normalize_init(&old_init_list[i], element_type);
+                    if size == 0 {
+                        for cur_old_init in old_init_list {
+                            let new_init = normalize_init(&cur_old_init, element_type);
                             new_init_list.push(new_init);
-                        } else {
-                            let new_zero_init = create_zerolized_init(element_type, span);
-                            new_init_list.push(new_zero_init);
+                        }
+                    } else {
+                        for i in 0..size {
+                            if i < old_init_list.len() {
+                                let new_init = normalize_init(&old_init_list[i], element_type);
+                                new_init_list.push(new_init);
+                            } else {
+                                let new_zero_init = create_zerolized_init(element_type, span);
+                                new_init_list.push(new_zero_init);
+                            }
                         }
                     }
                     let content = Initializer_Type::Init_List(new_init_list);
@@ -2271,4 +2308,20 @@ fn create_zerolized_init(ty: &Type, span: Span) -> Initializer {
             return Initializer{content, span};
         }
     }
+}
+
+fn data_bytes_count(init_data: &Vec<Data_Directive>) -> usize {
+    let mut total_bytes_count: usize = 0;
+    for directive in init_data {
+        let cur_bytes_count = match directive {
+            ASM_Byte(..)         => 1,
+            ASM_Word(..)         => 2,
+            ASM_Long(..)         => 4,
+            ASM_Quad(..)         => 8,
+            ASM_Labeled_Quad(..) => 8,
+            ASM_String(s) => s.len()+1,
+        };
+        total_bytes_count += cur_bytes_count;
+    }
+    return total_bytes_count;
 }

@@ -4,6 +4,7 @@ use colored::*;
 use crate::ir::ExprType::{self, *};
 use crate::ir::StmtType::{self, *};
 use crate::ir::OP::{self, *};
+use crate::ir::Data_Directive::{self, *};
 use crate::Declaration;
 use crate::Function;
 use crate::Obj;
@@ -98,9 +99,16 @@ impl Generator {
             emit!("  .data");
             emit!("  .globl {}", global_decl.obj.name);
             emit!("{}:", global_decl.obj.name);
-            if let Some(bytes) = &global_decl.init_value {
-                for b in bytes {
-                    emit!("  .byte {}", b);
+            if let Some(data_directives) = &global_decl.init_data {
+                for data_directive in data_directives {
+                    match data_directive {
+                        ASM_Byte(num) => emit!("  .byte {}", num),
+                        ASM_Word(num) => emit!("  .word {}", num),
+                        ASM_Long(num) => emit!("  .long {}", num),
+                        ASM_Quad(num) => emit!("  .quad {}", num),
+                        ASM_Labeled_Quad(label, num) => emit!("  .quad {}{:+}",label, num),
+                        ASM_String(s) => emit!("  .string \"{}\"",s),
+                    }
                 }
             } else {
                 // @Temporary: Before really implementing uninitialzed global variable (which is designated to .bss),
