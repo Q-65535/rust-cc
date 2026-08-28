@@ -2090,10 +2090,48 @@ fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String>
                 let error_info = format!("invalid initializer");
                 return Err(error_info);
             }
+            if !obj.is_global {
+                let error_info = format!("not a compile-time constant");
+                return Err(error_info);
+            }
             return Ok((Some(obj.name.clone()), 0));
+        }
+        ir::ExprType::AddrOf(expr) => {
+            let (label, num) = eval_rval(expr);
+            return Ok((Some(label), num));
         }
         _ => {
             let error_info = format!("this is not a costant expression");
+            return Err(error_info);
+        }
+    }
+}
+
+// @Naming
+fn eval_rval(expr: &ir::Expr) -> (String, i64) {
+    match &expr.content {
+        ir::ExprType::Object(obj) => {
+            if !obj.is_global {
+                let error_info = format!("not a compile-time constant");
+                report_semantic_error(expr.span, &error_info);
+                exit(1);
+            }
+            return (obj.name.clone(), 0);
+        }
+        ir::ExprType::Deref(expr) => {
+            if let Ok((label, num)) = eval_label_constant(expr) {
+                // @Cleanup
+                return (label.unwrap(), num);
+            } else {
+                todo!();
+            }
+        }
+        ir::ExprType::RequestStructMember(expr, offset) => {
+            let (label, num) = eval_rval(expr);
+            return (label,  num + *offset as i64);
+        }
+        _ => {
+            let error_info = format!("invalid initializer");
             report_semantic_error(expr.span, &error_info);
             exit(1);
         }
