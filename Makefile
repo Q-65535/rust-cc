@@ -48,10 +48,10 @@ test/%.exe: build test/%.c
 # `make struct`: build and run just the struct.c test.
 single_test:
 	cargo build
-	$(CC) -E -P -C test/constexpr.c -o test/constexpr.i
-	$(RUST_CC) -o test/constexpr.s test/constexpr.i
-	$(CC) -o constexpr.exe test/constexpr.s -xc test/common
-	echo constexpr.exe; ./constexpr.exe || exit 1; echo;
+	$(CC) -E -P -C test/initializer.c -o test/initializer.i
+	$(RUST_CC) -o test/initializer.s test/initializer.i
+	$(CC) -o initializer.exe test/initializer.s -xc test/common
+	echo initializer.exe; ./initializer.exe || exit 1; echo;
 
 local_test:
 	rm -f test.s
@@ -85,4 +85,4 @@ test: clean old_test
 # file of the same name happens to exist in the directory.
 .PHONY: build rebuild test clean
 
-#   gcc -E -P -C test/constexpr.c -o test/constexpr.i
+#   gcc -E -P -C test/initializer.c -o test/initializer.i

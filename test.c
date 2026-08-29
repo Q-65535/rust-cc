@@ -18,8 +18,11 @@ int main() {
         char identifier;
     } coord;
     coord location;
+    coord location_1;
+    location_1 = location;
 
-    char ee[3] = {2, "saf", 4};
+
+    char ee[3] = {2, 'f', 4};
 
 
     coord *location_pointer = &location;

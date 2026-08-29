@@ -501,40 +501,41 @@ impl ProgramAnalyzer {
             _ => {
                 if let Initializer_Type::Expr(init_expr) = &init.content {
                     let analyzed_init_expr = self.analyze_expr(init_expr);
-                    // @TODO: switch to eval_label_constant
-                    if let Ok((label, num)) = eval_label_constant(&analyzed_init_expr) {
-                        if !can_assign(ty, &analyzed_init_expr.ty) {
-                            let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
-                            ty, &analyzed_init_expr.ty);
-                            report_semantic_error(init.span, &err_info);
+                    match eval_label_constant(&analyzed_init_expr) {
+                        Ok((label, num)) => {
+                            if !can_assign(ty, &analyzed_init_expr.ty) {
+                                let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
+                                ty, &analyzed_init_expr.ty);
+                                report_semantic_error(init.span, &err_info);
+                                exit(1);
+                            }
+                            let mut init_data = Vec::new();
+                            if let Some(label) = label {
+                                // Label can only be applied to quad.
+                                debug_assert!(sizeof(ty) == 8);
+                                init_data.push(ASM_Labeled_Quad(label, num));
+                                return init_data;
+                            } else {
+                                let data_directive = match sizeof(ty) {
+                                    1 => ASM_Byte(num),
+                                    2 => ASM_Word(num),
+                                    4 => ASM_Long(num),
+                                    8 => ASM_Quad(num),
+                                    _ => {
+                                        let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
+                                        &analyzed_init_expr.ty, ty);
+                                        report_semantic_error(init.span, &err_info);
+                                        exit(1);
+                                    }
+                                };
+                                init_data.push(data_directive);
+                                return init_data;
+                            }
+                        }
+                        Err(err_info) => {
+                            report_semantic_error(analyzed_init_expr.span, &err_info);
                             exit(1);
                         }
-                        let mut init_data = Vec::new();
-                        if let Some(label) = label {
-                            // Label can only be applied to quad.
-                            debug_assert!(sizeof(ty) == 8);
-                            init_data.push(ASM_Labeled_Quad(label, num));
-                            return init_data;
-                        } else {
-                            let data_directive = match sizeof(ty) {
-                                1 => ASM_Byte(num),
-                                2 => ASM_Word(num),
-                                4 => ASM_Long(num),
-                                8 => ASM_Quad(num),
-                                _ => {
-                                    let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
-                                    &analyzed_init_expr.ty, ty);
-                                    report_semantic_error(init.span, &err_info);
-                                    exit(1);
-                                }
-                            };
-                            init_data.push(data_directive);
-                            return init_data;
-                        }
-                    } else {
-                        let err_info = format!("This is not a constant number expression!");
-                        report_semantic_error(analyzed_init_expr.span, &err_info);
-                        exit(1);
                     }
                 } else {
                     let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
@@ -1668,25 +1669,32 @@ fn array_of(ty: &Type, len: usize) -> Type {
     ArrayOf(base, len)
 }
 
-// evaluate whether a expression of right type can be assigned to a "stuff"
-// of left type
 pub fn is_integer(ty: &Type) -> bool {
     matches!(ty, Type::Int | Type::Long | Type::Short | Type::Char | Type::Bool | Type::Enum)
 }
 
-fn can_assign(left: &Type, mut right: &Type) -> bool {
+// evaluate whether a expression of right type can be assigned to a "stuff"
+// of left type
+fn can_assign(left_type: &Type, mut right_type: &Type) -> bool {
     // If the right is a function call, we only consdier its return type.
-    if let Func {return_type, ..} = right {
-        right = return_type;
+    if let Func {return_type, ..} = right_type {
+        right_type = return_type;
+    }
+    if is_integer(left_type) && is_integer(right_type) {
+        return true;
+    }
+    // @Compatibility: In GCC, two pointer types are assign compatible only when the
+    // pointee type is the same. However, in chibicc, any types of pointers can be assigned
+    // to another pointer variable. We choose to be in line with chibicc.
+    if matches!(left_type, Pointer_To(..)) && matches!(right_type, Pointer_To(..)) {
+        return true;
     }
     // array can be assigned to a pointer type, BUT not the other way around!
-    if is_pointer(left) && is_pointer_or_array(right) {
-        return true
-    } else if is_integer(left) && is_integer(right) {
-        return true
-    } else {
-        return left == right
+    if matches!(left_type, Pointer_To(..)) && matches!(right_type, ArrayOf(..)) {
+        return true;
     }
+
+    return left_type == right_type;
 }
 
 
@@ -1708,27 +1716,9 @@ fn can_be_lvalue(expr: &ir::Expr) -> bool {
     }
 }
 
-fn can_be_rvalue(expr: &Expr) -> bool {
-    return true;
-}
-
 pub fn is_pointer_or_array(t: &Type) -> bool {
     match t {
         Pointer_To(_) | ArrayOf(_, _) => true,
-        _ => false
-    }
-}
-
-pub fn is_pointer(t: &Type) -> bool {
-    match t {
-        Pointer_To(_) => true,
-        _ => false
-    }
-}
-
-pub fn is_array(t: &Type) -> bool {
-    match t {
-        ArrayOf(_, _) => true,
         _ => false
     }
 }
@@ -2086,54 +2076,31 @@ fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String>
             }
         }
         ir::ExprType::Object(obj) => {
-            if !matches!(obj.ty, ArrayOf(..) | Func{..}) {
-                let error_info = format!("invalid initializer");
-                return Err(error_info);
-            }
+            // if !matches!(obj.ty, ArrayOf(..) | Func{..} | Pointer_To(..)) {
+            //     let error_info = format!("invalid constant reference to symbol {}", obj.name);
+            //     return Err(error_info);
+            // }
             if !obj.is_global {
                 let error_info = format!("not a compile-time constant");
                 return Err(error_info);
             }
             return Ok((Some(obj.name.clone()), 0));
         }
+        ir::ExprType::RequestStructMember(expr, offset) => {
+            let (label, num) = eval_label_constant(expr)?;
+            return Ok((label, num+(*offset as i64)));
+        }
+        // In assembly, the address of some symbol is just the symbol name of itself.
+        // The linker will eventually resolve the actual address of this symbol.
         ir::ExprType::AddrOf(expr) => {
-            let (label, num) = eval_rval(expr);
-            return Ok((Some(label), num));
-        }
-        _ => {
-            let error_info = format!("this is not a costant expression");
-            return Err(error_info);
-        }
-    }
-}
-
-// @Naming
-fn eval_rval(expr: &ir::Expr) -> (String, i64) {
-    match &expr.content {
-        ir::ExprType::Object(obj) => {
-            if !obj.is_global {
-                let error_info = format!("not a compile-time constant");
-                report_semantic_error(expr.span, &error_info);
-                exit(1);
-            }
-            return (obj.name.clone(), 0);
+            return eval_label_constant(expr);
         }
         ir::ExprType::Deref(expr) => {
-            if let Ok((label, num)) = eval_label_constant(expr) {
-                // @Cleanup
-                return (label.unwrap(), num);
-            } else {
-                todo!();
-            }
-        }
-        ir::ExprType::RequestStructMember(expr, offset) => {
-            let (label, num) = eval_rval(expr);
-            return (label,  num + *offset as i64);
+            return eval_label_constant(expr);
         }
         _ => {
-            let error_info = format!("invalid initializer");
-            report_semantic_error(expr.span, &error_info);
-            exit(1);
+            let error_info = format!("this is not a costant expression: {:?}", expr);
+            return Err(error_info);
         }
     }
 }
@@ -2348,6 +2315,7 @@ fn create_zerolized_init(ty: &Type, span: Span) -> Initializer {
     }
 }
 
+// Calculate how many bytes the given vec of data directives will occupy in the final executable file.
 fn data_bytes_count(init_data: &Vec<Data_Directive>) -> usize {
     let mut total_bytes_count: usize = 0;
     for directive in init_data {
