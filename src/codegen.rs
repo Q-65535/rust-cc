@@ -96,10 +96,11 @@ impl Generator {
     pub fn gen_code(&mut self, program: AnalyzedProgram) {
         emit!(".file 1 \"{}\"", INPUT_PATH.lock().unwrap());
         for global_decl in &program.global_decls {
-            emit!("  .data");
+            emit!("");
             emit!("  .globl {}", global_decl.obj.name);
-            emit!("{}:", global_decl.obj.name);
             if let Some(data_directives) = &global_decl.init_data {
+                emit!("  .data");
+                emit!("{}:", global_decl.obj.name);
                 for data_directive in data_directives {
                     match data_directive {
                         ASM_Byte(num) => emit!("  .byte {}", num),
@@ -111,8 +112,8 @@ impl Generator {
                     }
                 }
             } else {
-                // @Temporary: Before really implementing uninitialzed global variable (which is designated to .bss),
-                // we just manually set its content to all zero in .data section.
+                emit!("  .bss");
+                emit!("{}:", global_decl.obj.name);
                 emit!("  .zero {}", sizeof(&global_decl.obj.ty));
             }
         }

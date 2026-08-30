@@ -2272,7 +2272,8 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                 }
                 Initializer_Type::Init_List(init_list) => {
                     if init_list.len() > 1 {
-                        let error_info = format!("Excess elements for initialize a scalar variable: you can provide at most 1 element in the init_list, but the number of elements in the init_list you given is {}.", init_list.len());
+                        let error_info = format!("Excess elements for initialize a scalar variable: you can provide \
+                        at most 1 element in the init_list, but the number of elements in the init_list you given is {}.", init_list.len());
                         report_semantic_error(span, &error_info);
                     }
                     if init_list.len() == 0 {
