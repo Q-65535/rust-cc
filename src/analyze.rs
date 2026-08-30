@@ -2122,6 +2122,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
     let span = init.span;
     match ty {
         ArrayOf(element_type, size) => {
+            let array_len_omitted = (*size == 0);
             let size = *size;
             let mut new_init_list = Vec::new();
             match &init.content {
@@ -2168,61 +2169,75 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             exit(1);
                         }
                     } else {
-                        let error_info = format!("you are trying to use scalar initiaizer to init an array variable.");
+                        let error_info = format!("you are trying to use scalar initiaizer to init an array variable whose type is {:#?}.", ty);
                         report_semantic_error(span, &error_info);
                         exit(1);
                     }
                 }
                 Initializer_Type::Init_List(old_init_list) => {
-                    // We intentionaly ignore the case where the given array size is 0,
-                    // because we allow array length left unspecified: int arr[] = {3, 4 ,6};
-                    if old_init_list.len() > size && size != 0 {
-                        let error_info = format!("Excess elements in array initializer: array size is {}, but the number of elements in the initializer is {}.", size, old_init_list.len()); 
-                        report_semantic_error(span, &error_info);
-                    }
-                    if size == 0 {
-                        for cur_old_init in old_init_list {
-                            let new_init = normalize_init(&cur_old_init, element_type);
+                    // Now, with brace elision, the init_list is just a vec of arbitrary init.
+                    // We keep retrive init from the list to normalize and fill the new_init_list
+                    // until new_init_list.len() is equal to size, e.g., fully normalized.
+                    let mut list_index = 0;
+
+                    // @Cleanup?: The following code is similar to the code in normalize_init_list().
+                    if array_len_omitted {
+                        // If the array len is omitted, we gonna exhaust the given init_list.
+                        while list_index < old_init_list.len() {
+                            let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, element_type);
                             new_init_list.push(new_init);
+                            list_index += consumed_count;
                         }
                     } else {
-                        for i in 0..size {
-                            if i < old_init_list.len() {
-                                let new_init = normalize_init(&old_init_list[i], element_type);
-                                new_init_list.push(new_init);
-                            } else {
-                                let new_zero_init = create_zerolized_init(element_type, span);
-                                new_init_list.push(new_zero_init);
+                        while new_init_list.len() < size {
+                            let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, element_type);
+                            new_init_list.push(new_init);
+                            list_index += consumed_count;
+                            if list_index >= old_init_list.len() {
+                                fill_zero(&mut new_init_list, ty);
+                                break;
                             }
                         }
                     }
+
+                    if list_index < old_init_list.len() {
+                        let error_info = format!("Excess elements in array initializer: number of init consumed is {}, \
+                        but the number of elements in the initializer is {}.", list_index, old_init_list.len());
+                        report_semantic_error(span, &error_info);
+                        exit(1);
+                    }
                     let content = Initializer_Type::Init_List(new_init_list);
-                    return Initializer {content, span};
+                    return Initializer{content, span};
                 }
             }
         }
         Struct(st) => {
-            let member_count = st.members.len();
             let mut new_init_list = Vec::new();
+            // @Cleanup?: The following code is similar to the code in normalize_init_list().
             match &init.content {
                 Initializer_Type::Init_List(old_init_list) => {
-                    if old_init_list.len() > member_count {
-                        let error_info = format!("Excess elements in struct initializer: The struct
-                        only has {} members, but you provide {} init list element here.", member_count, old_init_list.len());
-                        report_semantic_error(span, &error_info);
-                    }
-                    for i in 0..member_count {
-                        let cur_member_type = &st.members[i].ty;
-                        if i < old_init_list.len() {
-                            let new_init = normalize_init(&old_init_list[i], cur_member_type);
-                            new_init_list.push(new_init);
-                        } else {
-                            let new_zero_init = create_zerolized_init(cur_member_type, span);
-                            new_init_list.push(new_zero_init);
+                    let mut list_index = 0;
+                    let member_count = st.members.len();
+                    let mut cur_member_index = 0;
+                    while new_init_list.len() < member_count {
+                        let cur_member = &st.members[cur_member_index];
+                        let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, &cur_member.ty);
+                        new_init_list.push(new_init);
+                        list_index += consumed_count;
+                        if list_index >= old_init_list.len() {
+                            fill_zero(&mut new_init_list, ty);
+                            break;
                         }
                     }
+
+                    if list_index < old_init_list.len() {
+                        let error_info = format!("Excess elements in struct initializer: number of init consumed is {}, \
+                        but the number of elements in the initializer is {}.", list_index, old_init_list.len());
+                        report_semantic_error(span, &error_info);
+                        exit(1);
+                    }
                     let content = Initializer_Type::Init_List(new_init_list);
-                    return Initializer {content, span};
+                    return Initializer{content, span};
                 }
                 Initializer_Type::Expr(expr) => {
                     return init.clone();
@@ -2267,6 +2282,165 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     }
                 }
             }
+        }
+    }
+}
+
+// What this function does: starting from 'start_index' in old_init_list, try to consume some of 
+// init in the old_init_list and use them to produce a normalized init for the given type 'ty'.
+// This function returns the number of init that has been consumed and the produced noramalized init.
+fn normalize_init_list(old_init_list: &Vec<Initializer>, start_index: usize, ty: &Type) -> (usize, Initializer) {
+    // @Temporary: For now, we just use a dummy span for convenience.
+    // Better to pass a span argument to to this function.
+    let dummy_span = Span{start_index: 0, end_index: 0};
+    if old_init_list.len() == 0 {
+        return (0, create_zerolized_init(ty, dummy_span));
+    }
+
+    let first_span = old_init_list[start_index].span;
+    let last_span = old_init_list[old_init_list.len() - 1].span;
+    let span = Span::merge(first_span, last_span);
+    let mut new_init_list = Vec::new();
+    let mut consumed_count = 0;
+    let mut list_index = start_index;
+    match ty {
+        ArrayOf(element_type, array_len) => {
+            let array_len_omitted = (*array_len == 0);
+            match &old_init_list[list_index].content {
+                Initializer_Type::Init_List(..) => {
+                    return (1, normalize_init(&old_init_list[list_index], ty));
+                }
+                // Brace elision case.
+                Initializer_Type::Expr(expr) => {
+                    // Special case: string literal expression needs to be converted to init_list.
+                    if let Str(s) = &expr.content {
+                        return (1, normalize_init(&old_init_list[list_index], ty));
+                    }
+                    // If the element type is not a basic type, we dive
+                    // deeper until that is.
+                    if matches!(**element_type, ArrayOf(..) | Struct(..) | Union(..)) {
+                        if array_len_omitted {
+                            // If the array len is omitted, we gonna exhaust the given init_list.
+                            while list_index < old_init_list.len() {
+                                let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, element_type);
+                                new_init_list.push(new_init);
+                                list_index += consumed_count;
+                            }
+                        } else {
+                            while new_init_list.len() < *array_len {
+                                let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, element_type);
+                                new_init_list.push(new_init);
+                                list_index += consumed_count;
+                                if list_index >= old_init_list.len() {
+                                    fill_zero(&mut new_init_list, ty);
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        if array_len_omitted {
+                            let err_info = format!("Array length must be specifyed when handling \
+                            brace elision case");
+                            report_semantic_error(span, &err_info);
+                            exit(1);
+                        }
+                        while new_init_list.len() < *array_len {
+                            let new_init = normalize_init(&old_init_list[list_index], element_type);
+                            new_init_list.push(new_init);
+                            list_index += 1;
+                            if list_index >= old_init_list.len() {
+                                fill_zero(&mut new_init_list, ty);
+                                break;
+                            }
+                        }
+                    }
+                    let content = Initializer_Type::Init_List(new_init_list);
+                    return (list_index - start_index, Initializer{content, span});
+                }
+            }
+        }
+        Struct(st) => {
+            match &old_init_list[list_index].content {
+                Initializer_Type::Init_List(..) => {
+                    return (1, normalize_init(&old_init_list[list_index], ty));
+                }
+                Initializer_Type::Expr(expr) => {
+                    let member_count = st.members.len();
+                    let mut cur_member_index = 0;
+                    while new_init_list.len() < member_count {
+                        let cur_member = &st.members[cur_member_index];
+                        if matches!(cur_member.ty, ArrayOf(..) | Struct(..) | Union(..)) {
+                            let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, &cur_member.ty);
+                            new_init_list.push(new_init);
+                            list_index += consumed_count;
+                            if list_index >= old_init_list.len() {
+                                fill_zero(&mut new_init_list, ty);
+                                break;
+                            }
+                        } else {
+                            let new_init = normalize_init(&old_init_list[list_index], &cur_member.ty);
+                            new_init_list.push(new_init);
+                            list_index += 1;
+                            if list_index >= old_init_list.len() {
+                                fill_zero(&mut new_init_list, ty);
+                                break;
+                            }
+                        }
+                        cur_member_index += 1;
+                    }
+                    let content = Initializer_Type::Init_List(new_init_list);
+                    return (list_index - start_index, Initializer{content, span});
+                }
+            }
+        }
+        Union(st) => {
+            match &old_init_list[list_index].content {
+                Initializer_Type::Init_List(..) => {
+                    return (1, normalize_init(&old_init_list[list_index], ty));
+                }
+                Initializer_Type::Expr(expr) => {
+                    let first_member = &st.members[0];
+                    if matches!(first_member.ty, ArrayOf(..) | Struct(..) | Union(..)) {
+                        let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, &first_member.ty);
+                        new_init_list.push(new_init);
+                        list_index += consumed_count;
+                    } else {
+                        let new_init = normalize_init(&old_init_list[list_index], &first_member.ty);
+                        new_init_list.push(new_init);
+                        list_index += 1;
+                    }
+                    let content = Initializer_Type::Init_List(new_init_list);
+                    return (list_index - start_index, Initializer{content, span});
+                }
+            }
+        }
+        _ => {
+            return (1, normalize_init(&old_init_list[list_index], ty));
+        }
+    }
+}
+
+fn fill_zero(init_list: &mut Vec<Initializer>, ty: &Type) {
+    // @Temporary: Span info.
+    let span = Span{start_index: 0, end_index: 0};
+    match ty {
+        ArrayOf(element_type, array_len) => {
+            while init_list.len() < *array_len {
+                let zero_init = create_zerolized_init(element_type, span);
+                init_list.push(zero_init);
+            }
+        }
+        Struct(st) => {
+            while init_list.len() < st.members.len() {
+                let cur_fill_member_index = init_list.len();
+                let cur_fill_member_type = &st.members[cur_fill_member_index].ty;
+                let zero_init = create_zerolized_init(cur_fill_member_type, span);
+                init_list.push(zero_init);
+            }
+        }
+        _ => {
+            println!("Compiler bug: Trying to fill zeros to a scalar type.");
+            exit(1);
         }
     }
 }

@@ -45,13 +45,19 @@ test/%.exe: build test/%.c
 # 	$(CC) -o- -E -P -C test/struct.c | $(RUST_CC) -o test/struct.s -
 # 	$(CC) -o test/struct.exe test/struct.s -xc test/common
 
-# `make struct`: build and run just the struct.c test.
 single_test:
 	cargo build
 	$(CC) -E -P -C test/initializer.c -o test/initializer.i
 	$(RUST_CC) -o test/initializer.s test/initializer.i
 	$(CC) -o initializer.exe test/initializer.s -xc test/common
 	echo initializer.exe; ./initializer.exe || exit 1; echo;
+
+my_test:
+	cargo build
+	$(CC) -E -P -C test/mytest.c -o test/mytest.i
+	$(RUST_CC) -o test/mytest.s test/mytest.i
+	$(CC) -o mytest.exe test/mytest.s -xc test/common
+	echo mytest.exe; ./mytest.exe || exit 1; echo;
 
 local_test:
 	rm -f test.s
@@ -85,4 +91,4 @@ test: clean old_test
 # file of the same name happens to exist in the directory.
 .PHONY: build rebuild test clean
 
-#   gcc -E -P -C test/initializer.c -o test/initializer.i
+#   gcc -E -P -C test/mytest.c -o test/mytest.i
