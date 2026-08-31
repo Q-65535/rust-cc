@@ -469,7 +469,7 @@ impl ProgramAnalyzer {
                         init_data.append(&mut cur_init_data);
                     }
                     // Fill the trailing padding for this struct.
-                    while data_bytes_count(&init_data) != st.size {
+                    while data_bytes_count(&init_data) < st.size {
                         init_data.push(ASM_Byte(0));
                     }
                     return init_data;
@@ -2193,18 +2193,23 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, element_type);
                             new_init_list.push(new_init);
                             list_index += consumed_count;
-                            if list_index >= old_init_list.len() {
+                            // If the old_init_list is all consumed, and new_init_list still doesn't have
+                            // enough initializers to match the the array len, we fill zeros.
+                            if list_index >= old_init_list.len() && new_init_list.len() < size {
                                 fill_zero(&mut new_init_list, ty);
                                 break;
                             }
                         }
                     }
-
                     if list_index < old_init_list.len() {
                         let error_info = format!("Excess elements in array initializer: number of init consumed is {}, \
                         but the number of elements in the initializer is {}.", list_index, old_init_list.len());
                         report_semantic_error(span, &error_info);
                         exit(1);
+                    }
+
+                    if !array_len_omitted {
+                        debug_assert!(new_init_list.len() == size);
                     }
                     let content = Initializer_Type::Init_List(new_init_list);
                     return Initializer{content, span};
@@ -2224,10 +2229,13 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                         let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, &cur_member.ty);
                         new_init_list.push(new_init);
                         list_index += consumed_count;
-                        if list_index >= old_init_list.len() {
+                        // If the old_init_list is all consumed, and new_init_list still doesn't have
+                        // enough initializers to match the member_count, we fill zeros.
+                        if list_index >= old_init_list.len() && new_init_list.len() < member_count {
                             fill_zero(&mut new_init_list, ty);
                             break;
                         }
+                        cur_member_index += 1;
                     }
 
                     if list_index < old_init_list.len() {
@@ -2236,6 +2244,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                         report_semantic_error(span, &error_info);
                         exit(1);
                     }
+                    debug_assert!(new_init_list.len() == member_count);
                     let content = Initializer_Type::Init_List(new_init_list);
                     return Initializer{content, span};
                 }
@@ -2340,18 +2349,31 @@ fn normalize_init_list(old_init_list: &Vec<Initializer>, start_index: usize, ty:
                         }
                     } else {
                         if array_len_omitted {
-                            let err_info = format!("Array length must be specifyed when handling \
-                            brace elision case");
-                            report_semantic_error(span, &err_info);
-                            exit(1);
-                        }
-                        while new_init_list.len() < *array_len {
-                            let new_init = normalize_init(&old_init_list[list_index], element_type);
-                            new_init_list.push(new_init);
-                            list_index += 1;
-                            if list_index >= old_init_list.len() {
-                                fill_zero(&mut new_init_list, ty);
-                                break;
+                            // @TODO: Add is_flexible member to array type.
+                            // @Temporary
+                            let is_flexible = true;
+                            if is_flexible {
+                                while list_index < old_init_list.len() {
+                                    let new_init = normalize_init(&old_init_list[list_index], element_type);
+                                    new_init_list.push(new_init);
+                                    list_index += 1;
+                                }
+                            } else {
+                                let err_info = format!("Array length must be specifyed when handling \
+                                brace elision case");
+                                report_semantic_error(span, &err_info);
+                                exit(1);
+                            }
+
+                        } else {
+                            while new_init_list.len() < *array_len {
+                                let new_init = normalize_init(&old_init_list[list_index], element_type);
+                                new_init_list.push(new_init);
+                                list_index += 1;
+                                if list_index >= old_init_list.len() {
+                                    fill_zero(&mut new_init_list, ty);
+                                    break;
+                                }
                             }
                         }
                     }
