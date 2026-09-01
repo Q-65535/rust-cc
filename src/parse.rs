@@ -842,8 +842,20 @@ impl Parser {
                 self.expect(&LParen)?;
                 let mut params: Vec<Parameter> = Vec::new();
 
-                while !matches!(self.cur_token().kind, RParen | Eof) {
+                'a: while !matches!(self.cur_token().kind, RParen | Eof) {
                     let decl_specs = self.parse_decl_specs()?;
+                    // Special case: void parameter
+                    for decl_spec in &decl_specs {
+                        if decl_spec.content == Decl_Spec_Kind::Void {
+                            if params.len() > 0 || decl_specs.len() > 1 {
+                                let error_info = format!("'void' must be the only parameter and unnamed");
+                                let error_info = error_span(decl_spec.span, &error_info);
+                                return Err(error_info);
+                            } else {
+                                break 'a;
+                            }
+                        }
+                    }
                     let declarator = self.parse_declarator()?;
                     let param = Parameter{decl_specs, declarator};
                     params.push(param);
