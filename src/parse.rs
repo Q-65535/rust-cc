@@ -456,13 +456,19 @@ impl Parser {
     }
 
     pub fn sync_parse_point(&mut self) {
-        while !matches!(self.cur_token().kind, Semicolon | RBrace | Eof) {
-            self.bump();
+        // @Temporary: We need to figure out a correct way to sync parse point.
+        for e in &self.syntax_errors {
+            println!("{}", e);
         }
+        exit(1);
 
-        if self.at(&Semicolon) {
-            self.bump();
-        }
+        // while !matches!(self.cur_token().kind, Semicolon | RBrace | Eof) {
+        //     self.bump();
+        // }
+
+        // if self.at(&Semicolon) {
+        //     self.bump();
+        // }
     }
 
     pub fn parse(mut self) -> (Program, Vec<String>) {
@@ -842,17 +848,17 @@ impl Parser {
                 self.expect(&LParen)?;
                 let mut params: Vec<Parameter> = Vec::new();
 
-                'a: while !matches!(self.cur_token().kind, RParen | Eof) {
+                'parse_params_loop: while !matches!(self.cur_token().kind, RParen | Eof) {
                     let decl_specs = self.parse_decl_specs()?;
                     // Special case: void parameter
                     for decl_spec in &decl_specs {
                         if decl_spec.content == Decl_Spec_Kind::Void {
                             if params.len() > 0 || decl_specs.len() > 1 {
-                                let error_info = format!("'void' must be the only parameter and unnamed");
+                                let error_info = format!("'void' must be the only parameter and the only decl_spec and unnamed");
                                 let error_info = error_span(decl_spec.span, &error_info);
                                 return Err(error_info);
                             } else {
-                                break 'a;
+                                break 'parse_params_loop;
                             }
                         }
                     }
