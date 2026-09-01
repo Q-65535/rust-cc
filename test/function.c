@@ -1,6 +1,6 @@
 #include "test.h"
 
-int ret3(int a, void) {
+int ret3(void) {
   return 3;
   return 5;
 }
