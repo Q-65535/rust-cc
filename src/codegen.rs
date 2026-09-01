@@ -98,6 +98,7 @@ impl Generator {
         for global_decl in &program.global_decls {
             emit!("");
             emit!("  .globl {}", global_decl.obj.name);
+            emit!("  .align {}", global_decl.obj.ty.align());
             if let Some(data_directives) = &global_decl.init_data {
                 emit!("  .data");
                 emit!("{}:", global_decl.obj.name);
