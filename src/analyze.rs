@@ -22,6 +22,7 @@ use crate::common::{self, *};
 pub struct Symbol_Attribute {
     pub is_typedef: bool,
     pub is_static:  bool,
+    pub is_extern:  bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,7 +95,9 @@ pub struct Obj {
     pub ty: Type,
     // this offset should be based on %rbp
     pub offset: usize,
+    // If obj is_global or is_extern, the offset field has no meaning.
     pub is_global: bool,
+    pub is_extern: bool,
     // @TODO: Add position info.
     // When a variable is already defined, the compiler should tell where the variable is defined.
 }
@@ -419,7 +422,10 @@ impl ProgramAnalyzer {
                 init_data = Some(self.gen_init_data(&normalized_init, &final_type));
             }
             
-            let object = create_global_obj(&name, &final_type);
+            let mut object = create_global_obj(&name, &final_type);
+            if symbol_attribute.is_extern {
+                object.is_extern = true;
+            }
             self.scope_manager.add_object(object.clone());
             // A function declarator with no body (e.g. `int printf();`) is a
             // prototype, not a variable definition. Register it in scope so
@@ -684,7 +690,7 @@ impl ProgramAnalyzer {
         for item in items {
             match item {
                 Stmt(stmt) => stmts.push(self.analyze_stmt(stmt)),
-                Decl(decl) => stmts.append(&mut self.analyze_decl(decl)),
+                Decl(decl) => stmts.append(&mut self.analyze_local_decl(decl)),
             }
         }
         stmts
@@ -718,7 +724,7 @@ impl ProgramAnalyzer {
 
 
     // After analyzation, declarations are all resolved to creating obj and assignment statement.
-    fn analyze_decl(&mut self, decl: &Declaration) -> Vec<ir::StmtType> {
+    fn analyze_local_decl(&mut self, decl: &Declaration) -> Vec<ir::StmtType> {
         let mut stmts: Vec<ir::StmtType> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
         if symbol_attribute.is_typedef {
@@ -758,7 +764,14 @@ impl ProgramAnalyzer {
                 // @Fix: If it is a function declaration, we shouldn't allocate
                 // stack space to it? But currently create_local_obj() will definitely
                 // allocate space accroding to the size of the given type.
-                let obj = self.create_local_obj(&final_type, &name);
+
+                let obj = if symbol_attribute.is_extern {
+                    let mut obj = create_global_obj(&name, &final_type);
+                    obj.is_extern = true;
+                    obj
+                } else {
+                    self.create_local_obj(&final_type, &name)
+                };
                 self.scope_manager.add_object(obj.clone());
             }
         }
@@ -872,6 +885,10 @@ impl ProgramAnalyzer {
                     var_attribute.is_typedef = true;
                     continue;
                 },
+                Decl_Spec_Kind::Extern => {
+                    var_attribute.is_extern = true;
+                    continue;
+                },
                 Decl_Spec_Kind::Static => {
                     var_attribute.is_static = true;
                     continue;
@@ -935,9 +952,11 @@ impl ProgramAnalyzer {
                 }
             };
         }
-        if var_attribute.is_static && var_attribute.is_typedef {
-            let error_info = format!("typedef and static may not be used together.");
-            report_semantic_error(whole_span, &error_info);
+        if var_attribute.is_typedef {
+            if var_attribute.is_static || var_attribute.is_extern {
+                let error_info = format!("typedef may not be used together with static or extern.");
+                report_semantic_error(whole_span, &error_info);
+            }
         }
         return (cur_type, var_attribute);
     }
@@ -1094,7 +1113,7 @@ impl ProgramAnalyzer {
         let mut size: usize = sizeof(ty);
         let aligned_offset = align_to(self.current_local_var_offset, ty.align());
         self.current_local_var_offset = aligned_offset;
-        let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.current_local_var_offset, is_global: false};
+        let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.current_local_var_offset, is_global: false, is_extern: false};
         self.current_local_var_offset += size;
         obj
     }
@@ -1138,7 +1157,7 @@ impl ProgramAnalyzer {
                 if let Some(init) = init {
                     match init.as_ref() {
                         Decl(decl) => {
-                            let mut stmts_from_decl = self.analyze_decl(decl);
+                            let mut stmts_from_decl = self.analyze_local_decl(decl);
                             init_stmts.append(&mut stmts_from_decl);
                         }
                         Stmt(expr_stmt) => {
@@ -1512,11 +1531,9 @@ impl ProgramAnalyzer {
                                         casted_analyzed_args.push(analyzed_arg);
                                     }
                                 }
-
                                 let content = ExprType::FunCall(Box::new(ident), casted_analyzed_args);
                                 ir::Expr {content, ty, span}
-                            }
-                            else {
+                            } else {
                                 let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &obj_ty);
                                 report_semantic_error(ident.span, &error_message);
                                 exit(1);
@@ -1935,7 +1952,7 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
 fn create_global_obj(name: &str, base_type: &Type) -> Obj {
     let mut cur_type = base_type.clone();
     let mut size: usize = sizeof(base_type);
-    let obj = Obj{name: name.to_string(), ty: base_type.clone(), offset: 0, is_global: true};
+    let obj = Obj{name: name.to_string(), ty: base_type.clone(), offset: 0, is_global: true, is_extern: false};
     obj
 }
 

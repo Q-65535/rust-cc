@@ -45,7 +45,7 @@ pub enum TokenKind {
     // Keywords:
     Ret, If, Else, For, While,
     Sizeof, Typedef, Struct, LexEnum, Int, Char, _Bool, Union,
-    Long, Short, Void, _Atomic, Static, Goto, Break, Continue,
+    Long, Short, Void, _Atomic, Static, Extern, Goto, Break, Continue,
     Switch, Case, Default,
 
     Eof,
@@ -86,6 +86,7 @@ impl Lexer {
             ("_Atomic".to_string(), _Atomic),
             ("_Bool".to_string(), _Bool),
             ("static".to_string(), Static),
+            ("extern".to_string(), Extern),
             ("goto".to_string(), Goto),
             ("break".to_string(), Break),
             ("continue".to_string(), Continue),

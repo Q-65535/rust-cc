@@ -96,6 +96,9 @@ impl Generator {
     pub fn gen_code(&mut self, program: AnalyzedProgram) {
         emit!(".file 1 \"{}\"", INPUT_PATH.lock().unwrap());
         for global_decl in &program.global_decls {
+            if global_decl.obj.is_extern {
+                continue;
+            }
             emit!("");
             emit!("  .globl {}", global_decl.obj.name);
             if let Some(data_directives) = &global_decl.init_data {
@@ -436,7 +439,7 @@ impl Generator {
     fn gen_addr(&mut self, expr: &Expr) {
         match &expr.content {
             Object(obj) => {
-                if obj.is_global {
+                if obj.is_global || obj.is_extern {
                     emit!("  lea {}(%rip), %rax", obj.name);
                 } else {
                     emit!("  lea -{}(%rbp), %rax", self.cur_function_stack_size-obj.offset);

@@ -96,7 +96,7 @@ pub struct Member {
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
 pub enum Decl_Spec_Kind {
     // Storage class specifiers
-    Typedef, Static,
+    Typedef, Static, Extern,
 
     Typedef_Name(String),
     Int,
@@ -536,7 +536,7 @@ impl Parser {
 
     fn is_decl_spec(&self, token: &Token) -> bool {
         match &token.kind {
-            (Struct | Union | Static | LexEnum | Int | Long | Short | Char | _Bool | Void | Typedef) => true,
+            (Struct | Union | Static | LexEnum | Int | Long | Short | Char | _Bool | Void | Typedef | Extern) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -559,6 +559,10 @@ impl Parser {
                 TokenKind::Typedef => {
                     self.bump();
                     Decl_Spec_Kind::Typedef
+                },
+                TokenKind::Extern => {
+                    self.bump();
+                    Decl_Spec_Kind::Extern
                 },
                 TokenKind::Static => {
                     self.bump();
