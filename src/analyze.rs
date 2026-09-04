@@ -422,10 +422,11 @@ impl ProgramAnalyzer {
                 init_data = Some(self.gen_init_data(&normalized_init, &final_type));
             }
             
-            let mut object = create_global_obj(&name, &final_type);
-            if symbol_attribute.is_extern {
-                object.is_extern = true;
-            }
+            let object = if symbol_attribute.is_extern {
+                create_extern_obj(&name, &final_type)
+            } else {
+                create_global_obj(&name, &final_type)
+            };
             self.scope_manager.add_object(object.clone());
             // A function declarator with no body (e.g. `int printf();`) is a
             // prototype, not a variable definition. Register it in scope so
@@ -716,7 +717,7 @@ impl ProgramAnalyzer {
             report_semantic_error(param.declarator.span, &err_info);
             exit(1);
         } else {
-            let obj = self.create_local_obj(&final_type, &name);
+            let obj = self.create_local_obj(&name, &final_type);
             self.scope_manager.add_object(obj.clone());
             return obj;
         }
@@ -748,7 +749,7 @@ impl ProgramAnalyzer {
                         final_type = ArrayOf(element_type.clone(), infered_array_len);
                     }
                 }
-                let obj = self.create_local_obj(&final_type, &name);
+                let obj = self.create_local_obj(&name, &final_type);
                 self.scope_manager.add_object(obj.clone());
 
                 let mut obj_expr = self.gen_expr_from_obj(&obj, cur_declarator.span);
@@ -765,14 +766,13 @@ impl ProgramAnalyzer {
                 // stack space to it? But currently create_local_obj() will definitely
                 // allocate space accroding to the size of the given type.
 
-                let obj = if symbol_attribute.is_extern {
-                    let mut obj = create_global_obj(&name, &final_type);
-                    obj.is_extern = true;
-                    obj
+
+                let object = if symbol_attribute.is_extern {
+                    create_extern_obj(&name, &final_type)
                 } else {
-                    self.create_local_obj(&final_type, &name)
+                    self.create_local_obj(&name, &final_type)
                 };
-                self.scope_manager.add_object(obj.clone());
+                self.scope_manager.add_object(object);
             }
         }
         stmts
@@ -1107,7 +1107,7 @@ impl ProgramAnalyzer {
     }
 
 
-    fn create_local_obj(&mut self, ty: &Type, name: &str) -> Obj {
+    fn create_local_obj(&mut self, name: &str, ty: &Type) -> Obj {
         debug_assert!(!self.scope_manager.contains_symbol_at_current_scope(name));
 
         let mut size: usize = sizeof(ty);
@@ -1621,7 +1621,7 @@ impl ProgramAnalyzer {
     fn to_assign(&mut self, lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Expr {
         let span = Span::merge(lhs.span, rhs.span);
         let lhs_addr_expr = gen_addr_of_expr(lhs);
-        let temp_obj = self.create_local_obj(&lhs_addr_expr.ty, "");
+        let temp_obj = self.create_local_obj("", &lhs_addr_expr.ty);
         let temp_obj_expr = self.gen_expr_from_obj(&temp_obj, span);
         let expr_1 = gen_assign_expr(temp_obj_expr.clone(), lhs_addr_expr); // tmp = &A
 
@@ -1949,11 +1949,24 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
     }
 }
 
+fn create_extern_obj(name: &str, base_type: &Type) -> Obj {
+    Obj{
+        name: name.to_string(),
+        ty: base_type.clone(),
+        offset: 0,
+        is_global: false,
+        is_extern: true,
+    }
+}
+
 fn create_global_obj(name: &str, base_type: &Type) -> Obj {
-    let mut cur_type = base_type.clone();
-    let mut size: usize = sizeof(base_type);
-    let obj = Obj{name: name.to_string(), ty: base_type.clone(), offset: 0, is_global: true, is_extern: false};
-    obj
+    Obj{
+        name: name.to_string(),
+        ty: base_type.clone(),
+        offset: 0,
+        is_global: true,
+        is_extern: false,
+    }
 }
 
 fn report_semantic_error(span: Span, error_info: &str) {
