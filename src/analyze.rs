@@ -45,7 +45,7 @@ pub enum Type {
 use Type::*;
 
 impl Type {
-    fn align(&self) -> usize {
+    pub fn align(&self) -> usize {
         match self {
             Pointer_To(_) => 8,
             Type::Int => 4,
