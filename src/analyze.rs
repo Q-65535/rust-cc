@@ -1567,6 +1567,21 @@ impl ProgramAnalyzer {
                 let content = ir::ExprType::Integer(size.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
+            Alignof_Expr(expr_content) => {
+                let content = self.analyze_expr(expr_content);
+                let align = content.ty.align();
+                // @Future: The data type of sizeof expression is u64.
+                let ty = Type::Int;
+                let content = ir::ExprType::Integer(align.try_into().unwrap());
+                ir::Expr {content, ty, span}
+            }
+            Alignof_Type_Name(type_name) => {
+                let the_type = self.resolve_type_name(type_name);
+                let align = the_type.align();
+                let ty = Type::Int;
+                let content = ir::ExprType::Integer(align.try_into().unwrap());
+                ir::Expr {content, ty, span}
+            }
             Cast(to_be_casted_expr, type_name) => {
                 let mut analyzed_expr = self.analyze_expr(to_be_casted_expr);
                 let to_type = self.resolve_type_name(type_name);

@@ -214,6 +214,8 @@ pub enum ExprType {
     FunCall(Box<Expr>, Vec<Expr>),
     Sizeof_Expr(Box<Expr>),
     Sizeof_Type_Name(Type_Name),
+    Alignof_Expr(Box<Expr>),
+    Alignof_Type_Name(Type_Name),
     Cast(Box<Expr>, Type_Name),
     Str(Vec<u8>),
     // Parenthesized expression: a transparent wrapper that records the span of
@@ -1228,18 +1230,25 @@ impl Parser {
                 let expr = Expr::new(AddrOf(Box::new(operand)), span);
                 Ok(expr)
             },
-            TokenKind::Sizeof => {
-                self.expect(&Sizeof)?;
-                let (expr_content, end_index) = if self.at(&LParen)
-                    && self.is_type_spec(self.peek_token()) {
+            Sizeof | _Alignof => {
+                self.bump();
+                let (expr_content, end_index) = if self.at(&LParen) && self.is_type_spec(self.peek_token()) {
                     self.expect(&LParen)?;
                     let type_name = self.parse_type_name()?;
                     let close_paren = self.expect(&RParen)?;
-                    (Sizeof_Type_Name(type_name), close_paren.span.end_index)
+                    if prefix_starting_token.kind == Sizeof {
+                        (Sizeof_Type_Name(type_name), close_paren.span.end_index)
+                    } else {
+                        (Alignof_Type_Name(type_name), close_paren.span.end_index)
+                    }
                 } else {
                     let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                     let end_index = operand.span.end_index;
-                    (Sizeof_Expr(Box::new(operand)), end_index)
+                    if prefix_starting_token.kind == Sizeof {
+                        (Sizeof_Expr(Box::new(operand)), end_index)
+                    } else {
+                        (Alignof_Expr(Box::new(operand)), end_index)
+                    }
                 };
                 let span = Span{
                     start_index: prefix_starting_token.span.start_index,
