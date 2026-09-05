@@ -5,6 +5,7 @@ use crate::lex::{self, *};
 use crate::ir;
 use ir::OP;
 use ir::Data_Directive::{self, *};
+use ir::Global_Data_Decl;
 use ExprType::*;
 use Struct_Or_Union::*;
 use StmtType::*;
@@ -279,7 +280,7 @@ impl ScopeManager {
 }
 
 pub struct ProgramAnalyzer {
-    pub global_decls: Vec<ir::Declaration>,
+    pub global_data_decls: Vec<Global_Data_Decl>,
     pub scope_manager: ScopeManager,
     pub current_local_var_offset: usize,
     pub unique_stmt_labels_map_in_cur_function: HashMap<String, String>,
@@ -295,7 +296,7 @@ impl ProgramAnalyzer {
     pub fn new() -> Self {
         let scope = Scope::new();
         ProgramAnalyzer{
-                        global_decls: Vec::new(),
+                        global_data_decls: Vec::new(),
                         scope_manager: ScopeManager::new(),
                         current_local_var_offset: 0,
                         unique_stmt_labels_map_in_cur_function: HashMap::new(),
@@ -327,8 +328,8 @@ impl ProgramAnalyzer {
                     self.scope_manager.add_object(o);
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
-                    let mut batch_global_decls = self.analyze_global_decl(decl);
-                    self.global_decls.append(&mut batch_global_decls);
+                    let mut batch_global_data_decls = self.analyze_global_decl(decl);
+                    self.global_data_decls.append(&mut batch_global_data_decls);
                 }
             }
         }
@@ -339,7 +340,7 @@ impl ProgramAnalyzer {
                 afuns.push(afun);
             }
         }
-        ir::AnalyzedProgram{afuns, global_decls: self.global_decls}
+        ir::AnalyzedProgram{afuns, global_data_decls: self.global_data_decls}
     }
 
     pub fn analyze_function(&mut self, fun: &mut Function) -> ir::Function {
@@ -393,8 +394,8 @@ impl ProgramAnalyzer {
         self.scope_manager.add_typedef_alias(&name, final_type);
     }
 
-    pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<ir::Declaration> {
-        let mut decls: Vec<ir::Declaration> = Vec::new();
+    pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<Global_Data_Decl> {
+        let mut decls: Vec<Global_Data_Decl> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
         if symbol_attribute.is_typedef {
             for init_declarator in &mut decl.init_declarators {
@@ -435,7 +436,7 @@ impl ProgramAnalyzer {
             if let Type::Func{..} = final_type {
                 continue;
             }
-            let analyzed_decl = ir::Declaration{obj: object.clone(), init_data};
+            let analyzed_decl = Global_Data_Decl{obj: object, init_data};
             decls.push(analyzed_decl);
         }
         decls
@@ -1591,8 +1592,8 @@ impl ProgramAnalyzer {
                 }
                 // extra \0 character at the end of the string.
                 data_directive_vec.push(ASM_Byte(0 as i64));
-                let global_decl = ir::Declaration{obj: global_obj.clone(), init_data: Some(data_directive_vec)};
-                self.global_decls.push(global_decl);
+                let global_decl = Global_Data_Decl{obj: global_obj.clone(), init_data: Some(data_directive_vec)};
+                self.global_data_decls.push(global_decl);
 
                 let unique_symbol = ExprType::Object(global_obj);
                 ir::Expr{content: unique_symbol, ty, span}

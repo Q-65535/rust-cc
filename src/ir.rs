@@ -75,7 +75,7 @@ pub struct Function {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Declaration {
+pub struct Global_Data_Decl {
     pub obj: Obj,
     pub init_data: Option<Vec<Data_Directive>>,
 }
@@ -133,7 +133,7 @@ pub struct RequestStructMember {
 
 pub struct AnalyzedProgram {
     pub afuns: Vec<Function>,
-    pub global_decls: Vec<Declaration>,
+    pub global_data_decls: Vec<Global_Data_Decl>,
 }
 
 // binary operators
