@@ -763,12 +763,8 @@ impl ProgramAnalyzer {
                     let err_info = format!("variable {} has incomplete type", name);
                     report_semantic_error(cur_declarator.span, &err_info);
                 }
-                // @Fix: If it is a function declaration, we shouldn't allocate
-                // stack space to it? But currently create_local_obj() will definitely
-                // allocate space accroding to the size of the given type.
-
-
-                let object = if symbol_attribute.is_extern {
+                // Function declaration is implicitly extern.
+                let matches!(&final_type, Type::Func{..}) || object = if symbol_attribute.is_extern {
                     create_extern_obj(&name, &final_type)
                 } else {
                     self.create_local_obj(&name, &final_type)
