@@ -764,7 +764,7 @@ impl ProgramAnalyzer {
                     report_semantic_error(cur_declarator.span, &err_info);
                 }
                 // Function declaration is implicitly extern.
-                let matches!(&final_type, Type::Func{..}) || object = if symbol_attribute.is_extern {
+                let object = if matches!(&final_type, Type::Func{..}) || symbol_attribute.is_extern {
                     create_extern_obj(&name, &final_type)
                 } else {
                     self.create_local_obj(&name, &final_type)
