@@ -413,8 +413,8 @@ impl ProgramAnalyzer {
             let mut init_data = None;
             if let Some(init) = &mut init_declarator.init {
                 let normalized_init = normalize_init(init, &final_type);
-                if let ArrayOf(element_type, size) = &final_type {
-                    if *size == 0 {
+                if let ArrayOf(element_type, array_len) = &final_type {
+                    if *array_len == 0 {
                         let infered_array_len = resolve_array_size_from_init(&normalized_init);
                         final_type = ArrayOf(element_type.clone(), infered_array_len);
                     }
@@ -443,14 +443,13 @@ impl ProgramAnalyzer {
     fn gen_init_data(&mut self, init: &Initializer, ty: &Type) -> Vec::<Data_Directive> {
         let span = init.span;
         match ty {
-            // @Naming: count is a better name than size?
-            ArrayOf(element_type, size) => {
+            ArrayOf(element_type, array_len) => {
                 if let Initializer_Type::Init_List(init_list) = &init.content {
-                    if *size != 0 {
-                        debug_assert!(init_list.len() == *size);
+                    if *array_len != 0 {
+                        debug_assert!(init_list.len() == *array_len);
                     }
                     // @WasteSpace: Actually the initial capacity is much larger than we need.
-                    let mut init_data = Vec::with_capacity(*size * sizeof(element_type));
+                    let mut init_data = Vec::with_capacity(*array_len * sizeof(element_type));
                     for (index, init) in init_list.iter().enumerate() {
                         let mut cur_init_data = self.gen_init_data(init, element_type);
                         init_data.append(&mut cur_init_data);
@@ -467,15 +466,17 @@ impl ProgramAnalyzer {
                     debug_assert!(init_list.len() == st.members.len());
                     let mut init_data = Vec::with_capacity(st.size);
                     for (index, init) in init_list.iter().enumerate() {
-                        // @Speed: This way of filling data is inefficient.
-                        while st.members[index].offset != data_bytes_count(&init_data) {
+                        let mut bytes_to_fill = st.members[index].offset - data_bytes_count(&init_data);
+                        // @Complain: Dude, I just want to iterate x times, why rust force me to write this ugly form...
+                        for _ in 0..bytes_to_fill {
                             init_data.push(ASM_Byte(0));
                         }
                         let mut cur_init_data = self.gen_init_data(init, &st.members[index].ty);
                         init_data.append(&mut cur_init_data);
                     }
                     // Fill the trailing padding for this struct.
-                    while data_bytes_count(&init_data) < st.size {
+                    let mut bytes_to_fill = data_bytes_count(&init_data) - st.size;
+                    for _ in 0..bytes_to_fill {
                         init_data.push(ASM_Byte(0));
                     }
                     return init_data;
@@ -742,8 +743,8 @@ impl ProgramAnalyzer {
             }
             if let Some(init) = &init_declarator.init {
                 let normalized_init = normalize_init(init, &final_type);
-                if let ArrayOf(element_type, size) = &final_type {
-                    if *size == 0 {
+                if let ArrayOf(element_type, array_len) = &final_type {
+                    if *array_len == 0 {
                         let infered_array_len = resolve_array_size_from_init(&normalized_init);
                         final_type = ArrayOf(element_type.clone(), infered_array_len);
                     }
@@ -752,7 +753,7 @@ impl ProgramAnalyzer {
                 self.scope_manager.add_object(obj.clone());
 
                 let mut obj_expr = self.gen_expr_from_obj(&obj, cur_declarator.span);
-                let mut assignment_expr_stmts = self.init(obj_expr, &normalized_init);
+                let mut assignment_expr_stmts = self.init_local_var(obj_expr, &normalized_init);
                 stmts.append(&mut assignment_expr_stmts);
             } else {
                 // If the type is an array with 0 length, i.e., incomplete array type,
@@ -778,20 +779,20 @@ impl ProgramAnalyzer {
         stmts
     }
 
-    fn init(&mut self, target_expr: ir::Expr, init: &Initializer) -> Vec<ir::StmtType> {
+    fn init_local_var(&mut self, target_expr: ir::Expr, init: &Initializer) -> Vec<ir::StmtType> {
         let span = target_expr.span;
         let mut stmts = Vec::new();
         match &target_expr.ty {
-            ArrayOf(element_type, size) => {
+            ArrayOf(element_type, array_len) => {
                 if let Initializer_Type::Init_List(init_list) = &init.content {
                     // The init argument passed to this function must be normalized,
                     // so we do the assertion:
-                    debug_assert!(init_list.len() == *size);
+                    debug_assert!(init_list.len() == *array_len);
                     for (index, init) in init_list.iter().enumerate() {
                         let array_offset_expr = gen_num_expr(index as i64, span);
                         let pointer_arithmatic_expr = gen_binary_expr(target_expr.clone(), array_offset_expr, OP::Plus);
                         let sub_target_expr = gen_deref_expr(pointer_arithmatic_expr);
-                        let mut init_stmts = self.init(sub_target_expr, init);
+                        let mut init_stmts = self.init_local_var(sub_target_expr, init);
                         stmts.append(&mut init_stmts);
                     }
                 } else {
@@ -812,7 +813,7 @@ impl ProgramAnalyzer {
                             let cur_member_type = st.members[index].ty.clone();
                             let content = ir::ExprType::RequestStructMember(Box::new(target_expr.clone()), cur_member_offset);
                             let requrst_struct_member_expr = ir::Expr{content, ty: cur_member_type, span};
-                            let mut init_stmts = self.init(requrst_struct_member_expr, init);
+                            let mut init_stmts = self.init_local_var(requrst_struct_member_expr, init);
                             stmts.append(&mut init_stmts);
                         }
                     }
@@ -834,7 +835,7 @@ impl ProgramAnalyzer {
                         let first_init = &init_list[0];
                         let content = ir::ExprType::RequestStructMember(Box::new(target_expr.clone()), 0);
                         let requrst_struct_member_expr = ir::Expr{content, ty: first_member_type, span};
-                        let mut init_stmts = self.init(requrst_struct_member_expr, first_init);
+                        let mut init_stmts = self.init_local_var(requrst_struct_member_expr, first_init);
                         stmts.append(&mut init_stmts);
                     }
                     Initializer_Type::Expr(init_expr) => {
@@ -2138,9 +2139,9 @@ fn resolve_array_size_from_init(init: &Initializer) -> usize {
 fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
     let span = init.span;
     match ty {
-        ArrayOf(element_type, size) => {
-            let array_len_omitted = (*size == 0);
-            let size = *size;
+        ArrayOf(element_type, array_len) => {
+            let array_len_omitted = (*array_len == 0);
+            let array_len = *array_len;
             let mut new_init_list = Vec::new();
             match &init.content {
                 Initializer_Type::Expr(init_expr) => {
@@ -2156,7 +2157,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     // it just simply ignore the ending '\0' in the string literal.
                     if let Str(s) = &init_expr.content {
                         if **element_type == Char {
-                            if s.len() > size && size != 0 {
+                            if s.len() > array_len && array_len != 0 {
                                 let error_info = format!("initializer-string for array of {:?} is too long", element_type);
                                 report_semantic_error(span, &error_info);
                                 exit(1);
@@ -2170,7 +2171,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             }
                             // If the array length left unspecified, we manually add an extra '\0' at the end of the initializer.
                             // Then, the arary length actually is s.len()+1.
-                            if size == 0 {
+                            if array_len == 0 {
                                 // @Duplication_2
                                 let char_init_expr_content = Integer(0);
                                 let char_init_expr = Expr{content: char_init_expr_content, span};
@@ -2206,13 +2207,13 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             list_index += consumed_count;
                         }
                     } else {
-                        while new_init_list.len() < size {
+                        while new_init_list.len() < array_len {
                             let (consumed_count, new_init) = normalize_init_list(old_init_list, list_index, element_type);
                             new_init_list.push(new_init);
                             list_index += consumed_count;
                             // If the old_init_list is all consumed, and new_init_list still doesn't have
                             // enough initializers to match the the array len, we fill zeros.
-                            if list_index >= old_init_list.len() && new_init_list.len() < size {
+                            if list_index >= old_init_list.len() && new_init_list.len() < array_len {
                                 fill_zero(&mut new_init_list, ty);
                                 break;
                             }
@@ -2226,7 +2227,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     }
 
                     if !array_len_omitted {
-                        debug_assert!(new_init_list.len() == size);
+                        debug_assert!(new_init_list.len() == array_len);
                     }
                     let content = Initializer_Type::Init_List(new_init_list);
                     return Initializer{content, span};
@@ -2487,9 +2488,9 @@ fn fill_zero(init_list: &mut Vec<Initializer>, ty: &Type) {
 
 fn create_zerolized_init(ty: &Type, span: Span) -> Initializer {
     match ty {
-        ArrayOf(element_type, size) => {
+        ArrayOf(element_type, array_len) => {
             let mut init_list = Vec::new();
-            for i in 0..*size {
+            for i in 0..*array_len {
                 let cur_init = create_zerolized_init(element_type, span);
                 init_list.push(cur_init);
             }
