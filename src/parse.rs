@@ -107,6 +107,8 @@ pub enum Decl_Spec_Kind {
     Void,
     Struct_Union(Struct_Union_Specifier),
     Enum(Enum_Specifier),
+    Alignas_Expr(Expr),
+    Alignas_Type_Name(Type_Name),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -544,7 +546,8 @@ impl Parser {
 
     fn is_decl_spec(&self, token: &Token) -> bool {
         match &token.kind {
-            (Struct | Union | Static | LexEnum | Int | Long | Short | Char | _Bool | Void | Typedef | Extern) => true,
+            (Struct | Union | Static | LexEnum | Int | Long | Short |
+            Char | _Bool | Void | Typedef | Extern | _Alignas) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -571,6 +574,19 @@ impl Parser {
                 TokenKind::Extern => {
                     self.bump();
                     Decl_Spec_Kind::Extern
+                },
+                TokenKind::_Alignas => {
+                    self.bump();
+                    // @Simplify: Simplify if eval process.
+                    if self.at(&LParen) && self.is_type_spec(self.peek_token()) {
+                        self.expect(&LParen)?;
+                        let type_name = self.parse_type_name()?;
+                        self.expect(&RParen)?;
+                        Decl_Spec_Kind::Alignas_Type_Name(type_name)
+                    } else {
+                        let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
+                        Decl_Spec_Kind::Alignas_Expr(operand)
+                    }
                 },
                 TokenKind::Static => {
                     self.bump();

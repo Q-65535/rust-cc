@@ -24,6 +24,7 @@ pub struct Symbol_Attribute {
     pub is_typedef: bool,
     pub is_static:  bool,
     pub is_extern:  bool,
+    pub align:     usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +100,7 @@ pub struct Obj {
     // If obj is_global or is_extern, the offset field has no meaning.
     pub is_global: bool,
     pub is_extern: bool,
+    // @Refactor?: Maybe we should add align field to this obj struct?
     // @TODO: Add position info.
     // When a variable is already defined, the compiler should tell where the variable is defined.
 }
@@ -436,7 +438,12 @@ impl ProgramAnalyzer {
             if let Type::Func{..} = final_type {
                 continue;
             }
-            let analyzed_decl = Global_Data_Decl{obj: object, init_data};
+            let align = if symbol_attribute.align != 0 {
+                symbol_attribute.align
+            } else {
+                object.ty.align()
+            };
+            let analyzed_decl = Global_Data_Decl{obj: object, align, init_data};
             decls.push(analyzed_decl);
         }
         decls
@@ -751,7 +758,11 @@ impl ProgramAnalyzer {
                         final_type = ArrayOf(element_type.clone(), infered_array_len);
                     }
                 }
-                let obj = self.create_local_obj(&name, &final_type);
+                let obj = if symbol_attribute.align != 0 {
+                    self.create_local_obj_with_align(&name, &final_type, symbol_attribute.align)
+                } else {
+                    self.create_local_obj(&name, &final_type)
+                };
                 self.scope_manager.add_object(obj.clone());
 
                 let mut obj_expr = self.gen_expr_from_obj(&obj, cur_declarator.span);
@@ -768,7 +779,11 @@ impl ProgramAnalyzer {
                 let object = if matches!(&final_type, Type::Func{..}) || symbol_attribute.is_extern {
                     create_extern_obj(&name, &final_type)
                 } else {
-                    self.create_local_obj(&name, &final_type)
+                    if symbol_attribute.align != 0 {
+                        self.create_local_obj_with_align(&name, &final_type, symbol_attribute.align)
+                    } else {
+                        self.create_local_obj(&name, &final_type)
+                    }
                 };
                 self.scope_manager.add_object(object);
             }
@@ -879,6 +894,23 @@ impl ProgramAnalyzer {
         let mut cur_type = Type::Int;
         for spec in decl_specs {
             match &spec.content {
+                Decl_Spec_Kind::Alignas_Type_Name(type_name) => {
+                    let the_type = self.resolve_type_name(type_name);
+                    var_attribute.align = the_type.align();
+                    continue;
+                }
+                Decl_Spec_Kind::Alignas_Expr(operand) => {
+                    let analyzed_expr = self.analyze_expr(operand);
+                    let result = eval_pure_constant(&analyzed_expr);
+                    if let Ok(num) = result {
+                        var_attribute.align = num as usize;
+                    } else {
+                        let error_info = format!("The operand of _Alignas must be constant \
+                        but this is not.");
+                        report_semantic_error(operand.span, &error_info);
+                    }
+                    continue;
+                }
                 Decl_Spec_Kind::Typedef => {
                     var_attribute.is_typedef = true;
                     continue;
@@ -968,15 +1000,16 @@ impl ProgramAnalyzer {
         let mut the_type;
         if let Some(members) = &st.members {
             for m in members {
+                // @Simplify?: Figure out a better way to handle memebers, e.g., the offset
+                // argument may be omitted?
                 let mut am = self.analyze_struct_member(m, offset);
-                let member_align = am.ty.align();
                 if (st.kind == Is_Struct) {
-                    offset = align_to(offset, member_align);
+                    offset = align_to(offset, am.align);
                     am.offset = offset;
                     offset += sizeof(&am.ty);
                 }
-                if struct_align < member_align {
-                    struct_align = member_align;
+                if struct_align < am.align {
+                    struct_align = am.align;
                 }
                 if max_member_size < sizeof(&am.ty) {
                     max_member_size = sizeof(&am.ty);
@@ -1091,9 +1124,15 @@ impl ProgramAnalyzer {
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&member.decl_specs);
         let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &member.declarator);
+        let align = if symbol_attribute.align != 0 {
+            symbol_attribute.align
+        } else {
+            final_type.align()
+        };
         ir::Member{
             ty: final_type,
             name: name.clone(),
+            align,
             offset,
         }
     }
@@ -1104,6 +1143,16 @@ impl ProgramAnalyzer {
         ir::Expr{content, ty: o.ty.clone(), span}
     }
 
+    fn create_local_obj_with_align(&mut self, name: &str, ty: &Type, align: usize) -> Obj {
+        debug_assert!(!self.scope_manager.contains_symbol_at_current_scope(name));
+
+        let mut size: usize = sizeof(ty);
+        let aligned_offset = align_to(self.current_local_var_offset, align);
+        self.current_local_var_offset = aligned_offset;
+        let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.current_local_var_offset, is_global: false, is_extern: false};
+        self.current_local_var_offset += size;
+        obj
+    }
 
     fn create_local_obj(&mut self, name: &str, ty: &Type) -> Obj {
         debug_assert!(!self.scope_manager.contains_symbol_at_current_scope(name));
@@ -1607,7 +1656,7 @@ impl ProgramAnalyzer {
                 }
                 // extra \0 character at the end of the string.
                 data_directive_vec.push(ASM_Byte(0 as i64));
-                let global_decl = Global_Data_Decl{obj: global_obj.clone(), init_data: Some(data_directive_vec)};
+                let global_decl = Global_Data_Decl{obj: global_obj.clone(), align: global_obj.ty.align(), init_data: Some(data_directive_vec)};
                 self.global_data_decls.push(global_decl);
 
                 let unique_symbol = ExprType::Object(global_obj);
