@@ -396,16 +396,16 @@ impl ProgramAnalyzer {
         self.scope_manager.add_typedef_alias(&name, final_type);
     }
 
-    pub fn analyze_global_decl(&mut self, decl: &mut Declaration) -> Vec::<Global_Data_Decl> {
+    pub fn analyze_global_decl(&mut self, decl: &Declaration) -> Vec::<Global_Data_Decl> {
         let mut decls: Vec<Global_Data_Decl> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
         if symbol_attribute.is_typedef {
-            for init_declarator in &mut decl.init_declarators {
+            for init_declarator in &decl.init_declarators {
                 self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
             }
             return decls;
         }
-        for init_declarator in &mut decl.init_declarators {
+        for init_declarator in &decl.init_declarators {
             let cur_declarator = &init_declarator.declarator;
             let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_declarator);
 
@@ -414,7 +414,7 @@ impl ProgramAnalyzer {
                 report_semantic_error(cur_declarator.span, &err_info);
             }
             let mut init_data = None;
-            if let Some(init) = &mut init_declarator.init {
+            if let Some(init) = &init_declarator.init {
                 let normalized_init = normalize_init(init, &final_type);
                 if let ArrayOf(element_type, array_len) = &final_type {
                     if *array_len == 0 {
@@ -735,14 +735,20 @@ impl ProgramAnalyzer {
 
     // After analyzation, declarations are all resolved to creating obj and assignment statement.
     fn analyze_local_decl(&mut self, decl: &Declaration) -> Vec<ir::StmtType> {
-        let mut stmts: Vec<ir::StmtType> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
         if symbol_attribute.is_typedef {
             for init_declarator in &decl.init_declarators {
                 self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
             }
-            return stmts;
+            return vec![];
         }
+        if symbol_attribute.is_static {
+            let mut batch_global_data_decls = self.analyze_global_decl(decl);
+            self.global_data_decls.append(&mut batch_global_data_decls);
+            return vec![];
+        }
+
+        let mut stmts: Vec<ir::StmtType> = Vec::new();
         for init_declarator in &decl.init_declarators {
             let cur_declarator = &init_declarator.declarator;
             let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_declarator);
