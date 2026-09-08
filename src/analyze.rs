@@ -1181,10 +1181,14 @@ impl ProgramAnalyzer {
                 StmtType::Ex(expr)
             },
             Return(expr) => {
-                let expr = self.analyze_expr(expr);
-                let casted_expr = cast(expr, &self.current_function_return_type);
-                StmtType::Return(casted_expr)
-            },
+                if let Some(expr) = expr {
+                    let analyzed_expr = self.analyze_expr(expr);
+                    let casted_expr = cast(analyzed_expr, &self.current_function_return_type);
+                    return StmtType::Return(Some(casted_expr));
+                } else {
+                    return StmtType::Return(None);
+                }
+            }
             Block(items) => {
                 let stmts = self.analyze_block_in_new_scope(items);
                 StmtType::Block(stmts)
@@ -1658,6 +1662,7 @@ impl ProgramAnalyzer {
                 return casted_expr;
             }
             CompLit(init_list, type_name) => {
+                // @Space: clone?
                 let content = Initializer_Type::Init_List(init_list.clone());
                 let init = Initializer{content, span};
                 let mut ty = self.resolve_type_name(type_name);

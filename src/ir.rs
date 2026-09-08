@@ -4,7 +4,7 @@ use crate::common::{self, *};
 #[derive(Debug, Clone, PartialEq)]
 pub enum StmtType {
     Ex(Expr),
-    Return(Expr),
+    Return(Option<Expr>),
     Block(Vec<StmtType>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
     For {init: Vec<StmtType>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>, end_label: String, continue_point_label: String},

@@ -9,7 +9,7 @@ use crate::common::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum StmtType {
     Ex(Expr),
-    Return(Expr),
+    Return(Option<Expr>),
     Block(Vec<BlockItem>),
     If(IfStmt),
     For(ForStmt),
@@ -905,7 +905,16 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<StmtType, String> {
         match &self.cur_token().kind {
-            TokenKind::Ret => Ok(Return(self.parse_ret_stmt()?)),
+            TokenKind::Ret => {
+                self.bump();
+                let return_value = if self.cur_token().kind == Semicolon {
+                    None
+                } else {
+                    Some(self.parse_expr(Lowest, Left_To_Right)?)
+                };
+                self.expect(&Semicolon)?;
+                return Ok(StmtType::Return(return_value));
+            }
             TokenKind::If => Ok(StmtType::If(self.parse_if_stmt()?)),
             TokenKind::For => Ok(StmtType::For(self.parse_for_stmt()?)),
             TokenKind::While => Ok(StmtType::For(self.parse_while_stmt()?)),
@@ -1036,13 +1045,6 @@ impl Parser {
 
         self.scope_manager.exit_current_scope();
         items
-    }
-
-    fn parse_ret_stmt(&mut self) -> Result<Expr, String> {
-        self.expect(&TokenKind::Ret)?;
-        let expr = self.parse_expr(Lowest, Left_To_Right)?;
-        self.expect(&Semicolon)?;
-        Ok(expr)
     }
 
     fn parse_for_stmt(&mut self) -> Result<ForStmt, String> {

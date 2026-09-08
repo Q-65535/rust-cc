@@ -175,7 +175,12 @@ impl Generator {
     fn stmt_gen(&mut self, stmt: &ir::StmtType) {
         match stmt {
             ir::StmtType::Ex(expr) => self.expr_gen(&expr),
-            ir::StmtType::Return(expr) =>self.ret_gen(&expr),
+            ir::StmtType::Return(expr) => {
+                if let Some(expr) = expr {
+                    self.expr_gen(expr);
+                }
+                emit!("  jmp .L.return.{}\n", self.cur_function_name);
+            }
             ir::StmtType::Block(item) =>self.block_gen(item),
             ir::StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
             ir::StmtType::For{init, cond, inc, then, end_label, continue_point_label} => self.for_gen(init, cond, inc, then, end_label, continue_point_label),
@@ -212,11 +217,6 @@ impl Generator {
         self.stmt_gen(body);
         
         emit!("{}:", end_label);
-    }
-
-    fn ret_gen(&mut self, expr: &ir::Expr) {
-        self.expr_gen(expr);
-        emit!("  jmp .L.return.{}\n", self.cur_function_name);
     }
 
     fn if_gen(&mut self, cond: &ir::Expr, then: &ir::StmtType, otherwise: &Option<Box<ir::StmtType>>) {
