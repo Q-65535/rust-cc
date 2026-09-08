@@ -97,9 +97,11 @@ pub struct Obj {
     pub ty: Type,
     // this offset should be based on %rbp
     pub offset: usize,
+    pub align: usize,
     // If obj is_global or is_extern, the offset field has no meaning.
     pub is_global: bool,
     pub is_extern: bool,
+    pub is_static: bool,
     // @Refactor?: Maybe we should add align field to this obj struct?
     // @TODO: Add position info.
     // When a variable is already defined, the compiler should tell where the variable is defined.
@@ -426,12 +428,14 @@ impl ProgramAnalyzer {
                 }
                 init_data = Some(self.gen_init_data(&normalized_init, &final_type));
             }
-            
-            let object = if symbol_attribute.is_extern {
-                create_extern_obj(&name, &final_type)
-            } else {
-                create_global_obj(&name, &final_type)
-            };
+            if symbol_attribute.align != 0 {
+                if symbol_attribute.align < final_type.align() {
+                    let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
+                    the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
+                    report_semantic_error(cur_declarator.span, &err_info);
+                }
+            }
+            let object = create_global_obj_with_attribute(&name, &final_type, &symbol_attribute);
             self.scope_manager.add_object(object.clone());
             // A function declarator with no body (e.g. `int printf();`) is a
             // prototype, not a variable definition. Register it in scope so
@@ -440,12 +444,7 @@ impl ProgramAnalyzer {
             if let Type::Func{..} = final_type {
                 continue;
             }
-            let align = if symbol_attribute.align != 0 {
-                symbol_attribute.align
-            } else {
-                object.ty.align()
-            };
-            let analyzed_decl = Global_Data_Decl{obj: object, align, init_data};
+            let analyzed_decl = Global_Data_Decl{obj: object, init_data};
             decls.push(analyzed_decl);
         }
         decls
@@ -728,7 +727,7 @@ impl ProgramAnalyzer {
             report_semantic_error(param.declarator.span, &err_info);
             exit(1);
         } else {
-            let obj = self.create_local_obj(&name, &final_type);
+            let obj = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
             self.scope_manager.add_object(obj.clone());
             return obj;
         }
@@ -766,11 +765,14 @@ impl ProgramAnalyzer {
                         final_type = ArrayOf(element_type.clone(), infered_array_len);
                     }
                 }
-                let obj = if symbol_attribute.align != 0 {
-                    self.create_local_obj_with_align(&name, &final_type, symbol_attribute.align)
-                } else {
-                    self.create_local_obj(&name, &final_type)
-                };
+                if symbol_attribute.align != 0 {
+                    if symbol_attribute.align < final_type.align() {
+                        let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
+                        the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
+                        report_semantic_error(cur_declarator.span, &err_info);
+                    }
+                }
+                let obj = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
                 self.scope_manager.add_object(obj.clone());
 
                 let mut obj_expr = self.gen_expr_from_obj(&obj, cur_declarator.span);
@@ -783,16 +785,17 @@ impl ProgramAnalyzer {
                     let err_info = format!("variable {} has incomplete type", name);
                     report_semantic_error(cur_declarator.span, &err_info);
                 }
-                // Function declaration is implicitly extern.
-                let object = if matches!(&final_type, Type::Func{..}) || symbol_attribute.is_extern {
-                    create_extern_obj(&name, &final_type)
-                } else {
-                    if symbol_attribute.align != 0 {
-                        self.create_local_obj_with_align(&name, &final_type, symbol_attribute.align)
-                    } else {
-                        self.create_local_obj(&name, &final_type)
+                if symbol_attribute.align != 0 {
+                    if symbol_attribute.align < final_type.align() {
+                        let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
+                        the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
+                        report_semantic_error(cur_declarator.span, &err_info);
                     }
-                };
+                }
+                let mut object = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
+                if matches!(&object.ty, Type::Func{..}) {
+                    object.is_extern = true;
+                }
                 self.scope_manager.add_object(object);
             }
         }
@@ -1151,13 +1154,26 @@ impl ProgramAnalyzer {
         ir::Expr{content, ty: o.ty.clone(), span}
     }
 
-    fn create_local_obj_with_align(&mut self, name: &str, ty: &Type, align: usize) -> Obj {
+    fn create_local_obj_with_attribute(&mut self, name: &str, ty: &Type, attribute: &Symbol_Attribute) -> Obj {
         debug_assert!(!self.scope_manager.contains_symbol_at_current_scope(name));
 
+        let align = if attribute.align != 0 {
+            attribute.align
+        } else {
+            ty.align()
+        };
         let mut size: usize = sizeof(ty);
         let aligned_offset = align_to(self.current_local_var_offset, align);
         self.current_local_var_offset = aligned_offset;
-        let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.current_local_var_offset, is_global: false, is_extern: false};
+        let obj = Obj{
+            name: name.to_string(),
+            ty: ty.clone(),
+            offset: self.current_local_var_offset,
+            align: attribute.align,
+            is_global: false,
+            is_extern: attribute.is_extern,
+            is_static: attribute.is_static,
+        };
         self.current_local_var_offset += size;
         obj
     }
@@ -1168,7 +1184,15 @@ impl ProgramAnalyzer {
         let mut size: usize = sizeof(ty);
         let aligned_offset = align_to(self.current_local_var_offset, ty.align());
         self.current_local_var_offset = aligned_offset;
-        let obj = Obj{name: name.to_string(), ty: ty.clone(), offset: self.current_local_var_offset, is_global: false, is_extern: false};
+        let obj = Obj{
+            name: name.to_string(),
+            ty: ty.clone(),
+            offset: self.current_local_var_offset,
+            align: ty.align(),
+            is_global: false,
+            is_extern: false,
+            is_static: false,
+        };
         self.current_local_var_offset += size;
         obj
     }
@@ -1678,7 +1702,7 @@ impl ProgramAnalyzer {
                     let unique_name = self.next_complit_unique_name();
                     let anonymous_obj = create_global_obj(&unique_name, &ty);
                     let init_data = Some(self.gen_init_data(&normalized_init, &ty));
-                    let global_decl = Global_Data_Decl{obj: anonymous_obj.clone(), align: anonymous_obj.ty.align(), init_data};
+                    let global_decl = Global_Data_Decl{obj: anonymous_obj.clone(), init_data};
                     self.global_data_decls.push(global_decl);
                     return self.gen_expr_from_obj(&anonymous_obj, span);
                 // Local compound literal.
@@ -1708,7 +1732,7 @@ impl ProgramAnalyzer {
                 }
                 // extra \0 character at the end of the string.
                 data_directive_vec.push(ASM_Byte(0 as i64));
-                let global_decl = Global_Data_Decl{obj: global_obj.clone(), align: global_obj.ty.align(), init_data: Some(data_directive_vec)};
+                let global_decl = Global_Data_Decl{obj: global_obj.clone(), init_data: Some(data_directive_vec)};
                 self.global_data_decls.push(global_decl);
 
                 let unique_symbol = ExprType::Object(global_obj);
@@ -2077,13 +2101,20 @@ fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
     }
 }
 
-fn create_extern_obj(name: &str, base_type: &Type) -> Obj {
+fn create_global_obj_with_attribute(name: &str, ty: &Type, attribute: &Symbol_Attribute) -> Obj {
+    let align = if attribute.align != 0 {
+        attribute.align
+    } else {
+        ty.align()
+    };
     Obj{
         name: name.to_string(),
-        ty: base_type.clone(),
+        ty: ty.clone(),
         offset: 0,
-        is_global: false,
-        is_extern: true,
+        align,
+        is_global: true,
+        is_extern: attribute.is_extern,
+        is_static: attribute.is_static,
     }
 }
 
@@ -2092,8 +2123,10 @@ fn create_global_obj(name: &str, base_type: &Type) -> Obj {
         name: name.to_string(),
         ty: base_type.clone(),
         offset: 0,
+        align: base_type.align(),
         is_global: true,
         is_extern: false,
+        is_static: false,
     }
 }
 

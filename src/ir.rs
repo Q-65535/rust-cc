@@ -78,7 +78,6 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Global_Data_Decl {
     pub obj: Obj,
-    pub align: usize,
     pub init_data: Option<Vec<Data_Directive>>,
 }
 

@@ -100,8 +100,12 @@ impl Generator {
                 continue;
             }
             emit!("");
-            emit!("  .globl {}", global_decl.obj.name);
-            emit!("  .align {}", global_decl.align);
+            if global_decl.obj.is_static {
+                emit!("  .local {}", global_decl.obj.name);
+            } else {
+                emit!("  .globl {}", global_decl.obj.name);
+            }
+            emit!("  .align {}", global_decl.obj.align);
             if let Some(data_directives) = &global_decl.init_data {
                 emit!("  .data");
                 emit!("{}:", global_decl.obj.name);
