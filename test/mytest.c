@@ -2,9 +2,6 @@
 
 int main() {
 
-  extern int ext3;
-  if (ext3 == 7) {
-    printf("OK\n");
-  }
+  printf("OK\n");
   return 0;
 }

@@ -397,6 +397,10 @@ impl Generator {
                 self.expr_gen(inner_expr);
                 cast(&inner_expr.ty, ty);
             }
+            CompLit(stmts, expr) => {
+                self.block_gen(stmts);
+                self.expr_gen(expr);
+            }
             FunCall(func_ref, args) => {
                 match &func_ref.content {
                     Object(obj) => {
@@ -458,6 +462,10 @@ impl Generator {
                 self.gen_addr(st);
                 emit!("  add ${}, %rax", offset);
             },
+            CompLit(stmts, expr) => {
+                self.block_gen(stmts);
+                self.gen_addr(expr);
+            }
             _ => {
                 let err_msg = error_expr(expr, "codegen error: can't get addr of this expr");
                 eprintln!("{}", err_msg);

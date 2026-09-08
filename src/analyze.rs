@@ -288,6 +288,7 @@ pub struct ProgramAnalyzer {
     pub unique_stmt_labels_map_in_cur_function: HashMap<String, String>,
     pub current_function_return_type: Type,
     pub unique_string_name_index: usize,
+    pub unique_complit_name_index: usize,
     pub unique_stmt_label_index: usize,
     pub cur_end_label: Option<String>,
     pub cur_loop_continue_point_label: Option<String>,
@@ -304,6 +305,7 @@ impl ProgramAnalyzer {
                         unique_stmt_labels_map_in_cur_function: HashMap::new(),
                         current_function_return_type: Type::ty_none,
                         unique_string_name_index: 0,
+                        unique_complit_name_index: 0,
                         unique_stmt_label_index: 0,
                         cur_end_label: None,
                         cur_loop_continue_point_label: None,
@@ -519,7 +521,7 @@ impl ProgramAnalyzer {
                     let analyzed_init_expr = self.analyze_expr(init_expr);
                     match eval_label_constant(&analyzed_init_expr) {
                         Ok((label, num)) => {
-                            if !can_assign(ty, &analyzed_init_expr.ty) {
+                            if !can_assign_expr(ty, &analyzed_init_expr) {
                                 let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
                                 ty, &analyzed_init_expr.ty);
                                 report_semantic_error(init.span, &err_info);
@@ -1338,6 +1340,18 @@ impl ProgramAnalyzer {
         }
     }
 
+    fn next_complit_unique_name(&mut self) -> String {
+        let unique_name = format!("__compound_literal.{}", self.unique_complit_name_index);
+        self.unique_complit_name_index += 1;
+        return unique_name;
+    }
+
+    fn next_string_unique_name(&mut self) -> String {
+        let unique_name = format!(".LC{}", self.unique_string_name_index);
+        self.unique_string_name_index += 1;
+        return unique_name;
+    }
+
     fn transform_to_unique_goto_label(&mut self, label: &str) -> String {
         let unique_goto_label = format!(".GOTO_{}_{}", label.clone(), self.unique_stmt_label_index);
         self.unique_stmt_label_index += 1;
@@ -1643,11 +1657,38 @@ impl ProgramAnalyzer {
                 let casted_expr = cast(analyzed_expr, &to_type);
                 return casted_expr;
             }
+            CompLit(init_list, type_name) => {
+                let content = Initializer_Type::Init_List(init_list.clone());
+                let init = Initializer{content, span};
+                let mut ty = self.resolve_type_name(type_name);
+                let normalized_init = normalize_init(&init, &ty);
+                if let ArrayOf(element_type, array_len) = &ty {
+                    if *array_len == 0 {
+                        let infered_array_len = resolve_array_size_from_init(&normalized_init);
+                        ty = ArrayOf(element_type.clone(), infered_array_len);
+                    }
+                }
+                // Global compound literal.
+                if self.scope_manager.current_scope_index == 0 {
+                    let unique_name = self.next_complit_unique_name();
+                    let anonymous_obj = create_global_obj(&unique_name, &ty);
+                    let init_data = Some(self.gen_init_data(&normalized_init, &ty));
+                    let global_decl = Global_Data_Decl{obj: anonymous_obj.clone(), align: anonymous_obj.ty.align(), init_data};
+                    self.global_data_decls.push(global_decl);
+                    return self.gen_expr_from_obj(&anonymous_obj, span);
+                // Local compound literal.
+                } else {
+                    let anonymous_obj = self.create_local_obj("", &ty);
+                    let anonymous_obj_expr = self.gen_expr_from_obj(&anonymous_obj, span);
+                    let mut assignment_expr_stmts = self.init_local_var(anonymous_obj_expr.clone(), &normalized_init);
+                    let content = ir::ExprType::CompLit(assignment_expr_stmts, Box::new(anonymous_obj_expr));
+                    ir::Expr {content, ty, span}
+                }
+            }
             Str(s) => {
                 // We use a unique identifier as a reference to replace the original string literal.
                 // The string literal shall be initialized in .data section.
-                let unique_name = format!(".LC{}", self.unique_string_name_index);
-                self.unique_string_name_index += 1;
+                let unique_name = self.next_string_unique_name();
                 // In C, a string ends with an extra \0 character, so the array length +1.
                 let len = s.len() + 1;
                 let ty: Type = ArrayOf(Box::new(Type::Char), len);
@@ -1782,6 +1823,20 @@ fn can_assign(left_type: &Type, mut right_type: &Type) -> bool {
     return left_type == right_type;
 }
 
+fn can_assign_expr(left_type: &Type, right_expr: &ir::Expr) -> bool {
+    if can_assign(left_type, &right_expr.ty) {
+        return true;
+    }
+    return matches!(left_type, Pointer_To(..)) && is_null_pointer_constant(right_expr);
+}
+
+fn is_null_pointer_constant(expr: &ir::Expr) -> bool {
+    if !is_integer(&expr.ty) {
+        return false;
+    }
+    return matches!(eval_pure_constant(expr), Ok(0));
+}
+
 
 fn can_be_lvalue(expr: &ir::Expr) -> bool {
     use ir::ExprType;
@@ -1813,7 +1868,7 @@ fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
             let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
             report_semantic_error(lhs.span, &err_info);
         }
-        if !can_assign(&lhs.ty, &rhs.ty) {
+        if !can_assign_expr(&lhs.ty, &rhs) {
             let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
             &rhs.ty, &lhs.ty);
             report_semantic_error(lhs.span, &err_info);

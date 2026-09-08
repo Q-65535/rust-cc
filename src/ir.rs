@@ -46,6 +46,7 @@ pub enum ExprType {
     FunCall(Box<Expr>, Vec<Expr>),
     StmtExpr(Vec<StmtType>),
     Cast(Box<Expr>, Type),
+    CompLit(Vec<StmtType>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

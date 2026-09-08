@@ -219,6 +219,7 @@ pub enum ExprType {
     Alignof_Expr(Box<Expr>),
     Alignof_Type_Name(Type_Name),
     Cast(Box<Expr>, Type_Name),
+    CompLit(Vec<Initializer>, Type_Name),
     Str(Vec<u8>),
     // Parenthesized expression: a transparent wrapper that records the span of
     // the enclosing parens for diagnostics while leaving the inner expression's
@@ -1172,12 +1173,29 @@ impl Parser {
 
     fn parse_prefix(&mut self) -> Result<Expr, String> {
         let prefix_starting_token = self.cur_token().clone();
+        let start_index = prefix_starting_token.span.start_index;
         match prefix_starting_token.kind {
             LParen => {
                 let peek_token = self.peek_token();
                 if peek_token.kind == LBrace {
                     return self.parse_stmt_expr();
                 }else if self.is_type_spec(peek_token) || is_type_qualifier(peek_token) {
+                    self.bump();
+                    let type_name = self.parse_type_name()?;
+                    self.expect(&RParen)?;
+                    // compound literal
+                    if self.cur_token().kind == LBrace {
+                        let init_list = self.parse_init_list()?;
+                        let end_index = self.previous_token().span.end_index;
+                        let span = Span{start_index, end_index};
+                        return Ok(Expr::new(CompLit(init_list, type_name), span));
+                    // cast
+                    } else {
+                        let expr = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
+                        let end_index = self.previous_token().span.end_index;
+                        let span = Span{start_index, end_index};
+                        return Ok(Expr::new(Cast(Box::new(expr), type_name), span));
+                    }
                     return self.parse_cast_expr();
                 } else {
                     return self.parse_paren();
@@ -1414,7 +1432,8 @@ impl Parser {
     fn parse_assign(&mut self, lhs: Expr) -> Result<Expr, String> {
         if !matches!(
             &lhs.content,
-            Ident(_) | Deref(_) | ArrayIndexing(_, _) | Paren(_) | RequestStructMember(_, _)
+            Ident(_) | Deref(_) | ArrayIndexing(..) | Paren(_) |
+            RequestStructMember(..) | CompLit(..)
         ) {
             return Err(syntax_error(lhs.span, "definitely not a lvalue name"));
         }
