@@ -1233,6 +1233,7 @@ impl ProgramAnalyzer {
                 let backup_end_label = self.cur_end_label.clone();
                 let end_label = self.next_loop_end_label();
                 self.cur_end_label = Some(end_label.clone());
+                // @Rename
                 let backup_begin_label = self.cur_loop_continue_point_label.clone();
                 let continue_point_label = self.next_loop_begin_label();
                 self.cur_loop_continue_point_label = Some(continue_point_label.clone());
@@ -1266,6 +1267,22 @@ impl ProgramAnalyzer {
                 self.cur_loop_continue_point_label = backup_begin_label;
                 self.scope_manager.exit_current_scope();
                 StmtType::For{init: init_stmts, cond, inc, then, end_label, continue_point_label}
+            }
+            Do_While{then, cond} => {
+                let cond = self.analyze_expr(cond);
+                // @Cleanup: These are just disgusting!! Maybe we can handle the
+                // label stuff by using something like scope.
+                let backup_end_label = self.cur_end_label.clone();
+                let end_label = self.next_loop_end_label();
+                self.cur_end_label = Some(end_label.clone());
+                // @Rename
+                let backup_begin_label = self.cur_loop_continue_point_label.clone();
+                let continue_point_label = self.next_loop_begin_label();
+                self.cur_loop_continue_point_label = Some(continue_point_label.clone());
+                let then = Box::new(self.analyze_stmt(then));
+                self.cur_end_label = backup_end_label;
+                self.cur_loop_continue_point_label = backup_begin_label;
+                return StmtType::Do_While{then, cond, end_label, continue_point_label};
             }
             SwitchStmt(expr, stmt) => {
                 let new_switch = ir::Switch_Case{

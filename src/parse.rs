@@ -13,6 +13,7 @@ pub enum StmtType {
     Block(Vec<BlockItem>),
     If(IfStmt),
     For(ForStmt),
+    Do_While{then: Box<StmtType>, cond: Expr},
     SwitchStmt(Expr, Box<StmtType>),
     CaseStmt(Expr, Box<StmtType>),
     DefaultStmt(Box<StmtType>),
@@ -918,6 +919,14 @@ impl Parser {
             TokenKind::If => Ok(StmtType::If(self.parse_if_stmt()?)),
             TokenKind::For => Ok(StmtType::For(self.parse_for_stmt()?)),
             TokenKind::While => Ok(StmtType::For(self.parse_while_stmt()?)),
+            TokenKind::Do => {
+                self.bump();
+                let then = self.parse_stmt()?;
+                self.expect(&While)?;
+                let cond = self.parse_expr(Lowest, Left_To_Right)?;
+                self.expect(&Semicolon)?;
+                return Ok(StmtType::Do_While{then: Box::new(then), cond});
+            }
             TokenKind::Switch => {
                 self.bump();
                 let expr = self.parse_paren()?;

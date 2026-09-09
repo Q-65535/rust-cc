@@ -188,6 +188,16 @@ impl Generator {
             ir::StmtType::Block(item) =>self.block_gen(item),
             ir::StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
             ir::StmtType::For{init, cond, inc, then, end_label, continue_point_label} => self.for_gen(init, cond, inc, then, end_label, continue_point_label),
+            ir::StmtType::Do_While{then, cond, end_label, continue_point_label} => {
+                let c = self.next_jump_label_count();
+                emit!(".L.begin.{}:", c);
+                self.stmt_gen(&then);
+                emit!("{}:", continue_point_label);
+                self.expr_gen(cond);
+                emit!("  cmp $0, %rax");
+                emit!("  jne .L.begin.{}", c);
+                emit!("{}:", end_label);
+            }
             ir::StmtType::Goto(label) => emit!("  jmp {}", label),
             ir::StmtType::LabeledStmt(label, stmt) => {
                 emit!("{}:", label);

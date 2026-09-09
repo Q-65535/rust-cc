@@ -63,6 +63,9 @@ int main() {
   ASSERT(0, (2-2)&&5);
   ASSERT(1, 1&&5);
 
+  ASSERT(7, ({ int i=0; int j=0; do { j++; } while (i++ < 6); j; }));
+  ASSERT(4, ({ int i=0; int j=0; int k=0; do { if (++j > 3) break; continue; k++; } while (1); j; }));
+
   printf("OK\n");
   return 0;
 }

@@ -8,6 +8,7 @@ pub enum StmtType {
     Block(Vec<StmtType>),
     If {cond: Expr, then: Box<StmtType>, otherwise: Option<Box<StmtType>>},
     For {init: Vec<StmtType>, cond: Option<Expr>, inc: Option<Expr>, then: Box<StmtType>, end_label: String, continue_point_label: String},
+    Do_While {then: Box<StmtType>, cond: Expr, end_label: String, continue_point_label: String},
     Switch{switch_case_info: Switch_Case, body: Box<StmtType>, end_label: String},
     CaseStmt{unique_label: String, stmt: Box<StmtType>},
     Goto(String),
