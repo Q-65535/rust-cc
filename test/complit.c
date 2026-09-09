@@ -23,10 +23,10 @@ int main() {
   ASSERT(3, ({ int x=3; (int){x}; }));
   (int){3} = 5;
 
-  // ASSERT(1, tree->val);
-  // ASSERT(2, tree->lhs->val);
-  // ASSERT(3, tree->lhs->lhs->val);
-  // ASSERT(4, tree->lhs->rhs->val);
+  ASSERT(1, tree->val);
+  ASSERT(2, tree->lhs->val);
+  ASSERT(3, tree->lhs->lhs->val);
+  ASSERT(4, tree->lhs->rhs->val);
 
   printf("OK\n");
   return 0;
