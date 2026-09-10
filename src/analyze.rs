@@ -292,27 +292,35 @@ pub struct ProgramAnalyzer {
     pub unique_string_name_index: usize,
     pub unique_complit_name_index: usize,
     pub unique_stmt_label_index: usize,
-    pub cur_end_label: Option<String>,
-    pub cur_loop_continue_point_label: Option<String>,
-    pub cur_switch: Option<ir::Switch_Case>,
+
+    pub unique_break_pos_label_index: usize,
+    pub unique_continue_pos_label_index: usize,
+    pub unique_case_label_index: usize,
+
+    pub break_position_tracker: Vec::<String>,
+    pub continue_position_tracker: Vec::<String>,
+    pub switch_stmt_tracker: Vec::<ir::Switch_Case>,
 }
 
 impl ProgramAnalyzer {
     pub fn new() -> Self {
         let scope = Scope::new();
         ProgramAnalyzer{
-                        global_data_decls: Vec::new(),
-                        scope_manager: ScopeManager::new(),
-                        current_local_var_offset: 0,
-                        unique_stmt_labels_map_in_cur_function: HashMap::new(),
-                        current_function_return_type: Type::ty_none,
-                        unique_string_name_index: 0,
-                        unique_complit_name_index: 0,
-                        unique_stmt_label_index: 0,
-                        cur_end_label: None,
-                        cur_loop_continue_point_label: None,
-                        cur_switch: None,
-                        }
+            global_data_decls: Vec::new(),
+            scope_manager: ScopeManager::new(),
+            current_local_var_offset: 0,
+            unique_stmt_labels_map_in_cur_function: HashMap::new(),
+            current_function_return_type: Type::ty_none,
+            unique_string_name_index: 0,
+            unique_complit_name_index: 0,
+            unique_stmt_label_index: 0,
+            unique_break_pos_label_index: 0,
+            unique_continue_pos_label_index: 0,
+            unique_case_label_index: 0,
+            break_position_tracker: Vec::new(),
+            continue_position_tracker: Vec::new(),
+            switch_stmt_tracker: Vec::new(),
+        }
     }
 
     pub fn analyze(mut self, mut program: Program) -> ir::AnalyzedProgram {
@@ -355,6 +363,10 @@ impl ProgramAnalyzer {
         self.current_local_var_offset = 0;
         self.unique_stmt_labels_map_in_cur_function.clear();
         for label in &fun.stmt_labels {
+            // Why we need to transform to a unique label? Because in C, same label
+            // name can exist in multiple functions; however, in assembly,
+            // duplicate labels are not allowed, so we need to manually
+            // make it unique across the whole assembly file.
             let unique_label = self.transform_to_unique_goto_label(label);
             self.unique_stmt_labels_map_in_cur_function.insert(label.clone(), unique_label);
         }
@@ -1230,13 +1242,8 @@ impl ProgramAnalyzer {
             }
             For(parse::ForStmt{init, cond, inc, then}) => {
                 self.scope_manager.enter_new_scope();
-                let backup_end_label = self.cur_end_label.clone();
-                let end_label = self.next_loop_end_label();
-                self.cur_end_label = Some(end_label.clone());
-                // @Rename
-                let backup_begin_label = self.cur_loop_continue_point_label.clone();
-                let continue_point_label = self.next_loop_begin_label();
-                self.cur_loop_continue_point_label = Some(continue_point_label.clone());
+                let break_pos_label = self.enter_new_breakable_zone();
+                let continue_pos_label = self.enter_new_continuable_zone();
                 let mut init_stmts = Vec::new();
                 if let Some(init) = init {
                     match init.as_ref() {
@@ -1263,47 +1270,30 @@ impl ProgramAnalyzer {
                     None
                 };
                 let then = Box::new(self.analyze_stmt(then));
-                self.cur_end_label = backup_end_label;
-                self.cur_loop_continue_point_label = backup_begin_label;
+                self.exit_cur_breakable_zone();
+                self.exit_cur_continuable_zone();
                 self.scope_manager.exit_current_scope();
-                StmtType::For{init: init_stmts, cond, inc, then, end_label, continue_point_label}
+                StmtType::For{init: init_stmts, cond, inc, then, break_pos_label, continue_pos_label}
             }
             Do_While{then, cond} => {
                 let cond = self.analyze_expr(cond);
-                // @Cleanup: These are just disgusting!! Maybe we can handle the
-                // label stuff by using something like scope.
-                let backup_end_label = self.cur_end_label.clone();
-                let end_label = self.next_loop_end_label();
-                self.cur_end_label = Some(end_label.clone());
-                // @Rename
-                let backup_begin_label = self.cur_loop_continue_point_label.clone();
-                let continue_point_label = self.next_loop_begin_label();
-                self.cur_loop_continue_point_label = Some(continue_point_label.clone());
+                let break_pos_label = self.enter_new_breakable_zone();
+                let continue_pos_label = self.enter_new_continuable_zone();
                 let then = Box::new(self.analyze_stmt(then));
-                self.cur_end_label = backup_end_label;
-                self.cur_loop_continue_point_label = backup_begin_label;
-                return StmtType::Do_While{then, cond, end_label, continue_point_label};
+                self.exit_cur_breakable_zone();
+                self.exit_cur_continuable_zone();
+                return StmtType::Do_While{then, cond, break_pos_label, continue_pos_label};
             }
             SwitchStmt(expr, stmt) => {
-                let new_switch = ir::Switch_Case{
-                    target_expr: self.analyze_expr(expr),
-                    cases: Vec::new(),
-                    default_label: None,
-                };
+                let target_expr = self.analyze_expr(expr);
+                self.enter_new_switch_zone(target_expr);
+                let break_pos_label = self.enter_new_breakable_zone();
 
-                let backup_switch = self.cur_switch.clone();
-                self.cur_switch = Some(new_switch);
-                let backup_end_label = self.cur_end_label.clone();
-                let end_label = self.next_loop_end_label();
-                self.cur_end_label = Some(end_label.clone());
                 let stmt = self.analyze_stmt(stmt);
-                let result_switch = self.cur_switch.clone();
-                self.cur_end_label = backup_end_label;
-                self.cur_switch = backup_switch;
-
-                debug_assert!(result_switch.is_some());
-                if let Some(switch) = result_switch {
-                    StmtType::Switch{switch_case_info: switch, body: Box::new(stmt), end_label}
+                let filled_switch = self.exit_cur_switch_zone();
+                self.exit_cur_breakable_zone();
+                if let Some(switch) = filled_switch {
+                    StmtType::Switch{switch_case_info: switch, body: Box::new(stmt), break_pos_label}
                 } else {
                     println!("compiler bug: switch statement doesn't exist after handling the body!!!");
                     exit(1);
@@ -1313,7 +1303,7 @@ impl ProgramAnalyzer {
                 let analyzed_cond_expr = self.analyze_expr(cond_expr);
                 let unique_label = self.next_case_label();
                 let stmt = self.analyze_stmt(stmt);
-                if let Some(cur_switch) = &mut self.cur_switch {
+                if let Some(cur_switch) = self.get_cur_switch() {
                     let result = eval_pure_constant(&analyzed_cond_expr);
                     let cond_value = match result {
                         Err(e) => {
@@ -1334,7 +1324,7 @@ impl ProgramAnalyzer {
             DefaultStmt(default_case) => {
                 let unique_label = self.next_case_label();
                 let stmt = self.analyze_stmt(default_case);
-                if let Some(cur_switch) = &mut self.cur_switch {
+                if let Some(cur_switch) = self.get_cur_switch() {
                     let case = ir::Case{cond_value: 0, unique_label: unique_label.clone()};
                     cur_switch.default_label = Some(unique_label.clone());
                     StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
@@ -1345,7 +1335,7 @@ impl ProgramAnalyzer {
                 }
             }
             ContinueStmt => {
-                if let Some(label) = &self.cur_loop_continue_point_label {
+                if let Some(label) = self.get_cur_continue_pos() {
                     StmtType::Goto(label.clone())
                 } else {
                     // @Robustness: This should report the error location.
@@ -1354,7 +1344,7 @@ impl ProgramAnalyzer {
                 }
             }
             BreakStmt => {
-                if let Some(label) = &self.cur_end_label {
+                if let Some(label) = self.get_cur_break_pos() {
                     StmtType::Goto(label.clone())
                 } else {
                     // @Robustness: This should report the error location.
@@ -1385,6 +1375,65 @@ impl ProgramAnalyzer {
         }
     }
 
+    fn enter_new_breakable_zone(&mut self) -> String {
+        // @Refactor: inline next_break_label().
+        let break_position_label = self.next_break_label();
+        self.break_position_tracker.push(break_position_label.clone());
+        return break_position_label; 
+    }
+
+    fn exit_cur_breakable_zone(&mut self) {
+        self.break_position_tracker.pop();
+    }
+
+    fn next_break_label(&mut self) -> String {
+        let unique_break_label = format!(".BREAK_POS_{}", self.unique_break_pos_label_index);
+        self.unique_break_pos_label_index += 1;
+        return unique_break_label;
+    }
+
+    fn enter_new_continuable_zone(&mut self) -> String {
+        // @Refactor: inline next_continue_label().
+        let continue_position_label = self.next_continue_label();
+        self.continue_position_tracker.push(continue_position_label.clone());
+        return continue_position_label;
+    }
+
+    fn exit_cur_continuable_zone(&mut self) {
+        self.continue_position_tracker.pop();
+    }
+
+    fn next_continue_label(&mut self) -> String {
+        let unique_continue_label = format!(".CONTINUE_POS_{}", self.unique_continue_pos_label_index);
+        self.unique_continue_pos_label_index += 1;
+        return unique_continue_label;
+    }
+
+    fn get_cur_continue_pos(&mut self) -> Option<&String> {
+        return self.continue_position_tracker.last();
+    }
+
+    fn get_cur_break_pos(&mut self) -> Option<&String> {
+        return self.break_position_tracker.last();
+    }
+
+    fn enter_new_switch_zone(&mut self, target_expr: ir::Expr) {
+        let new_switch = ir::Switch_Case{
+            target_expr,
+            cases: Vec::new(),
+            default_label: None,
+        };
+        self.switch_stmt_tracker.push(new_switch);
+    }
+
+    fn exit_cur_switch_zone(&mut self) -> Option<ir::Switch_Case> {
+        return self.switch_stmt_tracker.pop();
+    }
+
+    fn get_cur_switch(&mut self) -> Option<&mut ir::Switch_Case> {
+        return self.switch_stmt_tracker.last_mut();
+    }
+
     fn next_complit_unique_name(&mut self) -> String {
         let unique_name = format!("__compound_literal.{}", self.unique_complit_name_index);
         self.unique_complit_name_index += 1;
@@ -1403,21 +1452,9 @@ impl ProgramAnalyzer {
         return unique_goto_label;
     }
 
-    fn next_loop_begin_label(&mut self) -> String {
-        let unique_loop_begin_label = format!(".LOOPBEGIN_{}", self.unique_stmt_label_index);
-        self.unique_stmt_label_index += 1;
-        return unique_loop_begin_label;
-    }
-
-    fn next_loop_end_label(&mut self) -> String {
-        let unique_loop_end_label = format!(".CONTINUE_POINT_{}", self.unique_stmt_label_index);
-        self.unique_stmt_label_index += 1;
-        return unique_loop_end_label;
-    }
-
     fn next_case_label(&mut self) -> String {
-        let unique_loop_begin_label = format!(".CASE_{}", self.unique_stmt_label_index);
-        self.unique_stmt_label_index += 1;
+        let unique_loop_begin_label = format!(".CASE_{}", self.unique_case_label_index);
+        self.unique_case_label_index += 1;
         return unique_loop_begin_label;
     }
 

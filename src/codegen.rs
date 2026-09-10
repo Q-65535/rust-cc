@@ -187,23 +187,23 @@ impl Generator {
             }
             ir::StmtType::Block(item) =>self.block_gen(item),
             ir::StmtType::If{cond, then, otherwise} => self.if_gen(cond, then, otherwise),
-            ir::StmtType::For{init, cond, inc, then, end_label, continue_point_label} => self.for_gen(init, cond, inc, then, end_label, continue_point_label),
-            ir::StmtType::Do_While{then, cond, end_label, continue_point_label} => {
+            ir::StmtType::For{init, cond, inc, then, break_pos_label, continue_pos_label} => self.for_gen(init, cond, inc, then, break_pos_label, continue_pos_label),
+            ir::StmtType::Do_While{then, cond, break_pos_label, continue_pos_label} => {
                 let c = self.next_jump_label_count();
                 emit!(".L.begin.{}:", c);
                 self.stmt_gen(&then);
-                emit!("{}:", continue_point_label);
+                emit!("{}:", continue_pos_label);
                 self.expr_gen(cond);
                 emit!("  cmp $0, %rax");
                 emit!("  jne .L.begin.{}", c);
-                emit!("{}:", end_label);
+                emit!("{}:", break_pos_label);
             }
             ir::StmtType::Goto(label) => emit!("  jmp {}", label),
             ir::StmtType::LabeledStmt(label, stmt) => {
                 emit!("{}:", label);
                 self.stmt_gen(stmt);
             }
-            ir::StmtType::Switch{switch_case_info, body, end_label} => self.switch_gen(switch_case_info, body, end_label),
+            ir::StmtType::Switch{switch_case_info, body, break_pos_label} => self.switch_gen(switch_case_info, body, break_pos_label),
             ir::StmtType::CaseStmt{unique_label, stmt} => {
                 emit!("{}:", unique_label);
                 self.stmt_gen(stmt);
