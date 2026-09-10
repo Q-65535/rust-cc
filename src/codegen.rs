@@ -441,6 +441,21 @@ impl Generator {
                         if needs_align {
                             emit!("  add $8, %rsp");
                         }
+                        // @Temporary: This is just for being compatible with chibicc's
+                        // test suits which is, weird. In its commit "Handle a function
+                        // returning bool, char or short", the return type of the 
+                        // functions declared in common is different to that in function.c
+                        // If they are the same, we don't need the following match cases.
+                        // You might be wondering why redeclaring a function with a different
+                        // return type doesn't cause a compile error? Well, that's because
+                        // the file "common" is not processed in our compiler, it is processed
+                        // after the compilation as specified in Makefile.
+                        match &expr.ty {
+                            Bool  =>  emit!("  movzx %al, %eax"),
+                            Char  =>  emit!("  movsbl %al, %eax"),
+                            Short =>  emit!("  movswl %ax, %eax"),
+                            _ => (),
+                        }
                     }
                     _ => eprintln!("currently only support function name as call reference"),
                 }

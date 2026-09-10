@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 void assert(int expected, int actual, char *code) {
   if (expected == actual) {
@@ -16,3 +17,8 @@ int *ext2 = &ext1;
 int ext3 = 7;
 int ext_fn1(int x) { return x*x; }
 int ext_fn2(int x) { return x/2; }
+
+int true_fn() { return 513; }
+int false_fn() { return 512; }
+int char_fn() { return (2<<8)+3; }
+int short_fn() { return (2<<16)+5; }
