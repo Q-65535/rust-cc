@@ -1288,7 +1288,6 @@ impl ProgramAnalyzer {
                 let target_expr = self.analyze_expr(expr);
                 self.enter_new_switch_zone(target_expr);
                 let break_pos_label = self.enter_new_breakable_zone();
-
                 let stmt = self.analyze_stmt(stmt);
                 let filled_switch = self.exit_cur_switch_zone();
                 self.exit_cur_breakable_zone();
@@ -1376,37 +1375,25 @@ impl ProgramAnalyzer {
     }
 
     fn enter_new_breakable_zone(&mut self) -> String {
-        // @Refactor: inline next_break_label().
-        let break_position_label = self.next_break_label();
-        self.break_position_tracker.push(break_position_label.clone());
-        return break_position_label; 
+        let unique_break_label = format!(".BREAK_POS_{}", self.unique_break_pos_label_index);
+        self.unique_break_pos_label_index += 1;
+        self.break_position_tracker.push(unique_break_label.clone());
+        return unique_break_label; 
     }
 
     fn exit_cur_breakable_zone(&mut self) {
         self.break_position_tracker.pop();
     }
 
-    fn next_break_label(&mut self) -> String {
-        let unique_break_label = format!(".BREAK_POS_{}", self.unique_break_pos_label_index);
-        self.unique_break_pos_label_index += 1;
-        return unique_break_label;
-    }
-
     fn enter_new_continuable_zone(&mut self) -> String {
-        // @Refactor: inline next_continue_label().
-        let continue_position_label = self.next_continue_label();
-        self.continue_position_tracker.push(continue_position_label.clone());
-        return continue_position_label;
+        let unique_continue_label = format!(".CONTINUE_POS_{}", self.unique_continue_pos_label_index);
+        self.unique_continue_pos_label_index += 1;
+        self.continue_position_tracker.push(unique_continue_label.clone());
+        return unique_continue_label;
     }
 
     fn exit_cur_continuable_zone(&mut self) {
         self.continue_position_tracker.pop();
-    }
-
-    fn next_continue_label(&mut self) -> String {
-        let unique_continue_label = format!(".CONTINUE_POS_{}", self.unique_continue_pos_label_index);
-        self.unique_continue_pos_label_index += 1;
-        return unique_continue_label;
     }
 
     fn get_cur_continue_pos(&mut self) -> Option<&String> {
