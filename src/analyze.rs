@@ -387,7 +387,7 @@ impl ProgramAnalyzer {
         // the function body scope.
         self.scope_manager.enter_new_scope();
         let mut analyzed_params: Vec<Obj> = Vec::new();
-        if let Some(DeclaratorSuffix::FunParam(params)) = &fun.declarator.suffix {
+        if let Some(DeclaratorSuffix::FunParam{params, is_variadic}) = &fun.declarator.suffix {
             for param in params {
                 let p = self.analyze_param(param);
                 analyzed_params.push(p);
@@ -610,7 +610,7 @@ impl ProgramAnalyzer {
                     return array_of(base_type, final_len);
                 }
             },
-            DeclaratorSuffix::FunParam(params) => {
+            DeclaratorSuffix::FunParam{params, is_variadic} => {
                 let return_type = base_type.clone();
                 let mut param_types = Vec::new();
                 for param in params {

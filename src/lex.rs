@@ -46,7 +46,7 @@ pub enum TokenKind {
     Ret, If, Else, For, While,
     Sizeof, Typedef, Struct, LexEnum, Int, Char, _Bool, Union,
     Long, Short, Void, _Atomic, Static, Extern, Goto, Break, Continue,
-    Switch, Case, Default, _Alignas, _Alignof, Do,
+    Switch, Case, Default, _Alignas, _Alignof, Do, Variadic_Mark,
 
     Eof,
 }
@@ -139,6 +139,14 @@ impl Lexer {
         }
     }
 
+    fn peek_next_nth_char(&self, n: usize) -> Option<char> {
+        if self.index + n >= self.src.len() {
+            None
+        } else {
+            Some(self.src[self.index + n])
+        }
+    }
+
     pub fn gen_token(kind: TokenKind, start_index: usize, len: usize) -> Token {
         let span = Span{start_index, end_index: start_index+len-1};
         Token {kind, span}
@@ -156,7 +164,15 @@ impl Lexer {
             match c {
                 ' ' | '\t' | '\n' | '\r' => (),
                 '~' => tokens.push(Self::gen_token(Tilde, start_index, 1)),
-                '.' => tokens.push(Self::gen_token(Period, start_index, 1)),
+                '.' => {
+                    if matches!(self.peek_char(), Some('.')) && matches!(self.peek_next_nth_char(2), Some('.')) {
+                        tokens.push(Self::gen_token(Variadic_Mark, start_index, 3));
+                        self.next_char();
+                        self.next_char();
+                    } else {
+                        tokens.push(Self::gen_token(Period, start_index, 1));
+                    }
+                }
                 ':' => tokens.push(Self::gen_token(Colon, start_index, 1)),
                 ';' => tokens.push(Self::gen_token(Semicolon, start_index, 1)),
                 ',' => tokens.push(Self::gen_token(LexComma, start_index, 1)),

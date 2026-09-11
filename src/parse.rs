@@ -49,7 +49,7 @@ use BlockItem::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorSuffix {
     ArrayLen(Option<Box<Expr>>, Option<Box<DeclaratorSuffix>>),
-    FunParam(Vec<Parameter>),
+    FunParam{params: Vec<Parameter>, is_variadic: bool},
 }
 use DeclaratorSuffix::*;
 
@@ -872,7 +872,14 @@ impl Parser {
                 self.expect(&LParen)?;
                 let mut params: Vec<Parameter> = Vec::new();
 
+                let mut is_variadic = false;
                 'parse_params_loop: while !matches!(self.cur_token().kind, RParen | Eof) {
+                    if self.cur_token().kind == Variadic_Mark {
+                        is_variadic = true;
+                        self.bump();
+                        break 'parse_params_loop;
+                    }
+
                     let decl_specs = self.parse_decl_specs()?;
                     // Special case: void parameter
                     for decl_spec in &decl_specs {
@@ -896,7 +903,7 @@ impl Parser {
                 }
 
                 self.expect(&RParen)?;
-                Ok(FunParam(params))
+                Ok(FunParam{params, is_variadic})
             },
             _ => {
                 Err(error_token(self.cur_token(), "Can't parse declarator suffix here!"))
@@ -1557,7 +1564,7 @@ impl Parser {
         self.stmt_labels.clear();
         let return_type_specifier = self.parse_decl_specs()?;
         let declarator = self.parse_declarator()?;
-        if let Some(FunParam(params)) = &declarator.suffix {
+        if let Some(FunParam{..}) = &declarator.suffix {
             if !self.at(&LBrace) {
                 return Err(error_token(self.cur_token(), "expected function body"));
             }
