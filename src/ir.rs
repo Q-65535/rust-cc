@@ -74,6 +74,7 @@ pub struct Function {
     pub stmts: Vec<StmtType>,
     pub stack_size: usize,
     pub is_static: bool,
+    pub var_area: Option<Obj>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

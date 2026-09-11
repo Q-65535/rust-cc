@@ -150,6 +150,37 @@ impl Generator {
         emit!("  mov %rsp, %rbp");
         emit!("  sub ${}, %rsp", aligned_stack_size);
         emit!();
+
+        // Save arg registers if function is variadic
+        if let Some(va_area) = fun.var_area {
+            let gp = fun.params.len().min(self.argregs64.len());
+            let va_area_disp = -((fun.stack_size - va_area.offset) as isize);
+
+            // va_elem
+            emit!("  movl ${}, {}(%rbp)", gp * 8, va_area_disp);
+            emit!("  movl $48, {}(%rbp)", va_area_disp + 4);
+            emit!("  leaq 16(%rbp), %rax");
+            emit!("  movq %rax, {}(%rbp)", va_area_disp + 8);
+            emit!("  leaq {}(%rbp), %rax", va_area_disp + 24);
+            emit!("  movq %rax, {}(%rbp)", va_area_disp + 16);
+
+            // __reg_save_area__
+            emit!("  movq %rdi, {}(%rbp)", va_area_disp + 24);
+            emit!("  movq %rsi, {}(%rbp)", va_area_disp + 32);
+            emit!("  movq %rdx, {}(%rbp)", va_area_disp + 40);
+            emit!("  movq %rcx, {}(%rbp)", va_area_disp + 48);
+            emit!("  movq %r8, {}(%rbp)", va_area_disp + 56);
+            emit!("  movq %r9, {}(%rbp)", va_area_disp + 64);
+            emit!("  movsd %xmm0, {}(%rbp)", va_area_disp + 72);
+            emit!("  movsd %xmm1, {}(%rbp)", va_area_disp + 80);
+            emit!("  movsd %xmm2, {}(%rbp)", va_area_disp + 88);
+            emit!("  movsd %xmm3, {}(%rbp)", va_area_disp + 96);
+            emit!("  movsd %xmm4, {}(%rbp)", va_area_disp + 104);
+            emit!("  movsd %xmm5, {}(%rbp)", va_area_disp + 112);
+            emit!("  movsd %xmm6, {}(%rbp)", va_area_disp + 120);
+            emit!("  movsd %xmm7, {}(%rbp)", va_area_disp + 128);
+        }
+
         for (i, param) in fun.params.iter().enumerate() {
             match sizeof(&param.ty) {
                 1 => emit!("  mov {}, -{}(%rbp)\n", self.argregs8[i],  fun.stack_size-param.offset),
@@ -501,6 +532,10 @@ impl Generator {
                 exit(1);
             },
         }
+    }
+
+    fn get_actual_obj_offset_to_rbp(&self, offset: usize) -> i64 {
+        return (-(self.cur_function_stack_size as i64) + offset as i64).try_into().unwrap();
     }
 
     fn push(&mut self, reg: &str) {

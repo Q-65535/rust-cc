@@ -386,11 +386,18 @@ impl ProgramAnalyzer {
         // parameters since function parameters are also in
         // the function body scope.
         self.scope_manager.enter_new_scope();
+        let mut var_area = None;
         let mut analyzed_params: Vec<Obj> = Vec::new();
         if let Some(DeclaratorSuffix::FunParam{params, is_variadic}) = &fun.declarator.suffix {
             for param in params {
                 let p = self.analyze_param(param);
                 analyzed_params.push(p);
+            }
+            if *is_variadic {
+                let var_area_type = Type::ArrayOf(Box::new(Char), 136);
+                let va_area_obj = self.create_local_obj("__va_area__", &var_area_type);
+                self.scope_manager.add_object(va_area_obj.clone());
+                var_area = Some(va_area_obj);
             }
         } else {
             let err_info = format!("compiler bug: the function doesn't have parameter field.");
@@ -403,7 +410,8 @@ impl ProgramAnalyzer {
             name,
             params: analyzed_params,
             stmts, stack_size,
-            is_static: symbol_attribute.is_static
+            is_static: symbol_attribute.is_static,
+            var_area,
         }
     }
 
