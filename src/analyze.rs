@@ -37,7 +37,7 @@ pub enum Type {
     Bool,
     Void,
     ArrayOf(Box<Type>, usize),
-    Func{return_type: Box<Type>, param_types: Vec<Type>},
+    Func{return_type: Box<Type>, param_types: Vec<Type>, is_variadic: bool},
     Struct(ir::Struct),
     Union(ir::Struct),
     Enum,
@@ -631,7 +631,7 @@ impl ProgramAnalyzer {
                     param_types.push(param_final_type);
                 }
                 let return_type = Box::new(return_type);
-                return Type::Func{return_type, param_types};
+                return Type::Func{return_type, param_types, is_variadic: *is_variadic};
             },
         }
     }
@@ -1647,16 +1647,14 @@ impl ProgramAnalyzer {
                         // linker reports the error if function name doesn't exist.
                         if let Some(obj) = self.scope_manager.resolve_object(name) {
                             let obj_ty = obj.ty.clone();
-                            if let Func{return_type, param_types} = obj_ty {
+                            if let Func{return_type, param_types, is_variadic} = obj_ty {
                                 let ty = *return_type;
                                 let ident = self.analyze_expr(ident);
                                 let mut casted_analyzed_args = Vec::new();
 
-                                // @Future: Add these judgements.
-                                // if args.len() > param_types.len() {
-                                //     report_semantic_error(span, "Too many arguments to call this function.");
-                                //     exit(1);
-                                // }
+                                if args.len() > param_types.len() && !is_variadic {
+                                    report_semantic_error(span, "Too many arguments to call this function.");
+                                }
                                 if args.len() < param_types.len() {
                                     report_semantic_error(span, "Too few arguments to call this function.");
                                 }
@@ -1670,10 +1668,12 @@ impl ProgramAnalyzer {
                                         }
                                         analyzed_arg = cast(analyzed_arg, param_type);
                                         casted_analyzed_args.push(analyzed_arg);
-                                    } else {
-                                        // @Temporary: For now, we just accept the "too many arguments" case.
+                                    } else if is_variadic {
                                         casted_analyzed_args.push(analyzed_arg);
+                                    } else {
+                                        report_semantic_error(span, "Compiler bug: Too many arguments error should be reported earlier.");
                                     }
+
                                 }
                                 let content = ExprType::FunCall(Box::new(ident), casted_analyzed_args);
                                 ir::Expr {content, ty, span}
