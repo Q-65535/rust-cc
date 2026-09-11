@@ -52,7 +52,7 @@ single_test:
 	$(CC) -o initializer.exe test/initializer.s -xc test/common
 	echo initializer.exe; ./initializer.exe || exit 1; echo;
 
-my_test:
+mytest:
 	cargo build
 	$(CC) -E -P -C test/mytest.c -o test/mytest.i
 	$(RUST_CC) -o test/mytest.s test/mytest.i

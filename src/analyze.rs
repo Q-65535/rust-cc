@@ -909,13 +909,14 @@ impl ProgramAnalyzer {
             start_index: decl_specs[0].span.start_index,
             end_index: decl_specs[decl_specs.len()-1].span.end_index,
         };
-        const VOID:  u32 = 1 << 0;
-        const BOOL:  u32 = 1 << 2;
-        const CHAR:  u32 = 1 << 4;
-        const SHORT: u32 = 1 << 6;
-        const INT:   u32 = 1 << 8;
-        const LONG:  u32 = 1 << 10;
-        const OTHER: u32 = 1 << 12;
+        const VOID:   u32 = 1 << 0;
+        const BOOL:   u32 = 1 << 2;
+        const CHAR:   u32 = 1 << 4;
+        const SHORT:  u32 = 1 << 6;
+        const INT:    u32 = 1 << 8;
+        const LONG:   u32 = 1 << 10;
+        const OTHER:  u32 = 1 << 12;
+        const SIGNED: u32 = 1 << 13;
 
         let mut var_attribute = Symbol_Attribute::default();
         let mut count: u32 = 0;
@@ -959,7 +960,7 @@ impl ProgramAnalyzer {
                         let error_info = format!("unknown typedef name :{}", name);
                         report_semantic_error(spec.span, &error_info);
                     }
-                    count += OTHER;
+                    count |= OTHER;
                     continue;
                 },
                 Decl_Spec_Kind::Int => {
@@ -980,29 +981,41 @@ impl ProgramAnalyzer {
                 Decl_Spec_Kind::Void => {
                     count += VOID;
                 },
+                Decl_Spec_Kind::Signed => {
+                    count |= SIGNED;
+                },
                 Decl_Spec_Kind::Struct_Union(st) => {
                     cur_type = self.analyze_struct_union(st);
-                    count += OTHER;
+                    count |= OTHER;
                     continue;
                 },
                 Decl_Spec_Kind::Enum(enum_spec) => {
                     cur_type = self.analyze_enum(enum_spec);
-                    count += OTHER;
+                    count |= OTHER;
                     continue;
                 },
             }
 
             cur_type = match count {
-                _ if count == VOID              => Type::Void,
-                _ if count == BOOL              => Type::Bool,
-                _ if count == CHAR              => Type::Char,
-                _ if count == SHORT             => Type::Short,
-                _ if count == SHORT + INT       => Type::Short,
-                _ if count == INT               => Type::Int,
-                _ if count == LONG              => Type::Long,
-                _ if count == LONG + INT        => Type::Long,
-                _ if count == LONG + LONG       => Type::Long,
-                _ if count == LONG + LONG + INT => Type::Long,
+                _ if count == VOID                       => Type::Void,
+                _ if count == BOOL                       => Type::Bool,
+                _ if count == CHAR                       => Type::Char,
+                _ if count == SIGNED + CHAR              => Type::Char,
+                _ if count == SHORT                      => Type::Short,
+                _ if count == SHORT + INT                => Type::Short,
+                _ if count == SIGNED + SHORT             => Type::Short,
+                _ if count == SIGNED + SHORT + INT       => Type::Short,
+                _ if count == INT                        => Type::Int,
+                _ if count == SIGNED                     => Type::Int,
+                _ if count == SIGNED + INT               => Type::Int,
+                _ if count == LONG                       => Type::Long,
+                _ if count == LONG + INT                 => Type::Long,
+                _ if count == LONG + LONG                => Type::Long,
+                _ if count == LONG + LONG + INT          => Type::Long,
+                _ if count == SIGNED + LONG              => Type::Long,
+                _ if count == SIGNED + LONG + INT        => Type::Long,
+                _ if count == SIGNED + LONG + LONG       => Type::Long,
+                _ if count == SIGNED + LONG + LONG + INT => Type::Long,
                 _ => {
                     let error_info = format!("Invalid type.");
                     report_semantic_error(whole_span, &error_info);
