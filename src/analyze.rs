@@ -98,13 +98,10 @@ pub struct Obj {
     // this offset should be based on %rbp
     pub offset: usize,
     pub align: usize,
-    // If obj is_global or is_extern, the offset field has no meaning.
+    // If obj is_global, is_extern or is_static, the offset field has no meaning.
     pub is_global: bool,
     pub is_extern: bool,
     pub is_static: bool,
-    // @Refactor?: Maybe we should add align field to this obj struct?
-    // @TODO: Add position info.
-    // When a variable is already defined, the compiler should tell where the variable is defined.
 }
 
 #[derive(Debug, Clone, PartialEq)]
