@@ -29,13 +29,17 @@ pub struct Symbol_Attribute {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    Pointer_To(Box<Type>),
+    Void,
+    Bool,
+    Char,
+    Short,
     Int,
     Long,
-    Short,
-    Char,
-    Bool,
-    Void,
+    UChar,
+    UShort,
+    UInt,
+    ULong,
+    Pointer_To(Box<Type>),
     ArrayOf(Box<Type>, usize),
     Func{return_type: Box<Type>, param_types: Vec<Type>, is_variadic: bool},
     Struct(ir::Struct),
@@ -49,13 +53,17 @@ use Type::*;
 impl Type {
     pub fn align(&self) -> usize {
         match self {
-            Pointer_To(_) => 8,
+            Type::Void => 1,
+            Type::Bool => 1,
+            Type::Char => 1,
+            Type::Short => 2,
             Type::Int => 4,
             Type::Long => 8,
-            Type::Short => 2,
-            Type::Char => 1,
-            Type::Bool => 1,
-            Type::Void => 1,
+            Type::UChar => 1,
+            Type::UShort => 2,
+            Type::UInt => 4,
+            Type::ULong => 8,
+            Pointer_To(_) => 8,
             ArrayOf(element_ty, len) => element_ty.align(),
             Func{..} => 8,
             Struct(st) => st.align,
@@ -65,17 +73,32 @@ impl Type {
             ty_none => 1,
         }
     }
+
+    pub fn size(&self) -> usize {
+        return sizeof(self);
+    }
+
+    pub fn is_unsigned(&self) -> bool {
+        match self {
+            Type::UChar | Type::UShort | Type::UInt | Type::ULong => true,
+            _ => false,
+        }
+    }
 }
 
 pub fn sizeof(ty: &Type) -> usize {
     match ty {
-        Pointer_To(_) => 8,
+        Type::Void => 1,
+        Type::Bool => 1,
+        Type::Char => 1,
+        Type::Short => 2,
         Type::Int => 4,
         Type::Long => 8,
-        Type::Short => 2,
-        Type::Char => 1,
-        Type::Bool => 1,
-        Type::Void => 1,
+        Type::UChar => 1,
+        Type::UShort => 2,
+        Type::UInt => 4,
+        Type::ULong => 8,
+        Pointer_To(_) => 8,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         Func{..} => 8,
         Struct(st) => st.size,
@@ -909,14 +932,15 @@ impl ProgramAnalyzer {
             start_index: decl_specs[0].span.start_index,
             end_index: decl_specs[decl_specs.len()-1].span.end_index,
         };
-        const VOID:   u32 = 1 << 0;
-        const BOOL:   u32 = 1 << 2;
-        const CHAR:   u32 = 1 << 4;
-        const SHORT:  u32 = 1 << 6;
-        const INT:    u32 = 1 << 8;
-        const LONG:   u32 = 1 << 10;
-        const OTHER:  u32 = 1 << 12;
-        const SIGNED: u32 = 1 << 13;
+        const VOID:     u32 = 1 << 0;
+        const BOOL:     u32 = 1 << 2;
+        const CHAR:     u32 = 1 << 4;
+        const SHORT:    u32 = 1 << 6;
+        const INT:      u32 = 1 << 8;
+        const LONG:     u32 = 1 << 10;
+        const OTHER:    u32 = 1 << 12;
+        const SIGNED:   u32 = 1 << 13;
+        const UNSIGNED: u32 = 1 << 14;
 
         let mut var_attribute = Symbol_Attribute::default();
         let mut count: u32 = 0;
@@ -943,15 +967,15 @@ impl ProgramAnalyzer {
                 Decl_Spec_Kind::Typedef => {
                     var_attribute.is_typedef = true;
                     continue;
-                },
+                }
                 Decl_Spec_Kind::Extern => {
                     var_attribute.is_extern = true;
                     continue;
-                },
+                }
                 Decl_Spec_Kind::Static => {
                     var_attribute.is_static = true;
                     continue;
-                },
+                }
                 Decl_Spec_Kind::Typedef_Name(name) => {
                     let result = self.scope_manager.resolve_typedef_alias(name);
                     if let Some(ty) = result {
@@ -962,38 +986,41 @@ impl ProgramAnalyzer {
                     }
                     count |= OTHER;
                     continue;
-                },
+                }
                 Decl_Spec_Kind::Int => {
                     count += INT;
-                },
+                }
                 Decl_Spec_Kind::Long => {
                     count += LONG;
-                },
+                }
                 Decl_Spec_Kind::Short => {
                     count += SHORT;
-                },
+                }
                 Decl_Spec_Kind::Char => {
                     count += CHAR;
-                },
+                }
                 Decl_Spec_Kind::Bool => {
                     count += BOOL;
-                },
+                }
                 Decl_Spec_Kind::Void => {
                     count += VOID;
-                },
+                }
                 Decl_Spec_Kind::Signed => {
                     count |= SIGNED;
-                },
+                }
+                Decl_Spec_Kind::Unsigned => {
+                    count |= UNSIGNED;
+                }
                 Decl_Spec_Kind::Struct_Union(st) => {
                     cur_type = self.analyze_struct_union(st);
                     count |= OTHER;
                     continue;
-                },
+                }
                 Decl_Spec_Kind::Enum(enum_spec) => {
                     cur_type = self.analyze_enum(enum_spec);
                     count |= OTHER;
                     continue;
-                },
+                }
             }
 
             cur_type = match count {
@@ -1001,13 +1028,18 @@ impl ProgramAnalyzer {
                 _ if count == BOOL                       => Type::Bool,
                 _ if count == CHAR                       => Type::Char,
                 _ if count == SIGNED + CHAR              => Type::Char,
+                _ if count == UNSIGNED + CHAR              => Type::UChar,
                 _ if count == SHORT                      => Type::Short,
                 _ if count == SHORT + INT                => Type::Short,
                 _ if count == SIGNED + SHORT             => Type::Short,
                 _ if count == SIGNED + SHORT + INT       => Type::Short,
+                _ if count == UNSIGNED + SHORT             => Type::UShort,
+                _ if count == UNSIGNED + SHORT + INT       => Type::UShort,
                 _ if count == INT                        => Type::Int,
                 _ if count == SIGNED                     => Type::Int,
                 _ if count == SIGNED + INT               => Type::Int,
+                _ if count == UNSIGNED                     => Type::UInt,
+                _ if count == UNSIGNED + INT               => Type::UInt,
                 _ if count == LONG                       => Type::Long,
                 _ if count == LONG + INT                 => Type::Long,
                 _ if count == LONG + LONG                => Type::Long,
@@ -1016,6 +1048,10 @@ impl ProgramAnalyzer {
                 _ if count == SIGNED + LONG + INT        => Type::Long,
                 _ if count == SIGNED + LONG + LONG       => Type::Long,
                 _ if count == SIGNED + LONG + LONG + INT => Type::Long,
+                _ if count == UNSIGNED + LONG              => Type::ULong,
+                _ if count == UNSIGNED + LONG + INT        => Type::ULong,
+                _ if count == UNSIGNED + LONG + LONG       => Type::ULong,
+                _ if count == UNSIGNED + LONG + LONG + INT => Type::ULong,
                 _ => {
                     let error_info = format!("Invalid type.");
                     report_semantic_error(whole_span, &error_info);
@@ -1094,7 +1130,6 @@ impl ProgramAnalyzer {
                 }
             }
         }
-
         return the_type;
     }
 
@@ -1869,7 +1904,9 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
 
 fn is_scalar_type(ty: &Type) -> bool {
     matches!(ty, 
-        Enum | Bool | Char | Short | Int | Long | Pointer_To(..) | ArrayOf(..)
+        Char  | Short  | Int  | Long  | Enum | Bool |
+        UChar | UShort | UInt | ULong |
+        Pointer_To(..) | ArrayOf(..)
     )
 }
 
@@ -1884,7 +1921,8 @@ fn array_of(ty: &Type, len: usize) -> Type {
 }
 
 pub fn is_integer(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Long | Type::Short | Type::Char | Type::Bool | Type::Enum)
+    matches!(ty, Char  | Short  | Int  | Long | Bool | Enum |
+                 UChar | UShort | UInt | ULong)
 }
 
 // evaluate whether a expression of right type can be assigned to a "stuff"
@@ -2070,17 +2108,35 @@ fn usual_arithmatic_conversion(lhs: ir::Expr, rhs: ir::Expr) -> (ir::Expr, ir::E
 }
 
 // This function implicitly treat lhs as standard.
-fn get_common_type(lhs_type: &Type, rhs_type: &Type) -> Type {
-    match lhs_type {
+fn get_common_type(lt: &Type, rt: &Type) -> Type {
+    match lt {
         Pointer_To(pointee_type) => return (pointer_to(pointee_type)),
         ArrayOf(element_type, _) => return (pointer_to(element_type)),
         _ => (),
     }
 
-    if sizeof(lhs_type) == 8 || sizeof(rhs_type) == 8 {
-        return Type::Long;
+    let mut lt = lt.clone();
+    let mut rt = rt.clone();
+
+    if lt.size() < 4 {
+        lt = Int;
     }
-    return Type::Int;
+
+    if rt.size() < 4 {
+       rt = Int;
+    }
+
+    if lt.size() > rt.size() {
+        return lt;
+    } else if lt.size() < rt.size() {
+        return rt;
+    }
+
+    if rt.is_unsigned() {
+        return rt;
+    }
+
+    return lt;
 }
 
 fn gen_promoted_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Expr {

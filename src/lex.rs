@@ -47,7 +47,7 @@ pub enum TokenKind {
     Ret, If, Else, For, While,
     Sizeof, Typedef, Struct, LexEnum, Int, Char, _Bool, Union,
     Long, Short, Void, _Atomic, Static, Extern, Goto, Break, Continue,
-    Switch, Case, Default, _Alignas, _Alignof, Do, Signed,
+    Switch, Case, Default, _Alignas, _Alignof, Do, Signed, Unsigned,
 
     Eof,
 }
@@ -98,6 +98,7 @@ impl Lexer {
             ("default".to_string(), Default),
             ("do".to_string(), Do),
             ("signed".to_string(), Signed),
+            ("unsigned".to_string(), Unsigned),
         ].into_iter().collect();
         Lexer{
             src: s.chars().collect(),

@@ -62,6 +62,7 @@ macro_rules! emit_raw {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fundemental_Type {
     I8, I16, I32, I64,
+    U8, U16, U32, U64,
 }
 use Fundemental_Type::*;
 
@@ -313,22 +314,27 @@ impl Generator {
                 self.push("%rax");
                 self.expr_gen(lhs);
                 self.pop("%rdi");
-                let (ax, di) = if matches!(lhs.ty, Long | Pointer_To(..) | ArrayOf(..)) {
-                    ("%rax", "%rdi")
+                let (ax, di, dx) = if matches!(lhs.ty, Long | ULong | Pointer_To(..) | ArrayOf(..)) {
+                    ("%rax", "%rdi", "%rdx")
                 } else {
-                    ("%eax", "%edi")
+                    ("%eax", "%edi", "%edx")
                 };
                 match op {
                     Plus =>  emit!("  add {}, {}", di, ax),
                     Minus => emit!("  sub {}, {}", di, ax),
                     Mul =>   emit!("  imul {}, {}", di, ax),
                     Div | Modulus => {
-                        if sizeof(&lhs.ty) == 8 {
-                            emit!("  cqo");
+                        if expr.ty.is_unsigned() {
+                          emit!("  mov $0, {}", dx);
+                          emit!("  div     {}", di);
                         } else {
-                            emit!("  cdq");
+                            if sizeof(&lhs.ty) == 8 {
+                                emit!("  cqo");
+                            } else {
+                                emit!("  cdq");
+                            }
+                            emit!("  idiv {}", di);
                         }
-                        emit!("  idiv {}", di);
                         if *op == Modulus {
                             emit!("  mov %rdx, %rax");
                         }
@@ -366,8 +372,8 @@ impl Generator {
                     }
                     SHR => {
                         emit!("  mov %rdi, %rcx");
-                        if sizeof(&expr.ty) == 8 {
-                            emit!("  sar %cl, {}", ax);
+                        if lhs.ty.is_unsigned() {
+                            emit!("  shr %cl, {}", ax);
                         } else {
                             emit!("  sar %cl, {}", ax);
                         }
@@ -377,8 +383,20 @@ impl Generator {
                         match op {
                             Eq => emit!("  sete %al"),
                             Neq => emit!("  setne %al"),
-                            LT => emit!("  setl %al"),
-                            LE => emit!("  setle %al"),
+                            LT => {
+                                if lhs.ty.is_unsigned() {
+                                    emit!("  setb %al");
+                                } else {
+                                    emit!("  setl %al");
+                                }
+                            }
+                            LE => {
+                                if lhs.ty.is_unsigned() {
+                                    emit!("  setbe %al");
+                                } else {
+                                    emit!("  setle %al");
+                                }
+                            }
                             GT => {
                                 emit!("  cmp %rax, %rdi");
                                 emit!("  setl %al");
@@ -483,9 +501,11 @@ impl Generator {
                         // the file "common" is not processed in our compiler, it is processed
                         // after the compilation as specified in Makefile.
                         match &expr.ty {
-                            Bool  =>  emit!("  movzx %al, %eax"),
-                            Char  =>  emit!("  movsbl %al, %eax"),
-                            Short =>  emit!("  movswl %ax, %eax"),
+                            Bool  =>   emit!("  movzx %al, %eax"),
+                            Char  =>   emit!("  movsbl %al, %eax"),
+                            Short =>   emit!("  movswl %ax, %eax"),
+                            UChar  =>  emit!("  movzbl %al, %eax"),
+                            UShort =>  emit!("  movzwl %ax, %eax"),
                             _ => (),
                         }
                     }
@@ -597,11 +617,16 @@ fn get_assembly_type(ty: &Type) -> Fundemental_Type {
     match ty {
         // Bool is special. Because it is normalized to either 0 or 1, we can
         // just use I64 without any problem.
-        Bool => I64,
-        Char => I8,
-        Short => I16,
-        Int => I32,
-        Long | Pointer_To(..) | ArrayOf(..) => I64,
+        Bool   =>   I64,
+        Char   =>   I8,
+        Short  =>   I16,
+        Int    =>   I32,
+        Long   =>   I64, 
+        UChar  =>   U8,
+        UShort =>   U16,
+        UInt   =>   U32,
+        ULong  =>   U64, 
+        Pointer_To(..) | ArrayOf(..) => I64,
         Func{return_type, ..} => get_assembly_type(return_type),
         _ => {
             println!("cannot get the fundemental type of this type: {:?}", ty);
@@ -611,40 +636,110 @@ fn get_assembly_type(ty: &Type) -> Fundemental_Type {
 }
 
 fn gen_cast_operation(from: Fundemental_Type, to: Fundemental_Type) {
+    let i32i8  = "  movsbl  %al, %eax";
+    let i32u8  = "  movzbl  %al, %eax";
+    let i32i16 = "  movswl  %ax, %eax";
+    let i32u16 = "  movzwl  %ax, %eax";
+    let i32i64 = "  movsxd %eax, %rax";
+    let u32i64 = "  mov    %eax, %eax";
+
+    fn direct_emit(ins: &str) {
+        emit!("{}", ins);
+    }
+
     match from {
         I8 => match to {
-                I32 => emit!("movsxd %eax, %rax"),
-                _ => (),
+                I8  => (),
+                I16 => (),
+                I32 => (),
+                I64 => direct_emit(i32i64),
+                U8  => direct_emit(i32u8),
+                U16 => direct_emit(i32u16),
+                U32 => (),
+                U64 => direct_emit(i32i64),
             }
         I16 => match to {
-                I8 => emit!("movsbl %al, %eax"),
-                I64 => emit!("movsxd %eax, %rax"),
-                _ => (),
+                I8  => direct_emit(i32i8),
+                I16 => (),
+                I32 => (),
+                I64 => direct_emit(i32i64),
+                U8  => direct_emit(i32u8),
+                U16 => direct_emit(i32u16),
+                U32 => (),
+                U64 => direct_emit(i32i64),
         }
         I32 => match to {
-                I8 => emit!("movsbl %al, %eax"),
-                I16 => emit!("movswl %ax, %eax"),
-                I64 => emit!("movsxd %eax, %rax"),
-                _ => (),
+                I8  => direct_emit(i32i8),
+                I16 => direct_emit(i32i16),
+                I32 => (),
+                I64 => direct_emit(i32i64),
+                U8  => direct_emit(i32u8),
+                U16 => direct_emit(i32u16),
+                U32 => (),
+                U64 => direct_emit(i32i64),
         }
         I64 => match to {
-                I8 => emit!("movsbl %al, %eax"),
-                I16 => emit!("movswl %ax, %eax"),
-                _ => (),
+                I8  => direct_emit(i32i8),
+                I16 => direct_emit(i32i16),
+                I32 => (),
+                I64 => (),
+                U8  => direct_emit(i32u8),
+                U16 => direct_emit(i32u16),
+                U32 => (),
+                U64 => (),
+        }
+        U8 => match to {
+                I8  => direct_emit(i32i8),
+                I16 => (),
+                I32 => (),
+                I64 => direct_emit(i32i64),
+                U8  => (),
+                U16 => (),
+                U32 => (),
+                U64 => direct_emit(i32i64),
+            }
+        U16 => match to {
+                I8  => direct_emit(i32i8),
+                I16 => direct_emit(i32i16),
+                I32 => (),
+                I64 => direct_emit(i32i64),
+                U8  => direct_emit(i32u8),
+                U16 => (),
+                U32 => (),
+                U64 => direct_emit(i32i64),
+        }
+        U32 => match to {
+                I8  => direct_emit(i32i8),
+                I16 => direct_emit(i32i16),
+                I32 => (),
+                I64 => direct_emit(i32i64),
+                U8  => direct_emit(i32u8),
+                U16 => direct_emit(i32u16),
+                U32 => (),
+                U64 => direct_emit(u32i64),
+        }
+        U64 => match to {
+                I8  => direct_emit(i32i8),
+                I16 => direct_emit(i32i16),
+                I32 => (),
+                I64 => (),
+                U8  => direct_emit(i32u8),
+                U16 => direct_emit(i32u16),
+                U32 => (),
+                U64 => (),
         }
     }
 }
 
 fn load_according_to_type(ty: &Type) {
-    if matches!(ty, ArrayOf(..) | Struct(..) | Union(..)) {
-        return;
-    } else {
-        match sizeof(ty) {
-            1 => emit!("  movsbl (%rax), %eax"),
-            2 => emit!("  movswl (%rax), %eax"),
-            4 => emit!("  movsxd (%rax), %rax"),
-            _ => emit!("  mov    (%rax), %rax"),
-        }
+    if matches!(ty, ArrayOf(..) | Struct(..) | Union(..)) {return;}
+
+    let mov_kind = if ty.is_unsigned() {"movz"} else {"movs"};
+    match sizeof(ty) {
+        1 => emit!("  {}bl (%rax), %eax", mov_kind),
+        2 => emit!("  {}wl (%rax), %eax", mov_kind),
+        4 => emit!("  movsxd (%rax), %rax"),
+        _ => emit!("  mov    (%rax), %rax"),
     }
 }
 
