@@ -1747,30 +1747,28 @@ impl ProgramAnalyzer {
             Sizeof_Expr(expr_content) => {
                 let content = self.analyze_expr(expr_content);
                 let size = sizeof(&content.ty);
-                // @Future: The data type of sizeof expression is u64.
-                let ty = Type::Int;
+                let ty = Type::ULong;
                 let content = ir::ExprType::Integer(size.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Sizeof_Type_Name(type_name) => {
                 let the_type = self.resolve_type_name(type_name);
                 let size = sizeof(&the_type);
-                let ty = Type::Int;
+                let ty = Type::ULong;
                 let content = ir::ExprType::Integer(size.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Alignof_Expr(expr_content) => {
                 let content = self.analyze_expr(expr_content);
                 let align = content.ty.align();
-                // @Future: The data type of sizeof expression is u64.
-                let ty = Type::Int;
+                let ty = Type::ULong;
                 let content = ir::ExprType::Integer(align.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Alignof_Type_Name(type_name) => {
                 let the_type = self.resolve_type_name(type_name);
                 let align = the_type.align();
-                let ty = Type::Int;
+                let ty = Type::ULong;
                 let content = ir::ExprType::Integer(align.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
@@ -2094,7 +2092,7 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                     report_semantic_error(rhs.span, "pointer arithmatic error: type doesn't match");
                 }
                 // The result of "pointer - pointer" is the gap between them,
-                // measured in elements.
+                // measured in terms of number of elements (the result can be negative). 
                 let expr = gen_promoted_binary_expr(lhs, rhs, ir::OP::Minus);
                 let scale = sizeof(&basic_ty);
                 let mut scaled_expr = scale_expr(expr, scale, ir::OP::Div);
