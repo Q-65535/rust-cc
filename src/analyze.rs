@@ -2314,10 +2314,18 @@ fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String>
                     return Ok((label, left_num * right_num));
                 }
                 Div => {
-                    return Ok((label, left_num / right_num));
+                    if expr.ty.is_unsigned() {
+                        return Ok((label, ((left_num as u64) / (right_num as u64)) as i64));
+                    } else {
+                        return Ok((label, left_num / right_num));
+                    }
                 }
                 Modulus => {
-                    return Ok((label, left_num % right_num));
+                    if expr.ty.is_unsigned() {
+                        return Ok((label, ((left_num as u64) % (right_num as u64)) as i64));
+                    } else {
+                        return Ok((label, left_num % right_num));
+                    }
                 }
                 BitAnd => {
                     return Ok((label, left_num & right_num));
@@ -2332,7 +2340,11 @@ fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String>
                     return Ok((label, left_num << right_num));
                 }
                 SHR => {
-                    return Ok((label, left_num >> right_num));
+                    if expr.ty.is_unsigned() {
+                        return Ok((label, ((left_num as u64) >> (right_num as u64)) as i64));
+                    } else {
+                        return Ok((label, left_num >> right_num));
+                    }
                 }
                 Eq => {
                     return Ok((label, (left_num == right_num) as i64));
@@ -2341,16 +2353,32 @@ fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String>
                     return Ok((label, (left_num != right_num) as i64));
                 }
                 LT => {
-                    return Ok((label, (left_num < right_num) as i64));
+                    if expr.ty.is_unsigned() {
+                        return Ok((label, ((left_num as u64) < (right_num as u64)) as i64));
+                    } else {
+                        return Ok((label, (left_num < right_num) as i64));
+                    }
                 }
                 LE => {
-                    return Ok((label, (left_num <= right_num) as i64));
+                    if expr.ty.is_unsigned() {
+                        return Ok((label, ((left_num as u64) <= (right_num as u64)) as i64));
+                    } else {
+                        return Ok((label, (left_num <= right_num) as i64));
+                    }
                 }
                 GT => {
-                    return Ok((label, (left_num > right_num) as i64));
+                    if expr.ty.is_unsigned() {
+                        return Ok((label, ((left_num as u64) > (right_num as u64)) as i64));
+                    } else {
+                        return Ok((label, (left_num > right_num) as i64));
+                    }
                 }
                 GE => {
-                    return Ok((label, (left_num >= right_num) as i64));
+                    if expr.ty.is_unsigned() {
+                        return Ok((label, ((left_num as u64) >= (right_num as u64)) as i64));
+                    } else {
+                        return Ok((label, (left_num >= right_num) as i64));
+                    }
                 }
                 LOGAND => {
                     if (left_num != 0) && (right_num != 0) {
@@ -2389,9 +2417,9 @@ fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String>
             if (is_integer(ty)) {
                 let (label, num) = eval_label_constant(expr)?;
                 let truncated_num = match sizeof(ty) {
-                    1 => (num as u8) as i64,
-                    2 => (num as u16) as i64,
-                    4 => (num as u32) as i64,
+                    1 => if ty.is_unsigned() { (num as u8) as i64 } else {(num as i8) as i64},
+                    2 => if ty.is_unsigned() { (num as u16) as i64 } else {(num as i16) as i64},
+                    4 => if ty.is_unsigned() { (num as u32) as i64 } else {(num as i32) as i64},
                     _ => num,
                 };
                 return Ok((label, truncated_num));
