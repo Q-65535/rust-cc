@@ -2,6 +2,7 @@ use crate::exit;
 use colored::*;
 use crate::lex::*;
 use crate::lex::TokenKind::{self, *};
+use crate::lex::Integer_Const_Type::{self, *};
 use ExprType::*;
 use crate::SRC;
 use crate::common::*;
@@ -199,7 +200,7 @@ pub enum Direct_Declarator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Integer(i64),
+    Integer{value: i64, ty: Integer_Const_Type},
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -1230,7 +1231,11 @@ impl Parser {
                     return self.parse_paren();
                 }
             },
-            Lex_Integer(n) => Ok(self.parse_natural_number(n)),
+            Lex_Integer{value, ty} => {
+                let token = self.bump();
+                let expr = Expr::new(Integer{value, ty}, token.span);
+                return Ok(expr);
+            }
             Exclamation => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
@@ -1428,21 +1433,6 @@ impl Parser {
             Ok(expr)
         } else {
             Err(error_token(&tok, "expect an identifier"))
-        }
-    }
-
-    fn parse_natural_number(&mut self, n: i64) -> Expr {
-        debug_assert!(matches!(self.cur_token().kind, Lex_Integer(_)));
-        let token = self.bump();
-        Expr::new(Integer(n), token.span)
-    }
-
-    fn parse_raw_usize(&mut self) -> Result<usize, String> {
-        let token = self.bump();
-        if let Lex_Integer(n) = token.kind {
-            Ok(n.try_into().unwrap())
-        } else {
-            Err(error_token(&token, "expect a number"))
         }
     }
 

@@ -38,8 +38,9 @@ pub enum TokenKind {
     Semicolon,
     Colon,
     LexComma,
-    Lex_Integer(i64),
-    Lex_Char(u8),
+    // @Refactor?: Should we just use u64 for integer constant all the way during compilation?
+    Lex_Integer{value: i64, ty: Integer_Const_Type},
+    Lex_Unsigned(u64),
     LexIdent(String),
     StringLiteral(Vec<u8>),
 
@@ -52,6 +53,13 @@ pub enum TokenKind {
     Eof,
 }
 use TokenKind::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Integer_Const_Type {
+    tInt, tLong, tUInt, tULong,
+}
+use Integer_Const_Type::*;
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
@@ -344,9 +352,9 @@ impl Lexer {
                     }
                 },
                 '0'..='9' => {
-                    let num = self.read_int();
-                    let num_str = num.to_string();
-                    tokens.push(Self::gen_token(Lex_Integer(num), start_index, num_str.len()));
+                    let (value, ty) = self.read_int();
+                    let num_str = value.to_string();
+                    tokens.push(Self::gen_token(Lex_Integer{value, ty}, start_index, num_str.len()));
                 },
                 '\'' => {
                     let character = self.read_char_literal();
@@ -364,7 +372,7 @@ impl Lexer {
                             // number whose data type is 32-bit singed integer.
                             // So, in GCC, (-128=='\x80') evaluates to 1, in this compiler, (128=='\x80') evaluates to 1.
                             // I don't known whether this difference will cause any problem, we'll see.
-                            tokens.push(Self::gen_token(Lex_Integer(byte as i64), start_index, len));
+                            tokens.push(Self::gen_token(Lex_Integer{value: byte as i64, ty: tInt}, start_index, len));
                         }
                         Err(s) => {
                             lexical_error_at(start_index, &s);
@@ -442,7 +450,7 @@ impl Lexer {
         tokens
     }
 
-    fn read_int(&mut self) -> i64 {
+    fn read_int(&mut self) -> (i64, Integer_Const_Type) {
         debug_assert!(matches!(self.cur_char(), '0'..='9'));
         let c = self.cur_char();
         let mut base = 10;
@@ -480,10 +488,10 @@ impl Lexer {
             }
         }
 
-        let mut result: i64 = 0;
+        let mut result: u64 = 0;
         if base == 10 {
             loop {
-                let cur_digit = self.cur_char() as i64 - '0' as i64;
+                let cur_digit = self.cur_char() as u64 - '0' as u64;
                 result *= base;
                 result += cur_digit;
                 if !matches!(self.peek_char(), Some('0'..='9')) {break;}
@@ -492,7 +500,7 @@ impl Lexer {
         }
         if base == 8 {
             loop {
-                let cur_digit = self.cur_char() as i64 - '0' as i64;
+                let cur_digit = self.cur_char() as u64 - '0' as u64;
                 result *= base;
                 result += cur_digit;
                 if !matches!(self.peek_char(), Some('0'..='7')) {break;}
@@ -501,7 +509,7 @@ impl Lexer {
         }
         if base == 2 {
             loop {
-                let cur_digit = self.cur_char() as i64 - '0' as i64;
+                let cur_digit = self.cur_char() as u64 - '0' as u64;
                 result *= base;
                 result += cur_digit;
                 if !matches!(self.peek_char(), Some('0'..='1')) {break;}
@@ -510,13 +518,13 @@ impl Lexer {
         }
         if base == 16 {
             loop {
-                let mut cur_digit: i64 = 0;
+                let mut cur_digit: u64 = 0;
                 if matches!(self.cur_char(), '0'..='9') {
-                    cur_digit = self.cur_char() as i64 - '0' as i64;
+                    cur_digit = self.cur_char() as u64 - '0' as u64;
                 } else if matches!(self.cur_char(), 'a'..='f') {
-                    cur_digit = self.cur_char() as i64 - 'a' as i64 + 10;
+                    cur_digit = self.cur_char() as u64 - 'a' as u64 + 10;
                 } else if matches!(self.cur_char(), 'A'..='F') {
-                    cur_digit = self.cur_char() as i64 - 'A' as i64 + 10;
+                    cur_digit = self.cur_char() as u64 - 'A' as u64 + 10;
                 }
                 result *= base;
                 result += cur_digit;
@@ -525,7 +533,71 @@ impl Lexer {
                 self.next_char();
             }
         }
-        return result;
+
+        let mut l_count = 0;
+        let mut u_count = 0;
+        while matches!(self.peek_char(), Some('l' | 'L' | 'u' | 'U')) {
+            self.next_char();
+            if matches!(self.cur_char(), 'l' | 'L') {
+                l_count += 1;
+            } else if matches!(self.cur_char(), 'u' | 'U') {
+                u_count += 1;
+            }
+        }
+        let mut l = false;
+        let mut u = false;
+        if l_count > 0 {
+            if l_count > 2 {
+                let err_msg = format!("At most 2 L (or l) suffix is allowed, but you give {} of it.", l_count);
+                lexical_error_at(self.index, &err_msg);
+            } else {
+                l = true;
+            }
+        }
+        if u_count > 0 {
+            if u_count > 1 {
+                let err_msg = format!("At most 1 U (or u) suffix is allowed, but you give {} of it.", u_count);
+                lexical_error_at(self.index, &err_msg);
+            } else {
+                u = true;
+            }
+        }
+
+
+        // Infer a type.
+        let ty: Integer_Const_Type;
+        if base == 10 {
+            if l && u {
+                ty = tULong;
+            } else if l {
+                ty = tLong;
+            } else if u {
+                ty = if (result >> 32) != 0 {tULong} else {tUInt};
+            } else {
+                ty = if (result >> 31) != 0 {tLong} else {tInt};
+            }
+        } else {
+            if l && u {
+                ty = tULong;
+            } else if l {
+                ty = if (result >> 63) != 0 {tULong} else {tLong};
+            } else if u {
+                ty = if (result >> 32) != 0 {tULong} else {tInt};
+            // According to C spec:
+            // For unsuffixed non-decimal integer constants, choose the first
+            // type whose range contains the value, in this order:
+            // int -> unsigned int -> long -> unsigned long.
+            } else if (result >> 63) != 0 {
+                ty = tULong;
+            } else if (result >> 32) != 0 {
+                ty = tLong;
+            } else if (result >> 31) != 0 {
+                ty = tUInt;
+            } else {
+                ty = tInt;
+            }
+        }
+        return (result as i64, ty);
     }
 
     // @Question: Should we return a u8 or i8?
