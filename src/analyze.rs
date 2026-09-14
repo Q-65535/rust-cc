@@ -81,7 +81,7 @@ impl Type {
 
     pub fn is_unsigned(&self) -> bool {
         match self {
-            Type::UChar | Type::UShort | Type::UInt | Type::ULong => true,
+            UChar | UShort | UInt | ULong | Pointer_To(..) => true,
             _ => false,
         }
     }
@@ -2103,6 +2103,14 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
             } else {
                 gen_promoted_binary_expr(lhs, rhs, ir::OP::Minus)
             }
+        }
+        // Here, we specificlly transform this form: "a > b" to "b < a".
+        OP::GT => {
+            gen_promoted_binary_expr(rhs, lhs, OP::LT)
+        }
+        // transform "a >= b" to "b <= a".
+        OP::GE => {
+            gen_promoted_binary_expr(rhs, lhs, OP::LE)
         }
         _ => {
             gen_promoted_binary_expr(lhs, rhs, op)

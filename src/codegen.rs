@@ -397,14 +397,6 @@ impl Generator {
                                     emit!("  setle %al");
                                 }
                             }
-                            GT => {
-                                emit!("  cmp %rax, %rdi");
-                                emit!("  setl %al");
-                            },
-                            GE => {
-                                emit!("  cmp %rax, %rdi");
-                                emit!("  setle %al");
-                            },
                             _ => unreachable!(),
                         }
                         emit!("  movzb %al, %rax");
