@@ -915,6 +915,10 @@ impl Parser {
                 let cur_array_len = if matches!(&self.cur_token().kind, RSquareBracket) {
                     None
                 } else {
+                    // Ignore "static" and "const" in array-dimensions.
+                    while matches!(self.cur_token().kind, Static | Restrict) {
+                        self.bump();
+                    }
                     let expr = self.parse_expr(Lowest, Left_To_Right)?;
                     Some(Box::new(expr))
                 };
