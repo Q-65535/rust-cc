@@ -657,59 +657,55 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn resolve_abstract_declarator(&mut self, base_type: &Type, declarator: &Option<Abstract_Declarator>) -> Result<Type, String> {
+    fn resolve_abstract_declarator(&mut self, base_type: &Type, declarator: &Abstract_Declarator) -> Type {
+        use Decl_Spec_Kind::*;
         let mut cur_type = base_type.clone();
-        if let Some(declarator)  = declarator {
-            // deal with pointers
-            for i in 0..declarator.star_count {
-                cur_type = pointer_to(&cur_type);
-            }
-            // deal with suffix
-            if let Some(suffix) = &declarator.suffix {
-                cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
-            }
-            if let Some(inner_declarator) = &declarator.direct_abstract_declarator {
-
-                // @Cleanup
-                // @Cleanup
-                // @Cleanup
-                // @Cleanup
-                cur_type = self.resolve_abstract_declarator(&cur_type, &Some(*inner_declarator.clone()))?;
-            }
-        }
-
-        // If the final type is a tag, We want to make sure that
-        // it can resove to a concrete struct, and do the Resolvation.
-        if let Tag(tag_name) = cur_type.clone() {
-            match self.scope_manager.resolve_tag(&tag_name) {
-                Some(the_type) => cur_type = the_type.clone(),
-                None => {
-                    let err_info = format!("Storage size of '{}' is unkonwn.", &tag_name);
-                    return Err(err_info);
+        // deal with pointers
+        for q in &declarator.qualifiers_and_pointers {
+            match q {
+                Const | Restrict | Volatile | _Atomic => continue,
+                Pointer_Mark => cur_type = pointer_to(&cur_type),
+                _ => {
+                    let err_info = format!("Compiler bug: not a qualifier or pointer! {:?}", q);
+                    report_semantic_error(declarator.span, &err_info);
                 }
             }
-        }
-        return Ok(cur_type);
-    }
-
-    fn resolve_declarator(&mut self, attribute: &Symbol_Attribute, base_type: &Type, declarator: &Declarator) -> (Type, String) {
-        // deal with pointers
-        let mut cur_type = base_type.clone();
-        let mut name = "empty_declarator_name".to_string();
-        for i in 0..declarator.star_count {
-            cur_type = pointer_to(&cur_type);
         }
         // deal with suffix
         if let Some(suffix) = &declarator.suffix {
             cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
         }
+        if let Some(inner_declarator) = &declarator.direct_abstract_declarator {
+            cur_type = self.resolve_abstract_declarator(&cur_type, inner_declarator);
+        }
+        return cur_type;
+    }
+
+    fn resolve_declarator(&mut self, attribute: &Symbol_Attribute, base_type: &Type, declarator: &Declarator) -> (Type, String) {
+        use Decl_Spec_Kind::*;
+        let mut cur_type = base_type.clone();
+        for qualifier in &declarator.qualifiers_and_pointers {
+            match qualifier {
+                Const | Restrict | Volatile | _Atomic => continue,
+                Pointer_Mark => cur_type = pointer_to(&cur_type),
+                _ => {
+                    let err_info = format!("Compiler bug, not a qualifier");
+                    report_semantic_error(declarator.span, &err_info);
+                }
+            }
+        }
+        // deal with suffix
+        if let Some(suffix) = &declarator.suffix {
+            cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
+        }
+        let name: String;
         match &*declarator.direct_declarator {
             Direct_Declarator::Identifier(ident) => {
                 name = ident.name.clone();
-            },
+            }
             Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
                 (cur_type, name) = self.resolve_declarator(attribute, &cur_type, &inner_declarator);
-            },
+            }
         }
 
         let mut need_concrete_type_info = true;
@@ -729,7 +725,7 @@ impl ProgramAnalyzer {
                 }
             }
 
-            if cur_type == Void {
+            if cur_type == Type::Void {
                 let err_info = format!("variable declared void!");
                 report_semantic_error(declarator.span, &err_info);
             }
@@ -928,6 +924,7 @@ impl ProgramAnalyzer {
     }
 
     fn analyze_decl_specs(&mut self, decl_specs: &Vec<Decl_Spec>) -> (Type, Symbol_Attribute) {
+        use Decl_Spec_Kind::*;
         debug_assert!(decl_specs.len() > 0);
         let whole_span = Span{
             start_index: decl_specs[0].span.start_index,
@@ -948,12 +945,12 @@ impl ProgramAnalyzer {
         let mut cur_type = Type::Int;
         for spec in decl_specs {
             match &spec.content {
-                Decl_Spec_Kind::Alignas_Type_Name(type_name) => {
+                Alignas_Type_Name(type_name) => {
                     let the_type = self.resolve_type_name(type_name);
                     var_attribute.align = the_type.align();
                     continue;
                 }
-                Decl_Spec_Kind::Alignas_Expr(operand) => {
+                Alignas_Expr(operand) => {
                     let analyzed_expr = self.analyze_expr(operand);
                     let result = eval_pure_constant(&analyzed_expr);
                     if let Ok(num) = result {
@@ -965,19 +962,26 @@ impl ProgramAnalyzer {
                     }
                     continue;
                 }
-                Decl_Spec_Kind::Typedef => {
+                // For now, we just skip some decl specs:
+                Auto | Register | _Noreturn | Const | Restrict | Volatile | _Atomic => continue,
+                Pointer_Mark => {
+                    let error_info = format!("Compiler bug: Shouldn't encounter pointer mark \
+                    in analyzing decl spec phase.");
+                    report_semantic_error(spec.span, &error_info);
+                }
+                Typedef => {
                     var_attribute.is_typedef = true;
                     continue;
                 }
-                Decl_Spec_Kind::Extern => {
+                Extern => {
                     var_attribute.is_extern = true;
                     continue;
                 }
-                Decl_Spec_Kind::Static => {
+                Static => {
                     var_attribute.is_static = true;
                     continue;
                 }
-                Decl_Spec_Kind::Typedef_Name(name) => {
+                Typedef_Name(name) => {
                     let result = self.scope_manager.resolve_typedef_alias(name);
                     if let Some(ty) = result {
                         cur_type = ty.clone();
@@ -988,36 +992,20 @@ impl ProgramAnalyzer {
                     count |= OTHER;
                     continue;
                 }
-                Decl_Spec_Kind::Int => {
-                    count += INT;
-                }
-                Decl_Spec_Kind::Long => {
-                    count += LONG;
-                }
-                Decl_Spec_Kind::Short => {
-                    count += SHORT;
-                }
-                Decl_Spec_Kind::Char => {
-                    count += CHAR;
-                }
-                Decl_Spec_Kind::Bool => {
-                    count += BOOL;
-                }
-                Decl_Spec_Kind::Void => {
-                    count += VOID;
-                }
-                Decl_Spec_Kind::Signed => {
-                    count |= SIGNED;
-                }
-                Decl_Spec_Kind::Unsigned => {
-                    count |= UNSIGNED;
-                }
-                Decl_Spec_Kind::Struct_Union(st) => {
+                Int      => count += INT,
+                Long     => count += LONG,
+                Short    => count += SHORT,
+                Char     => count += CHAR,
+                Bool     => count += BOOL,
+                Void     => count += VOID,
+                Signed   => count |= SIGNED,
+                Unsigned => count |= UNSIGNED,
+                Struct_Union(st) => {
                     cur_type = self.analyze_struct_union(st);
                     count |= OTHER;
                     continue;
                 }
-                Decl_Spec_Kind::Enum(enum_spec) => {
+                Enum(enum_spec) => {
                     cur_type = self.analyze_enum(enum_spec);
                     count |= OTHER;
                     continue;
@@ -1025,30 +1013,30 @@ impl ProgramAnalyzer {
             }
 
             cur_type = match count {
-                _ if count == VOID                       => Type::Void,
-                _ if count == BOOL                       => Type::Bool,
-                _ if count == CHAR                       => Type::Char,
-                _ if count == SIGNED + CHAR              => Type::Char,
+                _ if count == VOID                         => Type::Void,
+                _ if count == BOOL                         => Type::Bool,
+                _ if count == CHAR                         => Type::Char,
+                _ if count == SIGNED + CHAR                => Type::Char,
                 _ if count == UNSIGNED + CHAR              => Type::UChar,
-                _ if count == SHORT                      => Type::Short,
-                _ if count == SHORT + INT                => Type::Short,
-                _ if count == SIGNED + SHORT             => Type::Short,
-                _ if count == SIGNED + SHORT + INT       => Type::Short,
+                _ if count == SHORT                        => Type::Short,
+                _ if count == SHORT + INT                  => Type::Short,
+                _ if count == SIGNED + SHORT               => Type::Short,
+                _ if count == SIGNED + SHORT + INT         => Type::Short,
                 _ if count == UNSIGNED + SHORT             => Type::UShort,
                 _ if count == UNSIGNED + SHORT + INT       => Type::UShort,
-                _ if count == INT                        => Type::Int,
-                _ if count == SIGNED                     => Type::Int,
-                _ if count == SIGNED + INT               => Type::Int,
+                _ if count == INT                          => Type::Int,
+                _ if count == SIGNED                       => Type::Int,
+                _ if count == SIGNED + INT                 => Type::Int,
                 _ if count == UNSIGNED                     => Type::UInt,
                 _ if count == UNSIGNED + INT               => Type::UInt,
-                _ if count == LONG                       => Type::Long,
-                _ if count == LONG + INT                 => Type::Long,
-                _ if count == LONG + LONG                => Type::Long,
-                _ if count == LONG + LONG + INT          => Type::Long,
-                _ if count == SIGNED + LONG              => Type::Long,
-                _ if count == SIGNED + LONG + INT        => Type::Long,
-                _ if count == SIGNED + LONG + LONG       => Type::Long,
-                _ if count == SIGNED + LONG + LONG + INT => Type::Long,
+                _ if count == LONG                         => Type::Long,
+                _ if count == LONG + INT                   => Type::Long,
+                _ if count == LONG + LONG                  => Type::Long,
+                _ if count == LONG + LONG + INT            => Type::Long,
+                _ if count == SIGNED + LONG                => Type::Long,
+                _ if count == SIGNED + LONG + INT          => Type::Long,
+                _ if count == SIGNED + LONG + LONG         => Type::Long,
+                _ if count == SIGNED + LONG + LONG + INT   => Type::Long,
                 _ if count == UNSIGNED + LONG              => Type::ULong,
                 _ if count == UNSIGNED + LONG + INT        => Type::ULong,
                 _ if count == UNSIGNED + LONG + LONG       => Type::ULong,
@@ -1867,15 +1855,24 @@ impl ProgramAnalyzer {
 
     fn resolve_type_name(&mut self, type_name: &Type_Name) -> Type {
         let (base_type, _) = self.analyze_decl_specs(&type_name.decl_specs);
-        let resolved_result = self.resolve_abstract_declarator(&base_type, &type_name.abstract_declarator);
-        let final_type: Type;
-        match resolved_result {
-            Ok(ty) => return ty,
-            Err(error_info) => {
-                report_semantic_error(type_name.span, &error_info);
-                exit(1);
+        let mut final_type: Type;
+        final_type = match &type_name.abstract_declarator {
+            Some(abstract_declarator) => self.resolve_abstract_declarator(&base_type, abstract_declarator),
+            None => base_type,
+        };
+        // If the final type is a struct tag, We want to make sure that
+        // it can resove to a concrete struct, and do the Resolvation.
+        if let Tag(tag_name) = &final_type {
+            match self.scope_manager.resolve_tag(&tag_name) {
+                Some(the_type) => final_type = the_type.clone(),
+                None => {
+                    let err_info = format!("Unable to resolve to a concrete struct from \
+                    tag name {}, which is not allowed in a type name.", &tag_name);
+                    report_semantic_error(type_name.span, &err_info);
+                }
             }
         }
+        return final_type;
     }
 }
 

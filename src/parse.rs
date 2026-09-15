@@ -97,8 +97,16 @@ pub struct Member {
 #[derive(Debug, Clone, PartialEq)]
 // @Refactor: We need a struct to contain this enum and store span info just like Expr.
 pub enum Decl_Spec_Kind {
-    // Storage class specifiers
+    // Storage class specifiers:
     Typedef, Static, Extern,
+
+    /*---------------------------------ignored------------------------------------*/
+    /**/ Auto, Register, _Noreturn,
+    /**/ // Type qualifiers:
+    /**/ Const, Restrict, Volatile, _Atomic,
+    /*---------------------------------ignored------------------------------------*/
+    // This is just for the convenience of parsing declarator to put pointer mark here.
+    Pointer_Mark,
 
     Typedef_Name(String),
     Int,
@@ -149,7 +157,7 @@ pub struct Enumerator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Abstract_Declarator {
-    pub star_count: i32,
+    pub qualifiers_and_pointers: Vec<Decl_Spec_Kind>,
     pub direct_abstract_declarator: Option<Box<Abstract_Declarator>>,
     pub suffix: Option<DeclaratorSuffix>,
     pub span: Span,
@@ -180,7 +188,7 @@ pub struct Init_Declarator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
-    pub star_count: i32,
+    pub qualifiers_and_pointers: Vec<Decl_Spec_Kind>,
     pub direct_declarator: Box<Direct_Declarator>,
     pub suffix: Option<DeclaratorSuffix>,
     pub span: Span,
@@ -552,7 +560,8 @@ impl Parser {
     fn is_decl_spec(&self, token: &Token) -> bool {
         match &token.kind {
             (Struct | Union | Static | LexEnum | Int | Long | Short |
-            Char | _Bool | Void | Typedef | Extern | _Alignas | Signed | Unsigned) => true,
+            Char | _Bool | Void | Typedef | Extern | _Alignas | Signed |
+            Unsigned | Const | Volatile | Auto | Register | Restrict | _Noreturn) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -576,11 +585,11 @@ impl Parser {
                 TokenKind::Typedef => {
                     self.bump();
                     Decl_Spec_Kind::Typedef
-                },
+                }
                 TokenKind::Extern => {
                     self.bump();
                     Decl_Spec_Kind::Extern
-                },
+                }
                 TokenKind::_Alignas => {
                     self.bump();
                     // @Simplify: Simplify if eval process.
@@ -593,55 +602,83 @@ impl Parser {
                         let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                         Decl_Spec_Kind::Alignas_Expr(operand)
                     }
-                },
+                }
                 TokenKind::Static => {
                     self.bump();
                     Decl_Spec_Kind::Static
-                },
+                }
                 TokenKind::LexIdent(name) => {
                     self.bump();
                     Decl_Spec_Kind::Typedef_Name(name)
-                },
+                }
                 TokenKind::Int => {
                     self.bump();
                     Decl_Spec_Kind::Int
-                },
+                }
                 TokenKind::Long => {
                     self.bump();
                     Decl_Spec_Kind::Long
-                },
+                }
                 TokenKind::Short => {
                     self.bump();
                     Decl_Spec_Kind::Short
-                },
+                }
                 TokenKind::Char => {
                     self.bump();
                     Decl_Spec_Kind::Char
-                },
+                }
                 TokenKind::_Bool => {
                     self.bump();
                     Decl_Spec_Kind::Bool
-                },
+                }
                 TokenKind::Void => {
                     self.bump();
                     Decl_Spec_Kind::Void
-                },
+                }
                 TokenKind::Signed => {
                     self.bump();
                     Decl_Spec_Kind::Signed
-                },
+                }
                 TokenKind::Unsigned => {
                     self.bump();
                     Decl_Spec_Kind::Unsigned
-                },
+                }
+                TokenKind::Const => {
+                    self.bump();
+                    Decl_Spec_Kind::Const
+                }
+                TokenKind::Restrict => {
+                    self.bump();
+                    Decl_Spec_Kind::Restrict
+                }
+                TokenKind::Volatile => {
+                    self.bump();
+                    Decl_Spec_Kind::Volatile
+                }
+                TokenKind::_Atomic => {
+                    self.bump();
+                    Decl_Spec_Kind::_Atomic
+                }
+                TokenKind::Auto => {
+                    self.bump();
+                    Decl_Spec_Kind::Auto
+                }
+                TokenKind::Register => {
+                    self.bump();
+                    Decl_Spec_Kind::Register
+                }
+                TokenKind::_Noreturn => {
+                    self.bump();
+                    Decl_Spec_Kind::_Noreturn
+                }
                 TokenKind::Struct | TokenKind::Union => {
                     let struct_spec = self.parse_struct_union_specifier()?;
                     Decl_Spec_Kind::Struct_Union(struct_spec)
-                },
+                }
                 TokenKind::LexEnum => {
                     let enum_specifier = self.parse_enum_specifier()?;
                     Decl_Spec_Kind::Enum(enum_specifier)
-                },
+                }
                 _ => {
                     let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
                     return Err(err_msg);
@@ -768,9 +805,19 @@ impl Parser {
 
     fn parse_declarator(&mut self) -> Result<Declarator, String> {
         let start_index = self.cur_token().span.start_index;
-        let mut star_count = 0;
-        while self.eat(&Mul) {
-            star_count += 1;
+
+        let mut qualifiers_and_pointers = Vec::new();
+        while is_pointer_or_type_qualifier(self.cur_token()) {
+            match self.cur_token().kind {
+                // For the sake of convenience, we just consider pointer mark as qualifier.
+                Mul => qualifiers_and_pointers.push(Decl_Spec_Kind::Pointer_Mark),
+                Const => qualifiers_and_pointers.push(Decl_Spec_Kind::Const),
+                Restrict => qualifiers_and_pointers.push(Decl_Spec_Kind::Restrict),
+                Volatile => qualifiers_and_pointers.push(Decl_Spec_Kind::Volatile),
+                _Atomic => qualifiers_and_pointers.push(Decl_Spec_Kind::_Atomic),
+                _ => break,
+            }
+            self.bump();
         }
 
         let direct_declarator = match self.cur_token().kind.clone() {
@@ -805,7 +852,7 @@ impl Parser {
         let span = Span{start_index, end_index};
 
         Ok(Declarator{
-            star_count,
+            qualifiers_and_pointers,
             direct_declarator,
             suffix,
             span,
@@ -1366,10 +1413,18 @@ impl Parser {
     // first token that does not belong to it.
     fn parse_abstract_declarator(&mut self) -> Result<Abstract_Declarator, String> {
         let start_index = self.cur_token().span.start_index;
-        let mut star_count = 0;
 
-        while self.eat(&Mul) {
-            star_count += 1;
+        let mut qualifiers_and_pointers = Vec::new();
+        while is_pointer_or_type_qualifier(self.cur_token()) {
+            match self.cur_token().kind {
+                Mul => qualifiers_and_pointers.push(Decl_Spec_Kind::Pointer_Mark),
+                Const => qualifiers_and_pointers.push(Decl_Spec_Kind::Const),
+                Restrict => qualifiers_and_pointers.push(Decl_Spec_Kind::Restrict),
+                Volatile => qualifiers_and_pointers.push(Decl_Spec_Kind::Volatile),
+                _Atomic => qualifiers_and_pointers.push(Decl_Spec_Kind::_Atomic),
+                _ => break,
+            }
+            self.bump();
         }
 
         let direct_abstract_declarator = if self.starts_grouped_abstract_declarator() {
@@ -1390,7 +1445,7 @@ impl Parser {
         let end_index = self.previous_token().span.end_index;
         let span = Span{start_index, end_index};
 
-        Ok(Abstract_Declarator{star_count, direct_abstract_declarator, suffix, span})
+        Ok(Abstract_Declarator{qualifiers_and_pointers, direct_abstract_declarator, suffix, span})
     }
 
     fn parse_stmt_expr(&mut self) -> Result<Expr, String> {
@@ -1586,9 +1641,17 @@ fn get_declarator_name(declarator: &Declarator) -> &str {
     }
 }
 
+
+fn is_pointer_or_type_qualifier(token: &Token) -> bool {
+    match &token.kind {
+        Mul | Const | Restrict | Volatile | _Atomic => true,
+        _ => false,
+    }
+}
+
 fn is_type_qualifier(token: &Token) -> bool {
     match &token.kind {
-        (TokenKind::_Atomic) => true,
+        Const | Restrict | Volatile | _Atomic => true,
         _ => false,
     }
 }
