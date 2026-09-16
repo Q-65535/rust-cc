@@ -40,6 +40,8 @@ pub enum TokenKind {
     LexComma,
     // @Refactor?: Should we just use u64 for integer constant all the way during compilation?
     Lex_Integer{value: i64, ty: Integer_Const_Type},
+    Lex_Float(f32),
+    Lex_Double(f64),
     Lex_Unsigned(u64),
     LexIdent(String),
     StringLiteral(Vec<u8>),
@@ -190,7 +192,13 @@ impl Lexer {
                         self.next_char();
                         self.next_char();
                     } else {
-                        tokens.push(Self::gen_token(Period, start_index, 1));
+                        if matches!(self.peek_char(), Some('0'..='9')) {
+                            let num_kind = self.read_num();
+                            let len = self.index - start_index + 1;
+                            tokens.push(Self::gen_token(num_kind, start_index, len));
+                        } else {
+                            tokens.push(Self::gen_token(Period, start_index, 1));
+                        }
                     }
                 }
                 ':' => tokens.push(Self::gen_token(Colon, start_index, 1)),
@@ -361,9 +369,9 @@ impl Lexer {
                     }
                 },
                 '0'..='9' => {
-                    let (value, ty) = self.read_int();
-                    let num_str = value.to_string();
-                    tokens.push(Self::gen_token(Lex_Integer{value, ty}, start_index, num_str.len()));
+                    let integer_kind = self.read_num();
+                    let len = self.index - start_index + 1;
+                    tokens.push(Self::gen_token(integer_kind, start_index, len));
                 },
                 '\'' => {
                     let character = self.read_char_literal();
@@ -459,7 +467,207 @@ impl Lexer {
         tokens
     }
 
-    fn read_int(&mut self) -> (i64, Integer_Const_Type) {
+    // This function can read integer and floating point constant number in C.
+    // For floating point number this function return either Lex_Double(f64) or Lex_Float(f32).
+    // For integer number, this function return Lex_Integer{}.
+    fn read_num(&mut self) -> TokenKind {
+        debug_assert!(matches!(self.cur_char(), '0'..='9' | '.'));
+
+        let start = self.index;
+        let len = self.src.len();
+        let mut end = start;
+
+        if self.cur_char() == '0' && matches!(self.peek_char(), Some('x' | 'X')) {
+            end += 2;
+
+            let digits_start = end;
+            while end < len && self.src[end].is_ascii_hexdigit() {
+                end += 1;
+            }
+            let has_integer_digits = end > digits_start;
+
+            let mut has_fraction_digits = false;
+            let mut is_float = false;
+            if end < len && self.src[end] == '.' {
+                is_float = true;
+                end += 1;
+                let fraction_start = end;
+                while end < len && self.src[end].is_ascii_hexdigit() {
+                    end += 1;
+                }
+                has_fraction_digits = end > fraction_start;
+            }
+
+            if !has_integer_digits && !has_fraction_digits {
+                lexical_error_at(start, "invalid hex number format");
+            }
+
+            if end < len && matches!(self.src[end], 'p' | 'P') {
+                is_float = true;
+                end += 1;
+                if end < len && matches!(self.src[end], '+' | '-') {
+                    end += 1;
+                }
+
+                let exponent_start = end;
+                while end < len && self.src[end].is_ascii_digit() {
+                    end += 1;
+                }
+                if end == exponent_start {
+                    lexical_error_at(start, "invalid hex floating exponent");
+                }
+            } else if is_float {
+                lexical_error_at(start, "hex floating constant requires a binary exponent");
+            }
+
+            if is_float {
+                return self.finish_float(start, end, true);
+            }
+
+            return self.read_int();
+        }
+
+        while end < len && self.src[end].is_ascii_digit() {
+            end += 1;
+        }
+        let mut is_float = self.cur_char() == '.';
+
+        if end < len && self.src[end] == '.' {
+            is_float = true;
+            end += 1;
+            while end < len && self.src[end].is_ascii_digit() {
+                end += 1;
+            }
+        }
+
+        if end < len && matches!(self.src[end], 'e' | 'E') {
+            is_float = true;
+            end += 1;
+            if end < len && matches!(self.src[end], '+' | '-') {
+                end += 1;
+            }
+
+            let exponent_start = end;
+            while end < len && self.src[end].is_ascii_digit() {
+                end += 1;
+            }
+            if end == exponent_start {
+                lexical_error_at(start, "invalid floating exponent");
+            }
+        }
+
+        if is_float {
+            return self.finish_float(start, end, false);
+        }
+
+        self.read_int()
+    }
+
+    fn finish_float(&mut self, start: usize, mut end: usize, is_hex: bool) -> TokenKind {
+        let mut is_float_type = false;
+        if end < self.src.len() {
+            match self.src[end] {
+                'f' | 'F' => {
+                    is_float_type = true;
+                    end += 1;
+                },
+                'l' | 'L' => {
+                    end += 1;
+                },
+                c if Self::is_ident_continue(c) => {
+                    lexical_error_at(end, "invalid suffix on floating constant");
+                },
+                _ => (),
+            }
+        }
+
+        if end < self.src.len() && Self::is_ident_continue(self.src[end]) {
+            lexical_error_at(end, "invalid suffix on floating constant");
+        }
+
+        let number_end = if matches!(self.src[end - 1], 'f' | 'F' | 'l' | 'L') {
+            end - 1
+        } else {
+            end
+        };
+        let literal: String = self.src[start..number_end].iter().collect();
+        self.index = end - 1;
+
+        let value = if is_hex {
+            Self::parse_hex_float_literal(&literal, start)
+        } else {
+            let normalized = Self::normalize_decimal_float_literal(&literal);
+            match normalized.parse::<f64>() {
+                Ok(value) => value,
+                Err(_) => lexical_error_at(start, "invalid floating number format"),
+            }
+        };
+
+        if is_float_type {
+            Lex_Float(value as f32)
+        } else {
+            Lex_Double(value)
+        }
+    }
+
+    fn normalize_decimal_float_literal(literal: &str) -> String {
+        let mut normalized = literal.to_string();
+        if normalized.starts_with('.') {
+            normalized.insert(0, '0');
+        }
+
+        if let Some(exponent_index) = normalized.find('e').or_else(|| normalized.find('E')) {
+            if normalized[..exponent_index].ends_with('.') {
+                normalized.insert(exponent_index, '0');
+            }
+        } else if normalized.ends_with('.') {
+            normalized.push('0');
+        }
+
+        normalized
+    }
+
+    fn parse_hex_float_literal(literal: &str, start: usize) -> f64 {
+        let exponent_index = match literal.find('p').or_else(|| literal.find('P')) {
+            Some(index) => index,
+            None => lexical_error_at(start, "hex floating constant requires a binary exponent"),
+        };
+        let mantissa = &literal[2..exponent_index];
+        let exponent = match literal[exponent_index + 1..].parse::<i32>() {
+            Ok(exponent) => exponent,
+            Err(_) => lexical_error_at(start, "invalid hex floating exponent"),
+        };
+
+        let mut value = 0.0;
+        let mut fraction_scale = 1.0 / 16.0;
+        let mut past_dot = false;
+        for c in mantissa.chars() {
+            if c == '.' {
+                past_dot = true;
+                continue;
+            }
+
+            let digit = match c.to_digit(16) {
+                Some(digit) => digit as f64,
+                None => lexical_error_at(start, "invalid hex floating number format"),
+            };
+
+            if past_dot {
+                value += digit * fraction_scale;
+                fraction_scale /= 16.0;
+            } else {
+                value = value * 16.0 + digit;
+            }
+        }
+
+        value * 2.0f64.powi(exponent)
+    }
+
+    fn is_ident_continue(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_'
+    }
+
+    fn read_int(&mut self) -> TokenKind {
         debug_assert!(matches!(self.cur_char(), '0'..='9'));
         let c = self.cur_char();
         let mut base = 10;
@@ -606,7 +814,8 @@ impl Lexer {
                 ty = tInt;
             }
         }
-        return (result as i64, ty);
+
+        return Lex_Integer{value: result as i64, ty};
     }
 
     // @Question: Should we return a u8 or i8?
@@ -740,7 +949,42 @@ impl Lexer {
     }
 }
 
-fn lexical_error_at(index: usize, err_msg: &str) {
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lex_kinds_without_eof(src: &str) -> Vec<TokenKind> {
+        let mut lexer = Lexer::new(src);
+        let mut tokens = lexer.lex();
+        tokens.pop();
+        tokens.into_iter().map(|token| token.kind).collect()
+    }
+
+    #[test]
+    fn lexes_decimal_float_constants() {
+        assert_eq!(
+            lex_kinds_without_eof(".5 1. 1e2 1.e1 3.5f 4.0L"),
+            vec![
+                Lex_Double(0.5),
+                Lex_Double(1.0),
+                Lex_Double(100.0),
+                Lex_Double(10.0),
+                Lex_Float(3.5),
+                Lex_Double(4.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn lexes_hex_float_constants() {
+        assert_eq!(
+            lex_kinds_without_eof("0x1p2 0x1.8p1f 0x.8p0"),
+            vec![Lex_Double(4.0), Lex_Float(3.0), Lex_Double(0.5)]
+        );
+    }
+}
+
+fn lexical_error_at(index: usize, err_msg: &str) -> ! {
     use crate::error_span;
     let span = Span{start_index: index, end_index: index};
     let error_stage_info = "Lexical error: ".to_string();
