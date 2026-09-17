@@ -59,14 +59,6 @@ macro_rules! emit_raw {
     }};
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Fundemental_Type {
-    I8, I16, I32, I64,
-    U8, U16, U32, U64,
-    F32, F64,
-}
-use Fundemental_Type::*;
-
 pub struct Generator {
     cur_function_stack_size: usize,
     cur_function_name: String,
@@ -593,20 +585,6 @@ impl Generator {
                 }
             }
         }
-
-        if matches!(ty, Struct(..)|Union(..)) {
-            for i in 0..sizeof(ty) {
-                emit!("  mov {}(%rax), %r8b", i);
-                emit!("  mov %r8b, {}(%rdi)", i);
-            }
-        } else {
-            match sizeof(ty) {
-                1 => emit!("  mov  %al, (%rdi)"),
-                2 => emit!("  mov  %ax, (%rdi)"),
-                4 => emit!("  mov %eax, (%rdi)"),
-                _ => emit!("  mov %rax, (%rdi)"),
-            }
-        }
     }
 
 }
@@ -620,8 +598,8 @@ fn cast(from: &Type, to: &Type) {
         return;
     }
 
-    let from_fundemental_type = get_assembly_type(from);
-    let to_fundemental_type   = get_assembly_type(to);
+    let from_fundemental_type = get_fundemental_type(from);
+    let to_fundemental_type   = get_fundemental_type(to);
     gen_cast_operation(from_fundemental_type, to_fundemental_type);
 }
 
@@ -633,10 +611,25 @@ fn cmp_zero(ty: &Type) {
     }
 }
 
-fn get_assembly_type(ty: &Type) -> Fundemental_Type {
+
+// Every time we do casting, we first try to get the cast-from and cast-to
+// fundemental type from their original C types, then generate different
+// assembly code according to their fundemental types.
+// Emm..., so this enum exists only for type casting I guess?
+// Maybe it has other use cases in the future, I don't knowwwwwwww.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Fundemental_Type {
+    I8, I16, I32, I64,
+    U8, U16, U32, U64,
+    F32, F64,
+}
+use Fundemental_Type::*;
+
+
+fn get_fundemental_type(ty: &Type) -> Fundemental_Type {
     match ty {
-        // Bool is special. Because it is normalized to either 0 or 1, we can
-        // just use I64 without any problem.
+        // Bool is special. Because it is normalized to either 0 or 1
+        // in 64-bit range in register, we can just use I64 without any problem.
         Bool   =>   I64,
         Char   =>   I8,
         Short  =>   I16,
@@ -649,7 +642,7 @@ fn get_assembly_type(ty: &Type) -> Fundemental_Type {
         Float  =>   F32,
         Double =>   F64,
         Pointer_To(..) | ArrayOf(..) => I64,
-        Func{return_type, ..} => get_assembly_type(return_type),
+        Func{return_type, ..} => get_fundemental_type(return_type),
         _ => {
             println!("cannot get the fundemental type of this type: {:?}", ty);
             exit(1);

@@ -1306,12 +1306,12 @@ impl Parser {
             }
             Lex_Float(value) => {
                 let token = self.bump();
-                let expr = Expr::new(ExprType::Float_Const(value), token.span);
+                let expr = Expr::new(Float_Const(value), token.span);
                 return Ok(expr);
             }
             Lex_Double(value) => {
                 let token = self.bump();
-                let expr = Expr::new(ExprType::Double_Const(value), token.span);
+                let expr = Expr::new(Double_Const(value), token.span);
                 return Ok(expr);
             }
             Exclamation => {

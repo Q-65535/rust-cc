@@ -1505,8 +1505,8 @@ impl ProgramAnalyzer {
         let span = expr.span;
         match &expr.content {
             Integer_Const{value, ty} => gen_num_expr_with_specified_type(*value,  &ty, span),
-            parse::ExprType::Float_Const(value) => gen_float_expr(*value, span),
-            parse::ExprType::Double_Const(value) => gen_double_expr(*value, span),
+            Float_Const(value) => gen_float_expr(*value, span),
+            Double_Const(value) => gen_double_expr(*value, span),
 
             Binary(lhs, rhs, tokenKind) => {
                 let lhs = self.analyze_expr(lhs);
