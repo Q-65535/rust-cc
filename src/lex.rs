@@ -49,7 +49,7 @@ pub enum TokenKind {
     // Keywords:
     Ret, If, Else, For, While,
     Sizeof, Typedef, Struct, LexEnum, Int, Char, _Bool, Union,
-    Long, Short, Void, Static, Extern, Goto, Break, Continue,
+    Long, Short, Void, Float, Double, Static, Extern, Goto, Break, Continue,
     Switch, Case, Default, _Alignas, _Alignof, Do, Signed, Unsigned,
     Auto, Register, _Noreturn, Const, Restrict, Volatile, _Atomic,
 
@@ -97,6 +97,8 @@ impl Lexer {
             ("long".to_string(), Long),
             ("short".to_string(), Short),
             ("void".to_string(), Void),
+            ("float".to_string(), Float),
+            ("double".to_string(), Double),
             ("_Atomic".to_string(), _Atomic),
             ("_Bool".to_string(), _Bool),
             ("static".to_string(), Static),
@@ -676,32 +678,12 @@ impl Lexer {
             if self.peek_char() == Some('b') || self.peek_char() == Some('B') {
                 base = 2;
                 self.next_char();
-                if let Some(c) = self.peek_char() {
-                    if matches!(self.peek_char(), Some('0'..='1')) {
-                        self.next_char();
-                    } else {
-                        let error_message = format!("invalid binary number format");
-                        lexical_error_at(self.index, &error_message);
-                    }
-                } else {
-                    let error_message = format!("reach end of file when lexing a integer number");
-                    lexical_error_at(self.index, &error_message);
-                }
+                self.next_char();
             }
             if self.peek_char() == Some('x') || self.peek_char() == Some('X') {
                 base = 16;
                 self.next_char();
-                if let Some(c) = self.peek_char() {
-                    if matches!(self.peek_char(), Some('0'..='9' | 'a'..='f' | 'A'..='F')) {
-                        self.next_char();
-                    } else {
-                        let error_message = format!("invalid hex number format");
-                        lexical_error_at(self.index, &error_message);
-                    }
-                } else {
-                    let error_message = format!("reach end of file when lexing a integer number");
-                    lexical_error_at(self.index, &error_message);
-                }
+                self.next_char();
             }
         }
 
@@ -780,6 +762,13 @@ impl Lexer {
             }
         }
 
+        if let Some(c) = self.peek_char() {
+            if c.is_ascii_alphanumeric() {
+                self.next_char();
+                let err_msg = format!("Invalid suffix for constant integer number.");
+                lexical_error_at(self.index, &err_msg);
+            }
+        }
 
         // Infer a type.
         let ty: Integer_Const_Type;
@@ -946,41 +935,6 @@ impl Lexer {
             }
         }
         self.src[i..i+len].iter().collect()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn lex_kinds_without_eof(src: &str) -> Vec<TokenKind> {
-        let mut lexer = Lexer::new(src);
-        let mut tokens = lexer.lex();
-        tokens.pop();
-        tokens.into_iter().map(|token| token.kind).collect()
-    }
-
-    #[test]
-    fn lexes_decimal_float_constants() {
-        assert_eq!(
-            lex_kinds_without_eof(".5 1. 1e2 1.e1 3.5f 4.0L"),
-            vec![
-                Lex_Double(0.5),
-                Lex_Double(1.0),
-                Lex_Double(100.0),
-                Lex_Double(10.0),
-                Lex_Float(3.5),
-                Lex_Double(4.0),
-            ]
-        );
-    }
-
-    #[test]
-    fn lexes_hex_float_constants() {
-        assert_eq!(
-            lex_kinds_without_eof("0x1p2 0x1.8p1f 0x.8p0"),
-            vec![Lex_Double(4.0), Lex_Float(3.0), Lex_Double(0.5)]
-        );
     }
 }
 

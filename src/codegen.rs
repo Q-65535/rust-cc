@@ -63,6 +63,7 @@ macro_rules! emit_raw {
 pub enum Fundemental_Type {
     I8, I16, I32, I64,
     U8, U16, U32, U64,
+    F32, F64,
 }
 use Fundemental_Type::*;
 
@@ -305,11 +306,11 @@ impl Generator {
         let content = &expr.content;
         match content {
             Integer(n) => emit!("  mov ${}, %rax", n),
-            ExprType::Float(f) => {
+            ExprType::Float_Const(f) => {
                 emit!("  mov ${}, %eax  # float {}", f.to_bits(), f);
                 emit!("  movq %rax, %xmm0");
             }
-            ExprType::Double(f) => {
+            ExprType::Double_Const(f) => {
                 emit!("  mov ${}, %rax  # double {}", f.to_bits(), f);
                 emit!("  movq %rax, %xmm0");
             }
@@ -574,6 +575,25 @@ impl Generator {
     fn store_according_to_type(&mut self, ty: &Type) {
         self.pop("%rdi");
 
+        match ty {
+            Struct(..) | Union(..) => {
+                for i in 0..sizeof(ty) {
+                    emit!("  mov {}(%rax), %r8b", i);
+                    emit!("  mov %r8b, {}(%rdi)", i);
+                }
+            }
+            Type::Float => emit!("  movss %xmm0, (%rdi)"),
+            Type::Double => emit!("  movsd %xmm0, (%rdi)"),
+            _ => {
+                match sizeof(ty) {
+                    1 => emit!("  mov  %al, (%rdi)"),
+                    2 => emit!("  mov  %ax, (%rdi)"),
+                    4 => emit!("  mov %eax, (%rdi)"),
+                    _ => emit!("  mov %rax, (%rdi)"),
+                }
+            }
+        }
+
         if matches!(ty, Struct(..)|Union(..)) {
             for i in 0..sizeof(ty) {
                 emit!("  mov {}(%rax), %r8b", i);
@@ -626,6 +646,8 @@ fn get_assembly_type(ty: &Type) -> Fundemental_Type {
         UShort =>   U16,
         UInt   =>   U32,
         ULong  =>   U64, 
+        Float  =>   F32,
+        Double =>   F64,
         Pointer_To(..) | ArrayOf(..) => I64,
         Func{return_type, ..} => get_assembly_type(return_type),
         _ => {
@@ -640,99 +662,180 @@ fn gen_cast_operation(from: Fundemental_Type, to: Fundemental_Type) {
     let i32u8  = "  movzbl  %al, %eax";
     let i32i16 = "  movswl  %ax, %eax";
     let i32u16 = "  movzwl  %ax, %eax";
+    let i32f32 = "  cvtsi2ssl %eax, %xmm0";
     let i32i64 = "  movsxd %eax, %rax";
-    let u32i64 = "  mov    %eax, %eax";
+    let i32f64 = "  cvtsi2sdl %eax, %xmm0";
 
-    fn direct_emit(ins: &str) {
-        emit!("{}", ins);
-    }
+    let u32f32 = "mov %eax, %eax; cvtsi2ssq %rax, %xmm0";
+    let u32i64 = "  mov    %eax, %eax";
+    let u32f64 = "mov %eax, %eax; cvtsi2sdq %rax, %xmm0";
+
+    let i64f32 = "cvtsi2ssq %rax, %xmm0";
+    let i64f64 = "cvtsi2sdq %rax, %xmm0";
+
+    let u64f32 = "cvtsi2ssq %rax, %xmm0";
+    let u64f64 =
+      "test %rax,%rax; js 1f; pxor %xmm0,%xmm0; cvtsi2sd %rax,%xmm0; jmp 2f;
+      1: mov %rax,%rdi; and $1,%eax; pxor %xmm0,%xmm0; shr %rdi;
+      or %rax,%rdi; cvtsi2sd %rdi,%xmm0; addsd %xmm0,%xmm0; 2:";
+
+    let f32i8 = "cvttss2sil %xmm0, %eax; movsbl %al, %eax";
+    let f32u8 = "cvttss2sil %xmm0, %eax; movzbl %al, %eax";
+    let f32i16 = "cvttss2sil %xmm0, %eax; movswl %ax, %eax";
+    let f32u16 = "cvttss2sil %xmm0, %eax; movzwl %ax, %eax";
+    let f32i32 = "cvttss2sil %xmm0, %eax";
+    let f32u32 = "cvttss2siq %xmm0, %rax";
+    let f32i64 = "cvttss2siq %xmm0, %rax";
+    let f32u64 = "cvttss2siq %xmm0, %rax";
+    let f32f64 = "cvtss2sd %xmm0, %xmm0";
+
+    let f64i8 = "cvttsd2sil %xmm0, %eax; movsbl %al, %eax";
+    let f64u8 = "cvttsd2sil %xmm0, %eax; movzbl %al, %eax";
+    let f64i16 = "cvttsd2sil %xmm0, %eax; movswl %ax, %eax";
+    let f64u16 = "cvttsd2sil %xmm0, %eax; movzwl %ax, %eax";
+    let f64i32 = "cvttsd2sil %xmm0, %eax";
+    let f64u32 = "cvttsd2siq %xmm0, %rax";
+    let f64f32 = "cvtsd2ss %xmm0, %xmm0";
+    let f64i64 = "cvttsd2siq %xmm0, %rax";
+    let f64u64 = "cvttsd2siq %xmm0, %rax";
+
+    fn direct_emit(ins: &str) { emit!("{}", ins); }
 
     match from {
         I8 => match to {
-                I8  => (),
-                I16 => (),
-                I32 => (),
-                I64 => direct_emit(i32i64),
-                U8  => direct_emit(i32u8),
-                U16 => direct_emit(i32u16),
-                U32 => (),
-                U64 => direct_emit(i32i64),
-            }
+            I8  => (),
+            I16 => (),
+            I32 => (),
+            I64 => direct_emit(i32i64),
+            U8  => direct_emit(i32u8),
+            U16 => direct_emit(i32u16),
+            U32 => (),
+            U64 => direct_emit(i32i64),
+            F32 => direct_emit(i32f32),
+            F64 => direct_emit(i32f64),
+        }
         I16 => match to {
-                I8  => direct_emit(i32i8),
-                I16 => (),
-                I32 => (),
-                I64 => direct_emit(i32i64),
-                U8  => direct_emit(i32u8),
-                U16 => direct_emit(i32u16),
-                U32 => (),
-                U64 => direct_emit(i32i64),
+            I8  => direct_emit(i32i8),
+            I16 => (),
+            I32 => (),
+            I64 => direct_emit(i32i64),
+            U8  => direct_emit(i32u8),
+            U16 => direct_emit(i32u16),
+            U32 => (),
+            U64 => direct_emit(i32i64),
+            F32 => direct_emit(i32f32),
+            F64 => direct_emit(i32f64),
         }
         I32 => match to {
-                I8  => direct_emit(i32i8),
-                I16 => direct_emit(i32i16),
-                I32 => (),
-                I64 => direct_emit(i32i64),
-                U8  => direct_emit(i32u8),
-                U16 => direct_emit(i32u16),
-                U32 => (),
-                U64 => direct_emit(i32i64),
+            I8  => direct_emit(i32i8),
+            I16 => direct_emit(i32i16),
+            I32 => (),
+            I64 => direct_emit(i32i64),
+            U8  => direct_emit(i32u8),
+            U16 => direct_emit(i32u16),
+            U32 => (),
+            U64 => direct_emit(i32i64),
+            F32 => direct_emit(i32f32),
+            F64 => direct_emit(i32f64),
         }
         I64 => match to {
-                I8  => direct_emit(i32i8),
-                I16 => direct_emit(i32i16),
-                I32 => (),
-                I64 => (),
-                U8  => direct_emit(i32u8),
-                U16 => direct_emit(i32u16),
-                U32 => (),
-                U64 => (),
+            I8  => direct_emit(i32i8),
+            I16 => direct_emit(i32i16),
+            I32 => (),
+            I64 => (),
+            U8  => direct_emit(i32u8),
+            U16 => direct_emit(i32u16),
+            U32 => (),
+            U64 => (),
+            F32 => direct_emit(i64f32),
+            F64 => direct_emit(i64f64),
         }
         U8 => match to {
-                I8  => direct_emit(i32i8),
-                I16 => (),
-                I32 => (),
-                I64 => direct_emit(i32i64),
-                U8  => (),
-                U16 => (),
-                U32 => (),
-                U64 => direct_emit(i32i64),
-            }
+            I8  => direct_emit(i32i8),
+            I16 => (),
+            I32 => (),
+            I64 => direct_emit(i32i64),
+            U8  => (),
+            U16 => (),
+            U32 => (),
+            U64 => direct_emit(i32i64),
+            F32 => direct_emit(i32f32),
+            F64 => direct_emit(i32f64),
+        }
         U16 => match to {
-                I8  => direct_emit(i32i8),
-                I16 => direct_emit(i32i16),
-                I32 => (),
-                I64 => direct_emit(i32i64),
-                U8  => direct_emit(i32u8),
-                U16 => (),
-                U32 => (),
-                U64 => direct_emit(i32i64),
+            I8  => direct_emit(i32i8),
+            I16 => direct_emit(i32i16),
+            I32 => (),
+            I64 => direct_emit(i32i64),
+            U8  => direct_emit(i32u8),
+            U16 => (),
+            U32 => (),
+            U64 => direct_emit(i32i64),
+            F32 => direct_emit(i32f32),
+            F64 => direct_emit(i32f64),
         }
         U32 => match to {
-                I8  => direct_emit(i32i8),
-                I16 => direct_emit(i32i16),
-                I32 => (),
-                I64 => direct_emit(i32i64),
-                U8  => direct_emit(i32u8),
-                U16 => direct_emit(i32u16),
-                U32 => (),
-                U64 => direct_emit(u32i64),
+            I8  => direct_emit(i32i8),
+            I16 => direct_emit(i32i16),
+            I32 => (),
+            I64 => direct_emit(i32i64),
+            U8  => direct_emit(i32u8),
+            U16 => direct_emit(i32u16),
+            U32 => (),
+            U64 => direct_emit(u32i64),
+            F32 => direct_emit(u32f32),
+            F64 => direct_emit(u32f64),
         }
         U64 => match to {
-                I8  => direct_emit(i32i8),
-                I16 => direct_emit(i32i16),
-                I32 => (),
-                I64 => (),
-                U8  => direct_emit(i32u8),
-                U16 => direct_emit(i32u16),
-                U32 => (),
-                U64 => (),
+            I8  => direct_emit(i32i8),
+            I16 => direct_emit(i32i16),
+            I32 => (),
+            I64 => (),
+            U8  => direct_emit(i32u8),
+            U16 => direct_emit(i32u16),
+            U32 => (),
+            U64 => (),
+            F32 => direct_emit(u64f32),
+            F64 => direct_emit(u64f64),
+        }
+        F32 => match to {
+            I8  => direct_emit(f32i8),
+            I16 => direct_emit(f32i16),
+            I32 => direct_emit(f32i32),
+            I64 => direct_emit(f32i64),
+            U8  => direct_emit(f32u8),
+            U16 => direct_emit(f32u16),
+            U32 => direct_emit(f32u32),
+            U64 => direct_emit(f32u64),
+            F32 => (),
+            F64 => direct_emit(f32f64),
+        }
+        F64 => match to {
+            I8  => direct_emit(f64i8),
+            I16 => direct_emit(f64i16),
+            I32 => direct_emit(f64i32),
+            I64 => direct_emit(f64i64),
+            U8  => direct_emit(f64u8),
+            U16 => direct_emit(f64u16),
+            U32 => direct_emit(f64u32),
+            U64 => direct_emit(f64u64),
+            F32 => direct_emit(f64f32),
+            F64 => (),
         }
     }
 }
 
 fn load_according_to_type(ty: &Type) {
     if matches!(ty, ArrayOf(..) | Struct(..) | Union(..)) {return;}
+
+    if *ty == Type::Float {
+        emit!("  movss (%rax), %xmm0");
+        return;
+    }
+    if *ty == Type::Double {
+        emit!("  movsd (%rax), %xmm0");
+        return;
+    }
 
     let mov_kind = if ty.is_unsigned() {"movz"} else {"movs"};
     match sizeof(ty) {

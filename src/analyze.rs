@@ -942,9 +942,11 @@ impl ProgramAnalyzer {
         const SHORT:    u32 = 1 << 6;
         const INT:      u32 = 1 << 8;
         const LONG:     u32 = 1 << 10;
-        const OTHER:    u32 = 1 << 12;
-        const SIGNED:   u32 = 1 << 13;
-        const UNSIGNED: u32 = 1 << 14;
+        const FLOAT:    u32 = 1 << 12;
+        const DOUBLE:   u32 = 1 << 14;
+        const OTHER:    u32 = 1 << 16;
+        const SIGNED:   u32 = 1 << 17;
+        const UNSIGNED: u32 = 1 << 18;
 
         let mut var_attribute = Symbol_Attribute::default();
         let mut count: u32 = 0;
@@ -1003,6 +1005,8 @@ impl ProgramAnalyzer {
                 Short    => count += SHORT,
                 Char     => count += CHAR,
                 Bool     => count += BOOL,
+                Float    => count += FLOAT,
+                Double   => count += DOUBLE,
                 Void     => count += VOID,
                 Signed   => count |= SIGNED,
                 Unsigned => count |= UNSIGNED,
@@ -1047,6 +1051,8 @@ impl ProgramAnalyzer {
                 _ if count == UNSIGNED + LONG + INT        => Type::ULong,
                 _ if count == UNSIGNED + LONG + LONG       => Type::ULong,
                 _ if count == UNSIGNED + LONG + LONG + INT => Type::ULong,
+                _ if count == FLOAT                        => Type::Float,
+                _ if count == DOUBLE                       => Type::Double,
                 _ => {
                     let error_info = format!("Invalid type.");
                     report_semantic_error(whole_span, &error_info);
@@ -1498,9 +1504,9 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &expr.content {
-            Integer{value, ty} => gen_num_expr_with_specified_type(*value,  &ty, span),
-            parse::ExprType::Float(value) => gen_float_expr(*value, span),
-            parse::ExprType::Double(value) => gen_double_expr(*value, span),
+            Integer_Const{value, ty} => gen_num_expr_with_specified_type(*value,  &ty, span),
+            parse::ExprType::Float_Const(value) => gen_float_expr(*value, span),
+            parse::ExprType::Double_Const(value) => gen_double_expr(*value, span),
 
             Binary(lhs, rhs, tokenKind) => {
                 let lhs = self.analyze_expr(lhs);
@@ -1910,7 +1916,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
 fn is_scalar_type(ty: &Type) -> bool {
     matches!(ty, 
         Char  | Short  | Int  | Long  | Enum | Bool |
-        UChar | UShort | UInt | ULong |
+        UChar | UShort | UInt | ULong | Float | Double |
         Pointer_To(..) | ArrayOf(..)
     )
 }
@@ -2015,13 +2021,13 @@ fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
 }
 
 fn gen_float_expr(number: f32, span: Span) -> ir::Expr {
-        let content = ir::ExprType::Float(number);
+        let content = ir::ExprType::Float_Const(number);
         let ty = Type::Float;
         ir::Expr {content, ty, span}
 }
 
 fn gen_double_expr(number: f64, span: Span) -> ir::Expr {
-        let content = ir::ExprType::Double(number);
+        let content = ir::ExprType::Double_Const(number);
         let ty = Type::Double;
         ir::Expr {content, ty, span}
 }
@@ -2517,7 +2523,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             }
                             for i in 0..s.len() {
                                 // @Duplication_2
-                                let char_init_expr_content = Integer{value: s[i].clone() as i64, ty: tInt};
+                                let char_init_expr_content = Integer_Const{value: s[i].clone() as i64, ty: tInt};
                                 let char_init_expr = Expr{content: char_init_expr_content, span};
                                 let element_init_content = Initializer_Type::Expr(char_init_expr);
                                 new_init_list.push(Initializer{content: element_init_content, span});
@@ -2526,7 +2532,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             // Then, the arary length actually is s.len()+1.
                             if array_len == 0 {
                                 // @Duplication_2
-                                let char_init_expr_content = Integer{value: 0, ty: tInt};
+                                let char_init_expr_content = Integer_Const{value: 0, ty: tInt};
                                 let char_init_expr = Expr{content: char_init_expr_content, span};
                                 let element_init_content = Initializer_Type::Expr(char_init_expr);
                                 new_init_list.push(Initializer{content: element_init_content, span});
@@ -2875,7 +2881,7 @@ fn create_zerolized_init(ty: &Type, span: Span) -> Initializer {
         _ => {
             // @Smell: Maybe we should make the normalized init to use ir::Expr instead
             // of parse::Expr?
-            let content = ExprType::Integer{value: 0, ty: tInt};
+            let content = ExprType::Integer_Const{value: 0, ty: tInt};
             let zero_value_expr = Expr {content, span};
             let content = Initializer_Type::Expr(zero_value_expr);
             return Initializer{content, span};

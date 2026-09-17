@@ -117,6 +117,8 @@ pub enum Decl_Spec_Kind {
     Void,
     Signed,
     Unsigned,
+    Float,
+    Double,
     Struct_Union(Struct_Union_Specifier),
     Enum(Enum_Specifier),
     Alignas_Expr(Expr),
@@ -208,9 +210,9 @@ pub enum Direct_Declarator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Integer{value: i64, ty: Integer_Const_Type},
-    Float(f32),
-    Double(f64),
+    Integer_Const{value: i64, ty: Integer_Const_Type},
+    Float_Const(f32),
+    Double_Const(f64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -560,10 +562,15 @@ impl Parser {
     }
 
     fn is_decl_spec(&self, token: &Token) -> bool {
+        if self.is_type_spec(token) {
+            return true;
+        }
         match &token.kind {
+            // @TODO: Remove all type spec.
             (Struct | Union | Static | LexEnum | Int | Long | Short |
             Char | _Bool | Void | Typedef | Extern | _Alignas | Signed |
-            Unsigned | Const | Volatile | Auto | Register | Restrict | _Noreturn) => true,
+            Unsigned | Const | Volatile | Auto | Register | Restrict |
+            _Noreturn | Float | Double) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -572,7 +579,7 @@ impl Parser {
     fn is_type_spec(&self, token: &Token) -> bool {
         match &token.kind {
             (Struct | Union | LexEnum | Int | Long | Short | Char | _Bool | Void |
-             Signed | Unsigned) => true,
+             Signed | Unsigned | Float | Double) => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -644,6 +651,14 @@ impl Parser {
                 TokenKind::Unsigned => {
                     self.bump();
                     Decl_Spec_Kind::Unsigned
+                }
+                TokenKind::Float => {
+                    self.bump();
+                    Decl_Spec_Kind::Float
+                }
+                TokenKind::Double => {
+                    self.bump();
+                    Decl_Spec_Kind::Double
                 }
                 TokenKind::Const => {
                     self.bump();
@@ -1286,17 +1301,17 @@ impl Parser {
             },
             Lex_Integer{value, ty} => {
                 let token = self.bump();
-                let expr = Expr::new(Integer{value, ty}, token.span);
+                let expr = Expr::new(Integer_Const{value, ty}, token.span);
                 return Ok(expr);
             }
             Lex_Float(value) => {
                 let token = self.bump();
-                let expr = Expr::new(Float(value), token.span);
+                let expr = Expr::new(ExprType::Float_Const(value), token.span);
                 return Ok(expr);
             }
             Lex_Double(value) => {
                 let token = self.bump();
-                let expr = Expr::new(Double(value), token.span);
+                let expr = Expr::new(ExprType::Double_Const(value), token.span);
                 return Ok(expr);
             }
             Exclamation => {
