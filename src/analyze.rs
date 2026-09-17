@@ -40,6 +40,8 @@ pub enum Type {
     UShort,
     UInt,
     ULong,
+    Float,
+    Double,
     Pointer_To(Box<Type>),
     ArrayOf(Box<Type>, usize),
     Func{return_type: Box<Type>, param_types: Vec<Type>, is_variadic: bool},
@@ -64,6 +66,8 @@ impl Type {
             Type::UShort => 2,
             Type::UInt => 4,
             Type::ULong => 8,
+            Type::Float => 4,
+            Type::Double => 8,
             Pointer_To(_) => 8,
             ArrayOf(element_ty, len) => element_ty.align(),
             Func{..} => 8,
@@ -99,6 +103,8 @@ pub fn sizeof(ty: &Type) -> usize {
         Type::UShort => 2,
         Type::UInt => 4,
         Type::ULong => 8,
+        Type::Float => 4,
+        Type::Double => 8,
         Pointer_To(_) => 8,
         ArrayOf(element_ty, len) => sizeof(element_ty) * len,
         Func{..} => 8,
@@ -1493,6 +1499,9 @@ impl ProgramAnalyzer {
         let span = expr.span;
         match &expr.content {
             Integer{value, ty} => gen_num_expr_with_specified_type(*value,  &ty, span),
+            parse::ExprType::Float(value) => gen_float_expr(*value, span),
+            parse::ExprType::Double(value) => gen_double_expr(*value, span),
+
             Binary(lhs, rhs, tokenKind) => {
                 let lhs = self.analyze_expr(lhs);
                 let rhs = self.analyze_expr(rhs);
@@ -2005,6 +2014,19 @@ fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
         ir::Expr{content, ty, span}
 }
 
+fn gen_float_expr(number: f32, span: Span) -> ir::Expr {
+        let content = ir::ExprType::Float(number);
+        let ty = Type::Float;
+        ir::Expr {content, ty, span}
+}
+
+fn gen_double_expr(number: f64, span: Span) -> ir::Expr {
+        let content = ir::ExprType::Double(number);
+        let ty = Type::Double;
+        ir::Expr {content, ty, span}
+}
+
+// @Rename: gen_integer
 fn gen_num_expr(number: i64, span: Span) -> ir::Expr {
         let content = ir::ExprType::Integer(number);
         let ty = if number > i32::MAX as i64 {

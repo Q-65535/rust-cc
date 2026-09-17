@@ -305,6 +305,14 @@ impl Generator {
         let content = &expr.content;
         match content {
             Integer(n) => emit!("  mov ${}, %rax", n),
+            ExprType::Float(f) => {
+                emit!("  mov ${}, %eax  # float {}", f.to_bits(), f);
+                emit!("  movq %rax, %xmm0");
+            }
+            ExprType::Double(f) => {
+                emit!("  mov ${}, %rax  # double {}", f.to_bits(), f);
+                emit!("  movq %rax, %xmm0");
+            }
             CommaExpression(lhs, rhs) => {
                 self.expr_gen(lhs);
                 self.expr_gen(rhs);

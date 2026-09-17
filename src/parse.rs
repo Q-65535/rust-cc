@@ -209,6 +209,8 @@ pub enum Direct_Declarator {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
     Integer{value: i64, ty: Integer_Const_Type},
+    Float(f32),
+    Double(f64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
     Assign(Box<Expr>, Box<Expr>),
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -1285,6 +1287,16 @@ impl Parser {
             Lex_Integer{value, ty} => {
                 let token = self.bump();
                 let expr = Expr::new(Integer{value, ty}, token.span);
+                return Ok(expr);
+            }
+            Lex_Float(value) => {
+                let token = self.bump();
+                let expr = Expr::new(Float(value), token.span);
+                return Ok(expr);
+            }
+            Lex_Double(value) => {
+                let token = self.bump();
+                let expr = Expr::new(Double(value), token.span);
                 return Ok(expr);
             }
             Exclamation => {
