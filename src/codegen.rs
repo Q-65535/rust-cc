@@ -311,6 +311,43 @@ impl Generator {
                 self.expr_gen(rhs);
             }
             Binary(lhs, rhs, op) => {
+                if matches!(lhs.ty, Float | Double) {
+                    self.expr_gen(rhs);
+                    self.push_float("%xmm0");
+                    self.expr_gen(lhs);
+                    self.pop_float("%xmm1");
+
+                    let sz = if lhs.ty == Float {"ss"} else {"sd"};
+                    match op {
+                        op if op.is_compare() => {
+                            emit!("ucomi{} %xmm0, %xmm1", sz);
+                            match op {
+                                Eq => {
+                                    emit!("  sete %al");
+                                    emit!("  setnp %dl");
+                                    emit!("  and %dl, %al");
+                                }
+                                Neq => {
+                                    emit!("  setne %al");
+                                    emit!("  settp %dl");
+                                    emit!("  or %dl, %al");
+                                }
+                                LT => {
+                                    emit!("  seta %al");
+                                }
+                                LE => {
+                                    emit!("  setae %al");
+                                }
+                                _ => unreachable!(),
+                            }
+                            emit!("and $1, %al");
+                            emit!("movzb %al, %rax");
+                        }
+                        _ => todo!(),
+                    }
+                    return;
+                }
+
                 self.expr_gen(rhs);
                 self.push("%rax");
                 self.expr_gen(lhs);
@@ -509,6 +546,19 @@ impl Generator {
             _ => eprintln!("gen_code error: not support {:?}", content),
         }
     }
+
+    fn push_float(&mut self, reg: &str) {
+        emit!("  sub $8, %rsp");
+        emit!("  movsd {}, (%rsp)", reg);
+        self.depth += 1;
+    }
+
+    fn pop_float(&mut self, reg: &str) {
+        emit!("  movsd (%rsp), {}", reg);
+        emit!("  add $8, %rsp");
+        self.depth -= 1;
+    }
+
 
     fn next_jump_label_count(&mut self) -> usize {
         self.jump_label_count += 1;

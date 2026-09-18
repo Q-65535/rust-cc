@@ -2175,9 +2175,16 @@ fn get_common_type(lt: &Type, rt: &Type) -> Type {
         ArrayOf(element_type, _) => return (pointer_to(element_type)),
         _ => (),
     }
-
     let mut lt = lt.clone();
     let mut rt = rt.clone();
+
+    if lt == Double || rt == Double {
+        return Double;
+    }
+    if lt == Float || rt == Float {
+        return Float;
+    }
+
 
     if lt.size() < 4 {
         lt = Int;
