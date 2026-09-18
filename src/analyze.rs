@@ -358,12 +358,12 @@ impl ProgramAnalyzer {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
                     let (mut base_type, mut symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
-                    let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
+                    let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.dector);
                     // It is not allowed that function, variable or typedef name have the same name in the same scope.
                     // So we only check whether we encounter a duplicate name without considering it is function, variable or typedef name.
                     if self.scope_manager.contains_symbol_at_current_scope(&name) {
                         let err_info = format!("semantic error: {} redeclared as a symbol", name);
-                        report_semantic_error(fun.declarator.span, &err_info);
+                        report_semantic_error(fun.dector.span, &err_info);
                     }
                     let o = create_global_obj(&name, &function_type);
                     self.scope_manager.add_object(o);
@@ -401,13 +401,13 @@ impl ProgramAnalyzer {
         
 
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
-        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.declarator);
+        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.dector);
         if let Func{return_type, ..} = final_type {
             self.current_function_return_type = *return_type;
         } else {
             let err_info = format!("compiler bug: we are analyzing a function definition,
             but the data type resolved is not function!.");
-            report_semantic_error(fun.declarator.span, &err_info);
+            report_semantic_error(fun.dector.span, &err_info);
         }
         // We must enter scope before analyzing function
         // parameters since function parameters are also in
@@ -415,7 +415,7 @@ impl ProgramAnalyzer {
         self.scope_manager.enter_new_scope();
         let mut var_area = None;
         let mut analyzed_params: Vec<Obj> = Vec::new();
-        if let Some(DeclaratorSuffix::FunParam{params, is_variadic}) = &fun.declarator.suffix {
+        if let Some(DeclaratorSuffix::FunParam{params, is_variadic}) = &fun.dector.suffix {
             for param in params {
                 let p = self.analyze_param(param);
                 analyzed_params.push(p);
@@ -428,7 +428,7 @@ impl ProgramAnalyzer {
             }
         } else {
             let err_info = format!("compiler bug: the function doesn't have parameter field.");
-            report_semantic_error(fun.declarator.span, &err_info);
+            report_semantic_error(fun.dector.span, &err_info);
         }
         let mut stmts = self.analyze_block(&mut fun.items);
         let stack_size = self.current_local_var_offset;
@@ -442,8 +442,8 @@ impl ProgramAnalyzer {
         }
     }
 
-    pub fn analyze_typedef(&mut self, symbol_attribute: &Symbol_Attribute, base_type: &Type, declarator: &Declarator) {
-        let (final_type, name) = self.resolve_declarator(symbol_attribute, base_type, declarator);
+    pub fn analyze_typedef(&mut self, symbol_attribute: &Symbol_Attribute, base_type: &Type, dector: &Declarator) {
+        let (final_type, name) = self.resolve_declarator(symbol_attribute, base_type, dector);
         self.scope_manager.add_typedef_alias(&name, final_type);
     }
 
@@ -451,21 +451,21 @@ impl ProgramAnalyzer {
         let mut decls: Vec<Global_Data_Decl> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
         if symbol_attribute.is_typedef {
-            for init_declarator in &decl.init_declarators {
-                self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
+            for init_dector in &decl.init_dectors {
+                self.analyze_typedef(&symbol_attribute, &base_type, &init_dector.dector);
             }
             return decls;
         }
-        for init_declarator in &decl.init_declarators {
-            let cur_declarator = &init_declarator.declarator;
-            let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_declarator);
+        for init_dector in &decl.init_dectors {
+            let cur_dector = &init_dector.dector;
+            let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_dector);
 
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("semantic error: {} redeclared as a symbol", name);
-                report_semantic_error(cur_declarator.span, &err_info);
+                report_semantic_error(cur_dector.span, &err_info);
             }
             let mut init_data = None;
-            if let Some(init) = &init_declarator.init {
+            if let Some(init) = &init_dector.init {
                 let normalized_init = normalize_init(init, &final_type);
                 if let ArrayOf(element_type, array_len) = &final_type {
                     if *array_len == 0 {
@@ -479,7 +479,7 @@ impl ProgramAnalyzer {
                 if symbol_attribute.align < final_type.align() {
                     let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
                     the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
-                    report_semantic_error(cur_declarator.span, &err_info);
+                    report_semantic_error(cur_dector.span, &err_info);
                 }
             }
             let object = create_global_obj_with_attribute(&name, &final_type, &symbol_attribute);
@@ -651,7 +651,7 @@ impl ProgramAnalyzer {
                 let mut param_final_type: Type;
                 for param in params {
                     let (param_base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_specs);
-                    if let Some(param_dector) = &param.declarator {
+                    if let Some(param_dector) = &param.dector {
                         match param_dector {
                             Param_Declarator::Declarator(dector) => {
                                 param_final_type = self.resolve_declarator(&symbol_attribute, &param_base_type, dector).0;
@@ -675,54 +675,54 @@ impl ProgramAnalyzer {
         }
     }
 
-    fn resolve_abstract_declarator(&mut self, base_type: &Type, declarator: &Abstract_Declarator) -> Type {
+    fn resolve_abstract_declarator(&mut self, base_type: &Type, dector: &Abs_Declarator) -> Type {
         use Decl_Spec_Kind::*;
         let mut cur_type = base_type.clone();
         // deal with pointers
-        for q in &declarator.qualifiers_and_pointers {
+        for q in &dector.qualifiers_and_pointers {
             match q {
                 Const | Restrict | Volatile | _Atomic => continue,
                 Pointer_Mark => cur_type = pointer_to(&cur_type),
                 _ => {
                     let err_info = format!("Compiler bug: not a qualifier or pointer! {:?}", q);
-                    report_semantic_error(declarator.span, &err_info);
+                    report_semantic_error(dector.span, &err_info);
                 }
             }
         }
         // deal with suffix
-        if let Some(suffix) = &declarator.suffix {
+        if let Some(suffix) = &dector.suffix {
             cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
         }
-        if let Some(inner_declarator) = &declarator.direct_abstract_declarator {
-            cur_type = self.resolve_abstract_declarator(&cur_type, inner_declarator);
+        if let Some(inner_dector) = &dector.direct_abs_dector {
+            cur_type = self.resolve_abstract_declarator(&cur_type, inner_dector);
         }
         return cur_type;
     }
 
-    fn resolve_declarator(&mut self, attribute: &Symbol_Attribute, base_type: &Type, declarator: &Declarator) -> (Type, String) {
+    fn resolve_declarator(&mut self, attribute: &Symbol_Attribute, base_type: &Type, dector: &Declarator) -> (Type, String) {
         use Decl_Spec_Kind::*;
         let mut cur_type = base_type.clone();
-        for qualifier in &declarator.qualifiers_and_pointers {
+        for qualifier in &dector.qualifiers_and_pointers {
             match qualifier {
                 Const | Restrict | Volatile | _Atomic => continue,
                 Pointer_Mark => cur_type = pointer_to(&cur_type),
                 _ => {
                     let err_info = format!("Compiler bug, not a qualifier");
-                    report_semantic_error(declarator.span, &err_info);
+                    report_semantic_error(dector.span, &err_info);
                 }
             }
         }
         // deal with suffix
-        if let Some(suffix) = &declarator.suffix {
+        if let Some(suffix) = &dector.suffix {
             cur_type = self.resolve_type_with_suffix(&cur_type, suffix);
         }
         let name: String;
-        match &*declarator.direct_declarator {
+        match &*dector.direct_dector {
             Direct_Declarator::Identifier(ident) => {
                 name = ident.name.clone();
             }
-            Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
-                (cur_type, name) = self.resolve_declarator(attribute, &cur_type, &inner_declarator);
+            Direct_Declarator::Paren_Enclosed_Declarator(inner_dector) => {
+                (cur_type, name) = self.resolve_declarator(attribute, &cur_type, &inner_dector);
             }
         }
 
@@ -738,14 +738,14 @@ impl ProgramAnalyzer {
                     Some(the_type) => cur_type = the_type.clone(),
                     None => {
                         let err_info = format!("Storage size of {} is Unkonwn.", &tag_name);
-                        report_semantic_error(declarator.span, &err_info);
+                        report_semantic_error(dector.span, &err_info);
                     },
                 }
             }
 
             if cur_type == Type::Void {
                 let err_info = format!("variable declared void!");
-                report_semantic_error(declarator.span, &err_info);
+                report_semantic_error(dector.span, &err_info);
             }
         }
         return (cur_type, name);
@@ -771,7 +771,7 @@ impl ProgramAnalyzer {
 
     fn analyze_param(&mut self, param: &Func_Parameter) -> Obj {
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_specs);
-        let (mut final_type, name) = if let Some(Param_Declarator::Declarator(dector)) = &param.declarator {
+        let (mut final_type, name) = if let Some(Param_Declarator::Declarator(dector)) = &param.dector {
             self.resolve_declarator(&symbol_attribute, &base_type, dector)
         } else {
             let err_info = format!("Parameter in function definition must have a name.");
@@ -799,8 +799,8 @@ impl ProgramAnalyzer {
     fn analyze_local_decl(&mut self, decl: &Declaration) -> Vec<ir::StmtType> {
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
         if symbol_attribute.is_typedef {
-            for init_declarator in &decl.init_declarators {
-                self.analyze_typedef(&symbol_attribute, &base_type, &init_declarator.declarator);
+            for init_dector in &decl.init_dectors {
+                self.analyze_typedef(&symbol_attribute, &base_type, &init_dector.dector);
             }
             return vec![];
         }
@@ -811,14 +811,14 @@ impl ProgramAnalyzer {
         }
 
         let mut stmts: Vec<ir::StmtType> = Vec::new();
-        for init_declarator in &decl.init_declarators {
-            let cur_declarator = &init_declarator.declarator;
-            let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_declarator);
+        for init_dector in &decl.init_dectors {
+            let cur_dector = &init_dector.dector;
+            let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_dector);
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
-                report_semantic_error(cur_declarator.span, &err_info);
+                report_semantic_error(cur_dector.span, &err_info);
             }
-            if let Some(init) = &init_declarator.init {
+            if let Some(init) = &init_dector.init {
                 let normalized_init = normalize_init(init, &final_type);
                 if let ArrayOf(element_type, array_len) = &final_type {
                     if *array_len == 0 {
@@ -830,13 +830,13 @@ impl ProgramAnalyzer {
                     if symbol_attribute.align < final_type.align() {
                         let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
                         the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
-                        report_semantic_error(cur_declarator.span, &err_info);
+                        report_semantic_error(cur_dector.span, &err_info);
                     }
                 }
                 let obj = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
                 self.scope_manager.add_object(obj.clone());
 
-                let mut obj_expr = self.gen_expr_from_obj(&obj, cur_declarator.span);
+                let mut obj_expr = self.gen_expr_from_obj(&obj, cur_dector.span);
                 let mut assignment_expr_stmts = self.init_local_var(obj_expr, &normalized_init);
                 stmts.append(&mut assignment_expr_stmts);
             } else {
@@ -844,13 +844,13 @@ impl ProgramAnalyzer {
                 // and without initializer, this declaration is not allowed.
                 if matches!(&final_type, Type::ArrayOf(..)) && sizeof(&final_type) == 0 {
                     let err_info = format!("variable {} has incomplete type", name);
-                    report_semantic_error(cur_declarator.span, &err_info);
+                    report_semantic_error(cur_dector.span, &err_info);
                 }
                 if symbol_attribute.align != 0 {
                     if symbol_attribute.align < final_type.align() {
                         let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
                         the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
-                        report_semantic_error(cur_declarator.span, &err_info);
+                        report_semantic_error(cur_dector.span, &err_info);
                     }
                 }
                 let mut object = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
@@ -1218,7 +1218,7 @@ impl ProgramAnalyzer {
 
     fn analyze_struct_member(&mut self, member: &Member, offset: usize) -> ir::Member {
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&member.decl_specs);
-        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &member.declarator);
+        let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &member.dector);
         let align = if symbol_attribute.align != 0 {
             symbol_attribute.align
         } else {
@@ -1889,8 +1889,8 @@ impl ProgramAnalyzer {
     fn resolve_type_name(&mut self, type_name: &Type_Name) -> Type {
         let (base_type, _) = self.analyze_decl_specs(&type_name.decl_specs);
         let mut final_type: Type;
-        final_type = match &type_name.abstract_declarator {
-            Some(abstract_declarator) => self.resolve_abstract_declarator(&base_type, abstract_declarator),
+        final_type = match &type_name.abs_dector {
+            Some(abs_dector) => self.resolve_abstract_declarator(&base_type, abs_dector),
             None => base_type,
         };
         // If the final type is a struct tag, We want to make sure that

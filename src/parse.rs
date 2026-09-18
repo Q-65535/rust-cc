@@ -70,7 +70,7 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub return_type_specifier: Vec<Decl_Spec>,
-    pub declarator: Declarator,
+    pub dector: Declarator,
     pub items: Vec<BlockItem>,
     pub stmt_labels: Vec<String>,
 }
@@ -78,26 +78,26 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Func_Parameter {
     pub decl_specs: Vec<Decl_Spec>,
-    pub declarator: Option<Param_Declarator>,
+    pub dector: Option<Param_Declarator>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Param_Declarator {
     Declarator(Declarator),
-    Abstract_Declarator(Abstract_Declarator),
+    Abstract_Declarator(Abs_Declarator),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub decl_specs: Vec<Decl_Spec>,
-    pub init_declarators: Vec<Init_Declarator>,
+    pub init_dectors: Vec<Init_Declarator>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
     pub decl_specs: Vec<Decl_Spec>,
-    pub declarator: Declarator,
+    pub dector: Declarator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,16 +164,16 @@ pub struct Enumerator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Abstract_Declarator {
+pub struct Abs_Declarator {
     pub qualifiers_and_pointers: Vec<Decl_Spec_Kind>,
-    pub direct_abstract_declarator: Option<Box<Abstract_Declarator>>,
+    pub direct_abs_dector: Option<Box<Abs_Declarator>>,
     pub suffix: Option<DeclaratorSuffix>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Abstract_Direct_Declarator {
-    Paren_Enclosed_Abstract_Declarator(Abstract_Declarator),
+pub enum Abs_Direct_Declarator {
+    Paren_Enclosed_Abs_Declarator(Abs_Declarator),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -190,14 +190,14 @@ pub struct Initializer {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Init_Declarator {
-    pub declarator: Declarator,
+    pub dector: Declarator,
     pub init: Option<Initializer>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declarator {
     pub qualifiers_and_pointers: Vec<Decl_Spec_Kind>,
-    pub direct_declarator: Box<Direct_Declarator>,
+    pub direct_dector: Box<Direct_Declarator>,
     pub suffix: Option<DeclaratorSuffix>,
     pub span: Span,
 }
@@ -317,7 +317,7 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Type_Name {
     pub decl_specs: Vec<Decl_Spec>,
-    pub abstract_declarator: Option<Abstract_Declarator>,
+    pub abs_dector: Option<Abs_Declarator>,
     pub span: Span,
 }
 
@@ -538,25 +538,25 @@ impl Parser {
     }
 
     fn parse_decl(&mut self) -> Result<Declaration, String> {
-        let mut init_declarators: Vec<Init_Declarator> = Vec::new();
+        let mut init_dectors: Vec<Init_Declarator> = Vec::new();
         let decl_specs = self.parse_decl_specs()?;
         let is_typedef_declaration = decl_specs.iter().any(|spec| spec.content == Decl_Spec_Kind::Typedef);
 
         if !self.at(&Semicolon) {
             loop {
-                let init_declarator = self.parse_init_declarator()?;
+                let init_dector = self.parse_init_declarator()?;
                 if is_typedef_declaration {
-                    let name = get_declarator_name(&init_declarator.declarator);
+                    let name = get_declarator_name(&init_dector.dector);
                     if self.scope_manager.is_typedef_name_in_current_scope(name) {
                         let err_msg = error_span(
-                            init_declarator.declarator.span,
+                            init_dector.dector.span,
                             "typedef name is already being used!",
                         );
                         return Err(err_msg);
                     }
                     self.scope_manager.add_typedef_name(name);
                 }
-                init_declarators.push(init_declarator);
+                init_dectors.push(init_dector);
 
                 if !self.eat(&LexComma) {
                     break;
@@ -564,7 +564,7 @@ impl Parser {
             }
         }
         self.expect(&Semicolon)?;
-        Ok(Declaration{decl_specs, init_declarators})
+        Ok(Declaration{decl_specs, init_dectors})
     }
 
     fn is_decl_spec(&self, token: &Token) -> bool {
@@ -572,11 +572,8 @@ impl Parser {
             return true;
         }
         match &token.kind {
-            // @TODO: Remove all type spec.
-            (Struct | Union | Static | LexEnum | Int | Long | Short |
-            Char | _Bool | Void | Typedef | Extern | _Alignas | Signed |
-            Unsigned | Const | Volatile | Auto | Register | Restrict |
-            _Noreturn | Float | Double) => true,
+            Static | Typedef | Extern | _Alignas | Const |
+            Volatile | Auto | Register | Restrict | _Noreturn => true,
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -774,8 +771,8 @@ impl Parser {
             let decl_specs = self.parse_decl_specs()?;
             // parse declarators separated by ','
             loop {
-                let declarator = self.parse_declarator()?;
-                let m = Member{decl_specs: decl_specs.clone(), declarator};
+                let dector = self.parse_declarator()?;
+                let m = Member{decl_specs: decl_specs.clone(), dector};
                 members.push(m);
                 if !self.eat(&LexComma) {
                     break;
@@ -843,7 +840,7 @@ impl Parser {
             self.bump();
         }
 
-        let direct_declarator = match self.cur_token().kind.clone() {
+        let direct_dector = match self.cur_token().kind.clone() {
             LexIdent(ident) => {
                 let name = ident.clone();
                 let span = self.cur_token().span;
@@ -853,9 +850,9 @@ impl Parser {
             },
             LParen => {
                 self.expect(&LParen)?;
-                let paren_enclosed_declarator = self.parse_declarator()?;
+                let paren_enclosed_dector = self.parse_declarator()?;
                 self.expect(&RParen)?;
-                Box::new(Direct_Declarator::Paren_Enclosed_Declarator(paren_enclosed_declarator))
+                Box::new(Direct_Declarator::Paren_Enclosed_Declarator(paren_enclosed_dector))
             },
             _ => {
                 return Err(error_token(
@@ -876,14 +873,14 @@ impl Parser {
 
         Ok(Declarator{
             qualifiers_and_pointers,
-            direct_declarator,
+            direct_dector,
             suffix,
             span,
         })
     }
 
     fn parse_init_declarator(&mut self) -> Result<Init_Declarator, String> {
-        let mut declarator = self.parse_declarator()?;
+        let mut dector = self.parse_declarator()?;
         if self.eat(&LexAssignment) {
             let start_index = self.cur_token().span.start_index;
             let content = if self.cur_token().kind == LBrace {
@@ -897,9 +894,9 @@ impl Parser {
             let end_index = self.previous_token().span.end_index;
             let span = Span{start_index, end_index};
             let init = Some(Initializer{content, span});
-            Ok(Init_Declarator{declarator, init})
+            Ok(Init_Declarator{dector, init})
         } else {
-            Ok(Init_Declarator{declarator, init: None})
+            Ok(Init_Declarator{dector, init: None})
         }
     }
 
@@ -986,7 +983,7 @@ impl Parser {
                         let param_dector = Param_Declarator::Declarator(dector);
                         let func_param = Func_Parameter{
                             decl_specs,
-                            declarator: Some(param_dector),
+                            dector: Some(param_dector),
                             span,
                         };
                         params.push(func_param);
@@ -998,7 +995,7 @@ impl Parser {
                             let param_dector = Param_Declarator::Abstract_Declarator(abs_dector);
                             let func_param = Func_Parameter{
                                 decl_specs,
-                                declarator: Some(param_dector),
+                                dector: Some(param_dector),
                                 span,
                             };
                             params.push(func_param);
@@ -1008,7 +1005,7 @@ impl Parser {
                             self.cur_index = backup_index;
                             let func_param = Func_Parameter{
                                 decl_specs,
-                                declarator: None,
+                                dector: None,
                                 span,
                             };
                             params.push(func_param);
@@ -1462,7 +1459,7 @@ impl Parser {
     fn parse_type_name(&mut self) -> Result<Type_Name, String> {
         let start_index = self.cur_token().span.start_index;
         let decl_specs = self.parse_decl_specs()?;
-        let abstract_declarator = if starts_abstract_declarator(&self.cur_token().kind) {
+        let abs_dector = if starts_abstract_declarator(&self.cur_token().kind) {
             Some(self.parse_abstract_declarator()?)
         } else {
             None
@@ -1470,7 +1467,7 @@ impl Parser {
         let end_index = self.previous_token().span.end_index;
         let span = Span{start_index, end_index};
 
-        Ok(Type_Name{decl_specs, abstract_declarator, span})
+        Ok(Type_Name{decl_specs, abs_dector, span})
     }
 
     fn starts_grouped_abstract_declarator(&self) -> bool {
@@ -1479,7 +1476,7 @@ impl Parser {
 
     // Enters on the first token of the abstract declarator and returns on the
     // first token that does not belong to it.
-    fn parse_abstract_declarator(&mut self) -> Result<Abstract_Declarator, String> {
+    fn parse_abstract_declarator(&mut self) -> Result<Abs_Declarator, String> {
         let start_index = self.cur_token().span.start_index;
         let mut abs_dector_is_empty = true;
 
@@ -1500,9 +1497,9 @@ impl Parser {
         let direct_abstract_declarator = if self.starts_grouped_abstract_declarator() {
             abs_dector_is_empty = false;
             self.expect(&LParen)?;
-            let inner_declarator = self.parse_abstract_declarator()?;
+            let inner_dector = self.parse_abstract_declarator()?;
             self.expect(&RParen)?;
-            Some(Box::new(inner_declarator))
+            Some(Box::new(inner_dector))
         } else {
             None
         };
@@ -1520,7 +1517,7 @@ impl Parser {
         };
         let span = Span{start_index, end_index};
 
-        Ok(Abstract_Declarator{qualifiers_and_pointers, direct_abstract_declarator, suffix, span})
+        Ok(Abs_Declarator{qualifiers_and_pointers, direct_abs_dector: direct_abstract_declarator, suffix, span})
     }
 
     fn parse_stmt_expr(&mut self) -> Result<Expr, String> {
@@ -1694,21 +1691,21 @@ impl Parser {
     fn parse_fun_def(&mut self) -> Result<Function, String> {
         self.stmt_labels.clear();
         let return_type_specifier = self.parse_decl_specs()?;
-        let declarator = self.parse_declarator()?;
-        if let Some(FunParam{..}) = &declarator.suffix {
+        let dector = self.parse_declarator()?;
+        if let Some(FunParam{..}) = &dector.suffix {
             if !self.at(&LBrace) {
                 return Err(error_token(self.cur_token(), "expected function body"));
             }
             let items = self.parse_block();
-            Ok(Function{return_type_specifier, declarator, items, stmt_labels: self.stmt_labels.clone()})
+            Ok(Function{return_type_specifier, dector, items, stmt_labels: self.stmt_labels.clone()})
         } else {
             Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
     }
 }
 
-fn get_declarator_name(declarator: &Declarator) -> &str {
-    match &*declarator.direct_declarator {
+fn get_declarator_name(dector: &Declarator) -> &str {
+    match &*dector.direct_dector {
         Direct_Declarator::Identifier(ident) => {return &ident.name;}
         Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
             return get_declarator_name(inner_declarator);
