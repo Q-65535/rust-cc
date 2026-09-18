@@ -50,7 +50,7 @@ use BlockItem::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorSuffix {
     ArrayLen(Option<Box<Expr>>, Option<Box<DeclaratorSuffix>>),
-    FunParam{params: Vec<Parameter>, is_variadic: bool},
+    FunParam{params: Vec<Func_Parameter>, is_variadic: bool},
 }
 use DeclaratorSuffix::*;
 
@@ -76,10 +76,16 @@ pub struct Function {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Parameter {
+pub struct Func_Parameter {
     pub decl_specs: Vec<Decl_Spec>,
-    // @Future: Parameter may have declarator or Option<Abstract_Declarator>
-    pub declarator: Declarator,
+    pub declarator: Option<Param_Declarator>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Param_Declarator {
+    Declarator(Declarator),
+    Abstract_Declarator(Abstract_Declarator),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -950,9 +956,9 @@ impl Parser {
             // function parameters
             LParen => {
                 self.expect(&LParen)?;
-                let mut params: Vec<Parameter> = Vec::new();
-
+                let mut params: Vec<Func_Parameter> = Vec::new();
                 let mut is_variadic = false;
+
                 'parse_params_loop: while !matches!(self.cur_token().kind, RParen | Eof) {
                     if self.cur_token().kind == Variadic_Mark {
                         is_variadic = true;
@@ -973,10 +979,41 @@ impl Parser {
                             }
                         }
                     }
-                    let declarator = self.parse_declarator()?;
-                    let param = Parameter{decl_specs, declarator};
-                    params.push(param);
-
+                    let backup_index = self.cur_index;
+                    // Function definition or declaration case:
+                    if let Ok(dector) = self.parse_declarator() {
+                        let span = dector.span;
+                        let param_dector = Param_Declarator::Declarator(dector);
+                        let func_param = Func_Parameter{
+                            decl_specs,
+                            declarator: Some(param_dector),
+                            span,
+                        };
+                        params.push(func_param);
+                    // Function declaration case:
+                    } else {
+                        self.cur_index = backup_index;
+                        if let Ok(abs_dector) = self.parse_abstract_declarator() {
+                            let span = abs_dector.span;
+                            let param_dector = Param_Declarator::Abstract_Declarator(abs_dector);
+                            let func_param = Func_Parameter{
+                                decl_specs,
+                                declarator: Some(param_dector),
+                                span,
+                            };
+                            params.push(func_param);
+                        // No parameter case:
+                        } else {
+                            let span = decl_specs.last().unwrap().span;
+                            self.cur_index = backup_index;
+                            let func_param = Func_Parameter{
+                                decl_specs,
+                                declarator: None,
+                                span,
+                            };
+                            params.push(func_param);
+                        }
+                    }
                     if !self.eat(&LexComma) {
                         break;
                     }
@@ -1444,9 +1481,11 @@ impl Parser {
     // first token that does not belong to it.
     fn parse_abstract_declarator(&mut self) -> Result<Abstract_Declarator, String> {
         let start_index = self.cur_token().span.start_index;
+        let mut abs_dector_is_empty = true;
 
         let mut qualifiers_and_pointers = Vec::new();
         while is_pointer_or_type_qualifier(self.cur_token()) {
+            abs_dector_is_empty = false;
             match self.cur_token().kind {
                 Mul => qualifiers_and_pointers.push(Decl_Spec_Kind::Pointer_Mark),
                 Const => qualifiers_and_pointers.push(Decl_Spec_Kind::Const),
@@ -1459,6 +1498,7 @@ impl Parser {
         }
 
         let direct_abstract_declarator = if self.starts_grouped_abstract_declarator() {
+            abs_dector_is_empty = false;
             self.expect(&LParen)?;
             let inner_declarator = self.parse_abstract_declarator()?;
             self.expect(&RParen)?;
@@ -1468,12 +1508,16 @@ impl Parser {
         };
 
         let suffix = if matches!(self.cur_token().kind, LSquareBracket | LParen) {
+            abs_dector_is_empty = false;
             Some(self.parse_declarator_suffix()?)
         } else {
             None
         };
-
-        let end_index = self.previous_token().span.end_index;
+        let end_index = if abs_dector_is_empty {
+            self.cur_token().span.end_index
+        } else {
+            self.previous_token().span.end_index
+        };
         let span = Span{start_index, end_index};
 
         Ok(Abstract_Declarator{qualifiers_and_pointers, direct_abstract_declarator, suffix, span})

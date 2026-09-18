@@ -648,9 +648,21 @@ impl ProgramAnalyzer {
             DeclaratorSuffix::FunParam{params, is_variadic} => {
                 let return_type = base_type.clone();
                 let mut param_types = Vec::new();
+                let mut param_final_type: Type;
                 for param in params {
                     let (param_base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_specs);
-                    let (mut param_final_type, _) = self.resolve_declarator(&symbol_attribute, &param_base_type, &param.declarator);
+                    if let Some(param_dector) = &param.declarator {
+                        match param_dector {
+                            Param_Declarator::Declarator(dector) => {
+                                param_final_type = self.resolve_declarator(&symbol_attribute, &param_base_type, dector).0;
+                            }
+                            Param_Declarator::Abstract_Declarator(abs_dector) => {
+                                param_final_type = self.resolve_abstract_declarator(&param_base_type, abs_dector);
+                            }
+                        }
+                    } else {
+                        param_final_type = param_base_type.clone();
+                    }
                     // Function accepts parameters with array type, but treat it as a pointer.
                     if let ArrayOf(ref element_ty, _) = param_final_type {
                         param_final_type = pointer_to(&element_ty);
@@ -757,9 +769,15 @@ impl ProgramAnalyzer {
         stmts
     }
 
-    fn analyze_param(&mut self, param: &Parameter) -> Obj {
+    fn analyze_param(&mut self, param: &Func_Parameter) -> Obj {
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&param.decl_specs);
-        let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &param.declarator);
+        let (mut final_type, name) = if let Some(Param_Declarator::Declarator(dector)) = &param.declarator {
+            self.resolve_declarator(&symbol_attribute, &base_type, dector)
+        } else {
+            let err_info = format!("Parameter in function definition must have a name.");
+            report_semantic_error(param.span, &err_info);
+            exit(1);
+        };
         // Function accepts parameters with array type, but treat it as a pointer.
         if let ArrayOf(ref element_ty, _) = final_type {
             final_type = pointer_to(&element_ty);
@@ -767,7 +785,7 @@ impl ProgramAnalyzer {
         
         if self.scope_manager.contains_symbol_at_current_scope(&name) {
             let err_info = format!("fatal error: parameter variable {} already defined", &name);
-            report_semantic_error(param.declarator.span, &err_info);
+            report_semantic_error(param.span, &err_info);
             exit(1);
         } else {
             let obj = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
