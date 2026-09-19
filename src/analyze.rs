@@ -1920,7 +1920,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
     if matches!(to_type, ArrayOf(..)) {
         report_semantic_error(span, "the cast-to type must not be array type!");
     }
-    if !is_scalar_type(&from_type) || !is_scalar_type(&to_type) {
+    if !is_scalar(&from_type) || !is_scalar(&to_type) {
         let error_info = format!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
         when doing type casting! Don't blame me, ChatGPT told me that.");
         report_semantic_error(span, &error_info);
@@ -1931,7 +1931,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
 }
 
 
-fn is_scalar_type(ty: &Type) -> bool {
+fn is_scalar(ty: &Type) -> bool {
     matches!(ty, 
         Char  | Short  | Int  | Long  | Enum | Bool |
         UChar | UShort | UInt | ULong | Float | Double |
