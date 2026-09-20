@@ -175,13 +175,25 @@ impl Generator {
             emit!("  movsd %xmm7, {}(%rbp)", va_area_offset + 128);
         }
 
-        for (i, param) in fun.params.iter().enumerate() {
+        let mut float_reg_index = 0;
+        let mut integer_reg_index = 0;
+        for param in fun.params {
             let concrete_param_offset = self.get_concrete_obj_offset_to_rbp(&param);
-            match sizeof(&param.ty) {
-                1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[i],  concrete_param_offset),
-                2 => emit!("  mov {}, {}(%rbp)\n", self.argregs16[i], concrete_param_offset),
-                4 => emit!("  mov {}, {}(%rbp)\n", self.argregs32[i], concrete_param_offset),
-                _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[i], concrete_param_offset),
+            if param.ty.is_float() {
+                if param.ty == Float {
+                    emit!("  movss %xmm{}, {}(%rbp)\n", float_reg_index,  concrete_param_offset);
+                } else if param.ty == Double {
+                    emit!("  movsd %xmm{}, {}(%rbp)\n", float_reg_index,  concrete_param_offset);
+                }
+                float_reg_index += 1;
+            } else {
+                match sizeof(&param.ty) {
+                    1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[integer_reg_index],  concrete_param_offset),
+                    2 => emit!("  mov {}, {}(%rbp)\n", self.argregs16[integer_reg_index], concrete_param_offset),
+                    4 => emit!("  mov {}, {}(%rbp)\n", self.argregs32[integer_reg_index], concrete_param_offset),
+                    _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[integer_reg_index], concrete_param_offset),
+                }
+                integer_reg_index += 1;
             }
         }
         self.block_gen(&fun.stmts);
