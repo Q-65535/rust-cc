@@ -220,7 +220,8 @@ impl Generator {
                 self.stmt_gen(&then);
                 emit!("{}:", continue_pos_label);
                 self.expr_gen(cond);
-                emit!("  cmp $0, %rax");
+                cmp_zero(&cond.ty);
+                // emit!("  cmp $0, %rax");
                 emit!("  jne .L.begin.{}", c);
                 emit!("{}:", break_pos_label);
             }
@@ -262,7 +263,9 @@ impl Generator {
     fn if_gen(&mut self, cond: &ir::Expr, then: &ir::StmtType, otherwise: &Option<Box<ir::StmtType>>) {
         let c = self.next_jump_label_count();
         self.expr_gen(&cond);
-        emit!("  cmp $0, %rax");
+
+        cmp_zero(&cond.ty);
+        // emit!("  cmp $0, %rax");
         emit!("  je  .L.else.{}", c);
         self.stmt_gen(&then);
         emit!("  jmp .L.end.{}", c);
@@ -281,7 +284,8 @@ impl Generator {
         emit!(".L.begin.{}:", c);
         if let Some(expr) = cond {
             self.expr_gen(expr);
-            emit!("  cmp $0, %rax");
+            cmp_zero(&expr.ty);
+            // emit!("  cmp $0, %rax");
             emit!("  je  {}", end_label);
         }
         self.stmt_gen(&then);
@@ -311,7 +315,7 @@ impl Generator {
                 self.expr_gen(rhs);
             }
             Binary(lhs, rhs, op) => {
-                if matches!(lhs.ty, Float | Double) {
+                if matches!(lhs.ty, Float | Double) && matches!(op, Eq | Neq | LT | LE) {
                     self.expr_gen(rhs);
                     self.push_float("%xmm0");
                     self.expr_gen(lhs);
@@ -382,9 +386,13 @@ impl Generator {
                     BitXOR => emit!("  xor %rdi, %rax"),
                     LOGAND => {
                         let c = self.next_jump_label_count();
-                        emit!("  cmp $0, {}", ax);
+
+                        cmp_zero(&lhs.ty);
+                        // emit!("  cmp $0, {}", ax);
                         emit!("  je .L.false.{}", c);
-                        emit!("  cmp $0, {}", di);
+                        emit!("mov {}, {}", di, ax);
+                        cmp_zero(&rhs.ty);
+                        // emit!("  cmp $0, {}", di);
                         emit!("  je .L.false.{}", c);
                         emit!("  mov $1, {}", ax);
                         emit!("  jmp .L.end.{}", c);
@@ -394,9 +402,12 @@ impl Generator {
                     }
                     LOGOR => {
                         let c = self.next_jump_label_count();
-                        emit!("  cmp $0, {}", ax);
+                        cmp_zero(&lhs.ty);
+                        // emit!("  cmp $0, {}", ax);
                         emit!("  jne .L.true.{}", c);
-                        emit!("  cmp $0, {}", di);
+                        emit!("mov {}, {}", di, ax);
+                        cmp_zero(&rhs.ty);
+                        // emit!("  cmp $0, {}", di);
                         emit!("  jne .L.true.{}", c);
                         emit!("  mov $0, {}", ax);
                         emit!("  jmp .L.end.{}", c);
@@ -445,7 +456,8 @@ impl Generator {
             Conditional{cond, then, otherwise} => {
                 let c = self.next_jump_label_count();
                 self.expr_gen(cond);
-                emit!("  cmp $0, %rax");
+                cmp_zero(&cond.ty);
+                // emit!("  cmp $0, %rax");
                 emit!("  je .L.else.{}", c);
                 self.expr_gen(then);
                 emit!("  jmp .L.end.{}", c);
@@ -466,7 +478,8 @@ impl Generator {
             }
             Not(expr) => {
                 self.expr_gen(expr);
-                emit!("  cmp $0, %rax");
+                cmp_zero(&expr.ty);
+                // emit!("  cmp $0, %rax");
                 emit!("  sete %al");
                 emit!("  movzx %al, %rax");
             }
@@ -654,10 +667,22 @@ fn cast(from: &Type, to: &Type) {
 }
 
 fn cmp_zero(ty: &Type) {
-  if is_integer(ty) && sizeof(ty) <= 4 {
-    emit!("  cmp $0, %eax");
-  } else {
-    emit!("  cmp $0, %rax");
+    match ty {
+        Float => {
+            emit!("  xorps %xmm1, %xmm1");
+            emit!("  ucomiss %xmm1, %xmm0");
+        }
+        Double => {
+            emit!("  xorpd %xmm1, %xmm1");
+            emit!("  ucomisd %xmm1, %xmm0");
+        }
+        _ => {
+            if is_integer(ty) && sizeof(ty) <= 4 {
+                emit!("  cmp $0, %eax");
+            } else {
+                emit!("  cmp $0, %rax");
+            }
+        }
     }
 }
 
