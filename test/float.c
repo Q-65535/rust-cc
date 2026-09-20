@@ -60,11 +60,32 @@ int main() {
   ASSERT(1, 5.0f<=5);
   ASSERT(1, 4.9f<=5);
 
+  
+  ASSERT(6, 2.3+3.8);
+  ASSERT(-1, 2.3-3.8);
+  ASSERT(-3, -3.8);
+  ASSERT(13, 3.3*4);
+  ASSERT(2, 5.0/2);
+
+  ASSERT(6, 2.3f+3.8f);
+  ASSERT(6, 2.3f+3.8);
+  ASSERT(-1, 2.3f-3.8);
+  ASSERT(-3, -3.8f);
+  ASSERT(13, 3.3f*4);
+  ASSERT(2, 5.0f/2);
+
+  ASSERT(0, 0.0/0.0 == 0.0/0.0);
+  ASSERT(1, 0.0/0.0 != 0.0/0.0);
+
+  ASSERT(0, 0.0/0.0 < 0);
+  ASSERT(0, 0.0/0.0 <= 0);
+  ASSERT(0, 0.0/0.0 > 0);
+  ASSERT(0, 0.0/0.0 >= 0);
+
   ASSERT(0, !3.);
   ASSERT(1, !0.);
   ASSERT(0, !3.f);
   ASSERT(1, !0.f);
-
   ASSERT(5, 0.0 ? 3 : 5);
   ASSERT(3, 1.2 ? 3 : 5);
 

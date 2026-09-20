@@ -314,8 +314,44 @@ impl Generator {
                 self.expr_gen(lhs);
                 self.expr_gen(rhs);
             }
+            // Although logic operators belong to binary operators,
+            // they can be handeld in a unified way for integer and flonum.
+            // Other binary operators are handled separatly for integer and flonum.
+            Binary(lhs, rhs, op) if op.is_logic() => {
+                match op {
+                    LOGAND => {
+                        let c = self.next_jump_label_count();
+                        self.expr_gen(lhs);
+                        cmp_zero(&lhs.ty);
+                        emit!("  je .L.false.{}", c);
+                        self.expr_gen(rhs);
+                        cmp_zero(&rhs.ty);
+                        emit!("  je .L.false.{}", c);
+                        emit!("  mov $1, %rax");
+                        emit!("  jmp .L.end.{}", c);
+                        emit!(".L.false.{}:", c);
+                        emit!("  mov $0, %rax");
+                        emit!(".L.end.{}:", c);
+                    }
+                    LOGOR => {
+                        let c = self.next_jump_label_count();
+                        self.expr_gen(lhs);
+                        cmp_zero(&lhs.ty);
+                        emit!("  jne .L.true.{}", c);
+                        self.expr_gen(rhs);
+                        cmp_zero(&rhs.ty);
+                        emit!("  jne .L.true.{}", c);
+                        emit!("  mov $0, %rax");
+                        emit!("  jmp .L.end.{}", c);
+                        emit!(".L.true.{}:", c);
+                        emit!("  mov $1, %rax");
+                        emit!(".L.end.{}:", c);
+                    }
+                    _ => unreachable!(),
+                }
+            }
             Binary(lhs, rhs, op) => {
-                if matches!(lhs.ty, Float | Double) && matches!(op, Eq | Neq | LT | LE) {
+                if matches!(lhs.ty, Float | Double) {
                     self.expr_gen(rhs);
                     self.push_float("%xmm0");
                     self.expr_gen(lhs);
@@ -333,7 +369,7 @@ impl Generator {
                                 }
                                 Neq => {
                                     emit!("  setne %al");
-                                    emit!("  settp %dl");
+                                    emit!("  setp %dl");
                                     emit!("  or %dl, %al");
                                 }
                                 LT => {
@@ -347,110 +383,85 @@ impl Generator {
                             emit!("and $1, %al");
                             emit!("movzb %al, %rax");
                         }
-                        _ => todo!(),
+                        Plus =>  emit!("  add{} %xmm1, %xmm0", sz),
+                        Minus => emit!("  sub{} %xmm1, %xmm0", sz),
+                        Mul => emit!("  mul{} %xmm1, %xmm0", sz),
+                        Div => emit!("  div{} %xmm1, %xmm0", sz),
+                        _ => {
+                            eprintln!("Compiler bug: Unable to handle {:?} operator for flonum.", op);
+                            exit(1);
+                        }
                     }
-                    return;
-                }
-
-                self.expr_gen(rhs);
-                self.push("%rax");
-                self.expr_gen(lhs);
-                self.pop("%rdi");
-                let (ax, di, dx) = if matches!(lhs.ty, Long | ULong | Pointer_To(..) | ArrayOf(..)) {
-                    ("%rax", "%rdi", "%rdx")
                 } else {
-                    ("%eax", "%edi", "%edx")
-                };
-                match op {
-                    Plus =>  emit!("  add {}, {}", di, ax),
-                    Minus => emit!("  sub {}, {}", di, ax),
-                    Mul =>   emit!("  imul {}, {}", di, ax),
-                    Div | Modulus => {
-                        if expr.ty.is_unsigned() {
-                          emit!("  mov $0, {}", dx);
-                          emit!("  div     {}", di);
-                        } else {
-                            if sizeof(&lhs.ty) == 8 {
-                                emit!("  cqo");
+                    self.expr_gen(rhs);
+                    self.push("%rax");
+                    self.expr_gen(lhs);
+                    self.pop("%rdi");
+                    let (ax, di, dx) = if matches!(lhs.ty, Long | ULong | Pointer_To(..) | ArrayOf(..)) {
+                        ("%rax", "%rdi", "%rdx")
+                    } else {
+                        ("%eax", "%edi", "%edx")
+                    };
+                    match op {
+                        Plus =>  emit!("  add {}, {}", di, ax),
+                        Minus => emit!("  sub {}, {}", di, ax),
+                        Mul =>   emit!("  imul {}, {}", di, ax),
+                        Div | Modulus => {
+                            if expr.ty.is_unsigned() {
+                              emit!("  mov $0, {}", dx);
+                              emit!("  div     {}", di);
                             } else {
-                                emit!("  cdq");
-                            }
-                            emit!("  idiv {}", di);
-                        }
-                        if *op == Modulus {
-                            emit!("  mov %rdx, %rax");
-                        }
-                    },
-                    BitAnd => emit!("  and %rdi, %rax"),
-                    BitOR =>  emit!("  or %rdi, %rax"),
-                    BitXOR => emit!("  xor %rdi, %rax"),
-                    LOGAND => {
-                        let c = self.next_jump_label_count();
-
-                        cmp_zero(&lhs.ty);
-                        // emit!("  cmp $0, {}", ax);
-                        emit!("  je .L.false.{}", c);
-                        emit!("mov {}, {}", di, ax);
-                        cmp_zero(&rhs.ty);
-                        // emit!("  cmp $0, {}", di);
-                        emit!("  je .L.false.{}", c);
-                        emit!("  mov $1, {}", ax);
-                        emit!("  jmp .L.end.{}", c);
-                        emit!(".L.false.{}:", c);
-                        emit!("  mov $0, {}", ax);
-                        emit!(".L.end.{}:", c);
-                    }
-                    LOGOR => {
-                        let c = self.next_jump_label_count();
-                        cmp_zero(&lhs.ty);
-                        // emit!("  cmp $0, {}", ax);
-                        emit!("  jne .L.true.{}", c);
-                        emit!("mov {}, {}", di, ax);
-                        cmp_zero(&rhs.ty);
-                        // emit!("  cmp $0, {}", di);
-                        emit!("  jne .L.true.{}", c);
-                        emit!("  mov $0, {}", ax);
-                        emit!("  jmp .L.end.{}", c);
-                        emit!(".L.true.{}:", c);
-                        emit!("  mov $1, {}", ax);
-                        emit!(".L.end.{}:", c);
-                    }
-                    SHL => {
-                        emit!("  mov %rdi, %rcx");
-                        emit!("  shl %cl, {}", ax);
-                    }
-                    SHR => {
-                        emit!("  mov %rdi, %rcx");
-                        if lhs.ty.is_unsigned() {
-                            emit!("  shr %cl, {}", ax);
-                        } else {
-                            emit!("  sar %cl, {}", ax);
-                        }
-                    }
-                    op if op.is_compare() => {
-                        emit!("  cmp {}, {}", di, ax);
-                        match op {
-                            Eq => emit!("  sete %al"),
-                            Neq => emit!("  setne %al"),
-                            LT => {
-                                if lhs.ty.is_unsigned() {
-                                    emit!("  setb %al");
+                                if sizeof(&lhs.ty) == 8 {
+                                    emit!("  cqo");
                                 } else {
-                                    emit!("  setl %al");
+                                    emit!("  cdq");
                                 }
+                                emit!("  idiv {}", di);
                             }
-                            LE => {
-                                if lhs.ty.is_unsigned() {
-                                    emit!("  setbe %al");
-                                } else {
-                                    emit!("  setle %al");
-                                }
+                            if *op == Modulus {
+                                emit!("  mov %rdx, %rax");
                             }
-                            _ => unreachable!(),
+                        },
+                        BitAnd => emit!("  and {}, {}", di, ax),
+                        BitOR => emit!("  or {}, {}", di, ax),
+                        BitXOR => emit!("  xor {}, {}", di, ax),
+                        SHL => {
+                            emit!("  mov %rdi, %rcx");
+                            emit!("  shl %cl, {}", ax);
                         }
-                        emit!("  movzb %al, %rax");
-                    },
-                    _ => eprintln!("gen_code error: not support binary expr {:?}", content),
+                        SHR => {
+                            emit!("  mov %rdi, %rcx");
+                            if lhs.ty.is_unsigned() {
+                                emit!("  shr %cl, {}", ax);
+                            } else {
+                                emit!("  sar %cl, {}", ax);
+                            }
+                        }
+                        op if op.is_compare() => {
+                            emit!("  cmp {}, {}", di, ax);
+                            match op {
+                                Eq => emit!("  sete %al"),
+                                Neq => emit!("  setne %al"),
+                                LT => {
+                                    if lhs.ty.is_unsigned() {
+                                        emit!("  setb %al");
+                                    } else {
+                                        emit!("  setl %al");
+                                    }
+                                }
+                                LE => {
+                                    if lhs.ty.is_unsigned() {
+                                        emit!("  setbe %al");
+                                    } else {
+                                        emit!("  setle %al");
+                                    }
+                                }
+                                _ => unreachable!(),
+                            }
+                            emit!("  movzb %al, %rax");
+                        },
+                        _ => eprintln!("gen_code error: not support binary expr {:?}", content),
+                    }
                 }
             }
             Conditional{cond, then, otherwise} => {
@@ -474,7 +485,21 @@ impl Generator {
             }
             Neg(expr) => {
                 self.expr_gen(expr);
-                emit!("  neg %rax");
+                match &expr.ty {
+                    Float => {
+                        emit!("  mov $1, %rax");
+                        emit!("  shl $31, %rax");
+                        emit!("  movq %rax, %xmm1");
+                        emit!("  xorps %xmm1, %xmm0");
+                    }
+                    Double => {
+                        emit!("  mov $1, %rax");
+                        emit!("  shl $63, %rax");
+                        emit!("  movq %rax, %xmm1");
+                        emit!("  xorps %xmm1, %xmm0");
+                    }
+                    _ => emit!("  neg %rax"),
+                }
             }
             Not(expr) => {
                 self.expr_gen(expr);

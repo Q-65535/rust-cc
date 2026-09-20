@@ -1920,7 +1920,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
     if matches!(to_type, ArrayOf(..)) {
         report_semantic_error(span, "the cast-to type must not be array type!");
     }
-    if !is_scalar_type(&from_type) || !is_scalar_type(&to_type) {
+    if !is_scalar(&from_type) || !is_scalar(&to_type) {
         let error_info = format!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
         when doing type casting! Don't blame me, ChatGPT told me that.");
         report_semantic_error(span, &error_info);
@@ -1931,7 +1931,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
 }
 
 
-fn is_scalar_type(ty: &Type) -> bool {
+fn is_scalar(ty: &Type) -> bool {
     matches!(ty, 
         Char  | Short  | Int  | Long  | Enum | Bool |
         UChar | UShort | UInt | ULong | Float | Double |
@@ -2214,7 +2214,22 @@ fn gen_promoted_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Exp
     };
     let (lhs, rhs) = usual_arithmatic_conversion(lhs, rhs);
     let mut the_type = lhs.ty.clone();
-    if op.is_compare() {
+    if matches!(lhs.ty, Float | Double) {
+        if op.is_bitwise() {
+            let error_info = format!("Bitwise operation '{:?}' cannot be applied to this \
+                floating point type expression.", op);
+            report_semantic_error(lhs.span, &error_info);
+            exit(1);
+        }
+        if op == OP::Modulus {
+            let error_info = format!("Modulus operation cannot be applied to this \
+                floating point type expression.");
+            report_semantic_error(lhs.span, &error_info);
+            exit(1);
+        }
+    }
+
+    if op.is_compare_or_logic() {
         the_type = Type::Int;
     }
     let new_expr_content = ir::ExprType::Binary(Box::new(lhs), Box::new(rhs), op);

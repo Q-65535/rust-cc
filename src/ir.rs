@@ -172,7 +172,26 @@ pub enum OP {
 }
 
 impl OP {
+
+    pub fn is_compare_or_logic(&self) -> bool {
+        if self.is_compare() {return true;}
+        return self.is_logic();
+    }
+
+    pub fn is_logic(&self) -> bool {
+        return matches!(self, OP::LOGAND | OP::LOGOR);
+    }
+
     pub fn is_compare(&self) -> bool {
         matches!(self, OP::Eq | OP::Neq | OP::LT | OP::LE | OP::GT | OP::GE)
+    }
+
+    pub fn is_bitwise(&self) -> bool {
+        matches!(self, OP::BitAnd | OP::BitXOR | OP::BitOR | OP::SHL | OP::SHR)
+    }
+
+    pub fn can_be_applied_to_flonum(&self) -> bool {
+        if self.is_compare_or_logic() {return true};
+        return matches!(self, OP::Plus | OP::Minus | OP::Mul | OP::Div);
     }
 }
