@@ -355,7 +355,7 @@ impl Generator {
                     self.expr_gen(rhs);
                     self.push_float("%xmm0");
                     self.expr_gen(lhs);
-                    self.pop_float("%xmm1");
+                    self.pop_float(1);
 
                     let sz = if lhs.ty == Float {"ss"} else {"sd"};
                     match op {
@@ -536,17 +536,27 @@ impl Generator {
             FunCall(func_ref, args) => {
                 match &func_ref.content {
                     Object(obj) => {
-                        let mut nargs = 0;
-                        for arg in args {
+                        // Generate all the args and put them temorary on stack.
+                        for arg in args.into_iter().rev() {
                             self.expr_gen(arg);
-                            self.push("%rax");
-                            nargs += 1;
+                            if arg.ty.is_float() {
+                                self.push_float("%xmm0");
+                            } else {
+                                self.push("%rax");
+                            }
                         }
-                        // put arguments in designated registers
-                        for i in (0..nargs).rev() {
-                            self.pop(self.argregs64[i]);
+                        // Then put those args on the stack into designated registers.
+                        let mut float_reg_index = 0;
+                        let mut integer_reg_index = 0;
+                        for arg in args {
+                            if arg.ty.is_float() {
+                                self.pop_float(float_reg_index);
+                                float_reg_index += 1;
+                            } else {
+                                self.pop(self.argregs64[integer_reg_index]);
+                                integer_reg_index += 1;
+                            }
                         }
-
                         // The x86-64 ABI requires RSP to be 16-byte aligned
                         // at the point of a `call`. If an odd number of
                         // 8-byte values are live on the stack, realign first.
@@ -591,8 +601,8 @@ impl Generator {
         self.depth += 1;
     }
 
-    fn pop_float(&mut self, reg: &str) {
-        emit!("  movsd (%rsp), {}", reg);
+    fn pop_float(&mut self, reg_index: u8) {
+        emit!("  movsd (%rsp), %xmm{}", reg_index);
         emit!("  add $8, %rsp");
         self.depth -= 1;
     }

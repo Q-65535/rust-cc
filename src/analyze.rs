@@ -56,18 +56,18 @@ use Type::*;
 impl Type {
     pub fn align(&self) -> usize {
         match self {
-            Type::Void => 1,
-            Type::Bool => 1,
-            Type::Char => 1,
-            Type::Short => 2,
-            Type::Int => 4,
-            Type::Long => 8,
-            Type::UChar => 1,
-            Type::UShort => 2,
-            Type::UInt => 4,
-            Type::ULong => 8,
-            Type::Float => 4,
-            Type::Double => 8,
+            Void => 1,
+            Bool => 1,
+            Char => 1,
+            Short => 2,
+            Int => 4,
+            Long => 8,
+            UChar => 1,
+            UShort => 2,
+            UInt => 4,
+            ULong => 8,
+            Float => 4,
+            Double => 8,
             Pointer_To(_) => 8,
             ArrayOf(element_ty, len) => element_ty.align(),
             Func{..} => 8,
@@ -77,6 +77,10 @@ impl Type {
             Tag(_) => 0,
             ty_none => 1,
         }
+    }
+
+    pub fn is_float(&self) -> bool {
+        return matches!(self, Float | Double);
     }
 
     pub fn size(&self) -> usize {
