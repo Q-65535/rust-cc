@@ -18,6 +18,7 @@ int main() {
   ASSERT(65535, (unsigned short)65535);
   ASSERT(-1, (int)0xffffffff);
   ASSERT(0xffffffff, (unsigned)0xffffffff);
+  ASSERT(1, (long)(unsigned)0xffffffff == 4294967295);
   ASSERT(1, -1<1);
 
 

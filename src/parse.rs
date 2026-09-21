@@ -964,17 +964,19 @@ impl Parser {
                     }
 
                     let decl_specs = self.parse_decl_specs()?;
-                    // Special case: void parameter
-                    for decl_spec in &decl_specs {
-                        if decl_spec.content == Decl_Spec_Kind::Void {
-                            if params.len() > 0 || decl_specs.len() > 1 {
-                                let error_info = format!("'void' must be the only parameter and the only decl_spec and unnamed");
-                                let error_info = error_span(decl_spec.span, &error_info);
-                                return Err(error_info);
-                            } else {
-                                break 'parse_params_loop;
-                            }
+                    // A lone `void` means that the function takes no
+                    // parameters.  If a declarator follows, however, `void`
+                    // is its base type (for example `void *ptr`) and must be
+                    // parsed like any other parameter.
+                    if decl_specs.len() == 1
+                        && decl_specs[0].content == Decl_Spec_Kind::Void
+                        && self.at(&RParen)
+                    {
+                        if !params.is_empty() {
+                            let error_info = "'void' must be the only parameter";
+                            return Err(error_span(decl_specs[0].span, error_info));
                         }
+                        break 'parse_params_loop;
                     }
                     let backup_index = self.cur_index;
                     // Function definition or declaration case:

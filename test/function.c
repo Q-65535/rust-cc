@@ -21,6 +21,29 @@ int addx(int *x, int y) {
   return *x + y;
 }
 
+void *identity_ptr(void *ptr);
+
+void *identity_ptr(void *ptr) {
+  return ptr;
+}
+
+extern int redeclared_global;
+int redeclared_global = 7;
+
+int old_style() {
+  return 9;
+}
+
+int static_local_one() {
+  static int value = 11;
+  return value;
+}
+
+int static_local_two() {
+  static int value = 13;
+  return value;
+}
+
 int sub_char(char a, char b, char c) {
   return a - b - c;
 }
@@ -130,6 +153,11 @@ int main() {
   ASSERT(7, add2(3,4));
   ASSERT(1, sub2(4,3));
   ASSERT(55, fib(9));
+  ASSERT(3, ({ int x=3; *(int *)identity_ptr(&x); }));
+  ASSERT(7, redeclared_global);
+  ASSERT(9, old_style(1, 2));
+  ASSERT(11, static_local_one());
+  ASSERT(13, static_local_two());
 
   ASSERT(1, ({ sub_char(7, 3, 3); }));
 

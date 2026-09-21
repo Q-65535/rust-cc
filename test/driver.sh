@@ -1,5 +1,6 @@
 #!/bin/bash
-rust_cc=./target/debug/rust-cc
+compiler=${1:-./target/debug/rust-cc}
+compiler_name=${2:-rust-cc}
 tmp=`mktemp -d /tmp/rust-cc-test-XXXXXX`
 trap 'rm -rf $tmp' INT TERM HUP EXIT
 echo > $tmp/empty.c
@@ -15,12 +16,12 @@ check() {
 
 # -o
 rm -f $tmp/out
-$rust_cc -o $tmp/out $tmp/empty.c
+"$compiler" -o $tmp/out $tmp/empty.c
 [ -f $tmp/out ]
 check -o
 
 # --help
-$rust_cc --help 2>&1 | grep -q rust-cc
+"$compiler" --help 2>&1 | grep -q "$compiler_name"
 check --help
 
 echo OK

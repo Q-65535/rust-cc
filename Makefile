@@ -8,6 +8,13 @@
 # Path to the compiler binary that `cargo build` produces.
 RUST_CC=RUST_BACKTRACE=1 ./target/debug/rust-cc
 
+# chibicc checkout used by the stage2 bootstrap test.
+CHIBICC_DIR?=../chibicc
+CHIBICC_SRCS=$(notdir $(wildcard $(CHIBICC_DIR)/*.c))
+STAGE2_ASMS=$(CHIBICC_SRCS:%.c=stage2/%.s)
+CHIBICC_TEST_NAMES=$(basename $(notdir $(wildcard $(CHIBICC_DIR)/test/*.c)))
+STAGE2_TESTS=$(addprefix stage2/test/,$(addsuffix .exe,$(CHIBICC_TEST_NAMES)))
+
 # Every C file under test/ is a test program. $(wildcard) expands the glob to:
 #   test/arith.c test/control.c ... test/variable.c
 TEST_SRCS=$(wildcard test/*.c)
@@ -78,7 +85,7 @@ old_test: $(TESTS)
 # `make clean`: remove cargo artifacts, generated .s/.exe, temp + backup files.
 clean:
 	# cargo clean
-	rm -rf tmp* $(TESTS) test/*.s test/*.exe
+	rm -rf tmp* $(TESTS) test/*.s test/*.exe stage2
 	# find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
 
 clean_test:
@@ -87,8 +94,28 @@ clean_test:
 
 test: clean old_test
 
+test-all: test test-stage2
+
+# Stage 2: rust-cc compiles chibicc, then that chibicc compiles its own tests.
+stage2/chibicc: $(STAGE2_ASMS)
+	$(CC) -o $@ $^
+
+stage2/%.s: build self.py $(CHIBICC_DIR)/chibicc.h $(CHIBICC_DIR)/%.c
+	mkdir -p stage2
+	python3 self.py $(CHIBICC_DIR)/chibicc.h $(CHIBICC_DIR)/$*.c > stage2/$*.c
+	$(RUST_CC) -o $@ stage2/$*.c
+
+stage2/test/%.exe: stage2/chibicc $(CHIBICC_DIR)/test/%.c
+	mkdir -p stage2/test
+	$(CC) -o- -E -P -C $(CHIBICC_DIR)/test/$*.c | ./stage2/chibicc -o stage2/test/$*.s -
+	$(CC) -o $@ stage2/test/$*.s -xc $(CHIBICC_DIR)/test/common
+
+test-stage2: $(STAGE2_TESTS)
+	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
+	test/driver.sh ./stage2/chibicc chibicc
+
 # These are command names, not files to produce, so always run them even if a
 # file of the same name happens to exist in the directory.
-.PHONY: build rebuild test clean
+.PHONY: build rebuild test test-all test-stage2 clean
 
 #   gcc -E -P -C test/mytest.c -o test/mytest.i

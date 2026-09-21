@@ -1,4 +1,4 @@
-use std::{io::{self, Write}, collections::{VecDeque, HashMap}, process::exit, mem::swap};
+use std::{io::{self, Write}, collections::{VecDeque, HashMap, HashSet}, process::exit, mem::swap};
 use colored::*;
 use crate::parse::{self, *};
 use crate::lex::{self, *};
@@ -289,6 +289,19 @@ impl ScopeManager {
         current_scope.symbols.insert(name.to_string(), Symbol::Object(obj));
     }
 
+    pub fn add_object_with_source_name(&mut self, source_name: &str, obj: Obj) {
+        debug_assert!(!self.contains_symbol_at_current_scope(source_name));
+        let current_scope = &mut self.scopes[self.current_scope_index];
+        current_scope.symbols.insert(source_name.to_string(), Symbol::Object(obj));
+    }
+
+    pub fn replace_object(&mut self, obj: Obj) {
+        let name = obj.name.clone();
+        debug_assert!(self.resolve_object_at_current_scope(&name).is_some());
+        let current_scope = &mut self.scopes[self.current_scope_index];
+        current_scope.symbols.insert(name, Symbol::Object(obj));
+    }
+
     pub fn resolve_enum(&self, name: &str) -> Option<i64> {
         let index = self.current_scope_index;
         for i in (0..=index).rev() {
@@ -354,10 +367,13 @@ pub struct ProgramAnalyzer {
     pub unique_break_pos_label_index: usize,
     pub unique_continue_pos_label_index: usize,
     pub unique_case_label_index: usize,
+    pub unique_static_local_index: usize,
 
     pub break_position_tracker: Vec::<String>,
     pub continue_position_tracker: Vec::<String>,
     pub switch_stmt_tracker: Vec::<ir::Switch_Case>,
+    pub defined_functions: HashSet<String>,
+    pub defined_global_objects: HashSet<String>,
 }
 
 impl ProgramAnalyzer {
@@ -375,9 +391,12 @@ impl ProgramAnalyzer {
             unique_break_pos_label_index: 0,
             unique_continue_pos_label_index: 0,
             unique_case_label_index: 0,
+            unique_static_local_index: 0,
             break_position_tracker: Vec::new(),
             continue_position_tracker: Vec::new(),
             switch_stmt_tracker: Vec::new(),
+            defined_functions: HashSet::new(),
+            defined_global_objects: HashSet::new(),
         }
     }
 
@@ -388,16 +407,14 @@ impl ProgramAnalyzer {
         for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
-                    let (mut base_type, mut symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
+                    let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
                     let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.dector);
-                    // It is not allowed that function, variable or typedef name have the same name in the same scope.
-                    // So we only check whether we encounter a duplicate name without considering it is function, variable or typedef name.
-                    if self.scope_manager.contains_symbol_at_current_scope(&name) {
-                        let err_info = format!("semantic error: {} redeclared as a symbol", name);
+                    if !self.defined_functions.insert(name.clone()) {
+                        let err_info = format!("semantic error: function {} redefined", name);
                         report_semantic_error(fun.dector.span, &err_info);
                     }
-                    let o = create_global_obj(&name, &function_type);
-                    self.scope_manager.add_object(o);
+                    let object = create_global_obj_with_attribute(&name, &function_type, &symbol_attribute);
+                    self.register_global_object(object, fun.dector.span);
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
                     let mut batch_global_data_decls = self.analyze_global_decl(decl);
@@ -478,6 +495,21 @@ impl ProgramAnalyzer {
         self.scope_manager.add_typedef_alias(&name, final_type);
     }
 
+    fn register_global_object(&mut self, object: Obj, span: Span) {
+        if let Some(previous) = self.scope_manager.resolve_object_at_current_scope(&object.name) {
+            if previous.ty != object.ty || previous.is_static != object.is_static {
+                let err_info = format!("semantic error: incompatible redeclaration of {}", object.name);
+                report_semantic_error(span, &err_info);
+            }
+            self.scope_manager.replace_object(object);
+        } else if self.scope_manager.contains_symbol_at_current_scope(&object.name) {
+            let err_info = format!("semantic error: {} redeclared as a different kind of symbol", object.name);
+            report_semantic_error(span, &err_info);
+        } else {
+            self.scope_manager.add_object(object);
+        }
+    }
+
     pub fn analyze_global_decl(&mut self, decl: &Declaration) -> Vec::<Global_Data_Decl> {
         let mut decls: Vec<Global_Data_Decl> = Vec::new();
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&decl.decl_specs);
@@ -491,10 +523,6 @@ impl ProgramAnalyzer {
             let cur_dector = &init_dector.dector;
             let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_dector);
 
-            if self.scope_manager.contains_symbol_at_current_scope(&name) {
-                let err_info = format!("semantic error: {} redeclared as a symbol", name);
-                report_semantic_error(cur_dector.span, &err_info);
-            }
             let mut init_data = None;
             if let Some(init) = &init_dector.init {
                 let normalized_init = normalize_init(init, &final_type);
@@ -514,13 +542,23 @@ impl ProgramAnalyzer {
                 }
             }
             let object = create_global_obj_with_attribute(&name, &final_type, &symbol_attribute);
-            self.scope_manager.add_object(object.clone());
+            self.register_global_object(object.clone(), cur_dector.span);
             // A function declarator with no body (e.g. `int printf();`) is a
             // prototype, not a variable definition. Register it in scope so
             // calls resolve, but do NOT emit a data object for it — doing so
             // would define a bogus symbol that overrides the real function.
             if let Type::Func{..} = final_type {
                 continue;
+            }
+            // An extern declaration introduces the object to name lookup but
+            // does not allocate storage.  A later compatible definition may
+            // replace it and emit the actual data object.
+            if symbol_attribute.is_extern && init_dector.init.is_none() {
+                continue;
+            }
+            if !self.defined_global_objects.insert(name.clone()) {
+                let err_info = format!("semantic error: global object {} redefined", name);
+                report_semantic_error(cur_dector.span, &err_info);
             }
             let analyzed_decl = Global_Data_Decl{obj: object, init_data};
             decls.push(analyzed_decl);
@@ -839,8 +877,7 @@ impl ProgramAnalyzer {
             return vec![];
         }
         if symbol_attribute.is_static {
-            let mut batch_global_data_decls = self.analyze_global_decl(decl);
-            self.global_data_decls.append(&mut batch_global_data_decls);
+            self.analyze_static_local_decl(decl, &base_type, &symbol_attribute);
             return vec![];
         }
 
@@ -895,6 +932,43 @@ impl ProgramAnalyzer {
             }
         }
         stmts
+    }
+
+    fn analyze_static_local_decl(
+        &mut self,
+        decl: &Declaration,
+        base_type: &Type,
+        symbol_attribute: &Symbol_Attribute,
+    ) {
+        for init_dector in &decl.init_dectors {
+            let cur_dector = &init_dector.dector;
+            let (mut final_type, source_name) =
+                self.resolve_declarator(symbol_attribute, base_type, cur_dector);
+            if self.scope_manager.contains_symbol_at_current_scope(&source_name) {
+                let err_info = format!("variable {} already defined", source_name);
+                report_semantic_error(cur_dector.span, &err_info);
+            }
+
+            let mut init_data = None;
+            if let Some(init) = &init_dector.init {
+                let normalized_init = normalize_init(init, &final_type);
+                if let ArrayOf(element_type, array_len) = &final_type {
+                    if *array_len == 0 {
+                        let inferred_array_len = resolve_array_size_from_init(&normalized_init);
+                        final_type = ArrayOf(element_type.clone(), inferred_array_len);
+                    }
+                }
+                init_data = Some(self.gen_init_data(&normalized_init, &final_type));
+            }
+
+            let asm_name = format!(".L.static.{}", self.unique_static_local_index);
+            self.unique_static_local_index += 1;
+            let object =
+                create_global_obj_with_attribute(&asm_name, &final_type, symbol_attribute);
+            self.scope_manager
+                .add_object_with_source_name(&source_name, object.clone());
+            self.global_data_decls.push(Global_Data_Decl { obj: object, init_data });
+        }
     }
 
     fn init_local_var(&mut self, target_expr: ir::Expr, init: &Initializer) -> Vec<ir::StmtType> {
@@ -1646,7 +1720,17 @@ impl ProgramAnalyzer {
             }
             Deref(val) => {
                 let val = self.analyze_expr(val);
-                return gen_deref_expr(val);
+                let mut deref = gen_deref_expr(val);
+                // Forward typedefs such as `typedef struct Type Type` keep a
+                // Tag inside pointer types.  By the second analysis pass the
+                // tag definition is available, so materialize the concrete
+                // aggregate type when the pointer is dereferenced.
+                if let Tag(tag_name) = &deref.ty {
+                    if let Some(the_type) = self.scope_manager.resolve_tag(tag_name) {
+                        deref.ty = the_type.clone();
+                    }
+                }
+                return deref;
             }
             AddrOf(val) => {
                 let val = self.analyze_expr(val);
@@ -1729,7 +1813,12 @@ impl ProgramAnalyzer {
                                 let ident = self.analyze_expr(ident);
                                 let mut casted_analyzed_args = Vec::new();
 
-                                if args.len() > param_types.len() && !is_variadic {
+                                // In C, `f()` is an old-style declaration with
+                                // unspecified parameters, so calls may supply
+                                // arguments even though no parameter types are
+                                // recorded here.
+                                let has_unspecified_params = param_types.is_empty();
+                                if args.len() > param_types.len() && !is_variadic && !has_unspecified_params {
                                     report_semantic_error(span, "Too many arguments to call this function.");
                                 }
                                 if args.len() < param_types.len() {
@@ -1745,7 +1834,7 @@ impl ProgramAnalyzer {
                                         }
                                         analyzed_arg = cast(analyzed_arg, param_type);
                                         casted_analyzed_args.push(analyzed_arg);
-                                    } else if is_variadic {
+                                    } else if is_variadic || has_unspecified_params {
                                         if analyzed_arg.ty == Float {
                                             analyzed_arg = cast(analyzed_arg, &Double);
                                         }
@@ -1827,7 +1916,8 @@ impl ProgramAnalyzer {
                 // Global compound literal.
                 if self.scope_manager.current_scope_index == 0 {
                     let unique_name = self.next_complit_unique_name();
-                    let anonymous_obj = create_global_obj(&unique_name, &ty);
+                    let mut anonymous_obj = create_global_obj(&unique_name, &ty);
+                    anonymous_obj.is_static = true;
                     let init_data = Some(self.gen_init_data(&normalized_init, &ty));
                     let global_decl = Global_Data_Decl{obj: anonymous_obj.clone(), init_data};
                     self.global_data_decls.push(global_decl);
@@ -1849,7 +1939,11 @@ impl ProgramAnalyzer {
                 let len = s.len() + 1;
                 let ty: Type = ArrayOf(Box::new(Type::Char), len);
 
-                let global_obj = create_global_obj(&unique_name, &ty);
+                // The generated name is only unique within this translation
+                // unit, so it must have internal linkage when multiple object
+                // files are linked together.
+                let mut global_obj = create_global_obj(&unique_name, &ty);
+                global_obj.is_static = true;
                 // Although the content of this obj is stored in .data section, it can only be accessed
                 // at current scope. So we add the obj in current scope.
                 self.scope_manager.add_object(global_obj.clone());
