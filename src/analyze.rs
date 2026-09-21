@@ -569,42 +569,60 @@ impl ProgramAnalyzer {
             _ => {
                 if let Initializer_Type::Expr(init_expr) = &init.content {
                     let analyzed_init_expr = self.analyze_expr(init_expr);
-                    match eval_label_constant(&analyzed_init_expr) {
-                        Ok((label, num)) => {
-                            if !can_assign_expr(ty, &analyzed_init_expr) {
-                                let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
-                                ty, &analyzed_init_expr.ty);
-                                report_semantic_error(init.span, &err_info);
+                    if !can_assign_expr(ty, &analyzed_init_expr) {
+                        let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
+                            ty, &analyzed_init_expr.ty);
+                        report_semantic_error(init.span, &err_info);
+                        exit(1);
+                    }
+
+                    if ty.is_float() {
+                        let mut init_data = Vec::new();
+                        let fnum = eval_float(&analyzed_init_expr);
+                        let data_directive = if *ty == Float {
+                            let bit_pattern = (fnum as f32).to_bits() as i64;
+                            ASM_Long(bit_pattern)
+                        } else {
+                            let bit_pattern = fnum.to_bits() as i64;
+                            ASM_Quad(bit_pattern)
+                        };
+                        init_data.push(data_directive);
+                        return init_data;
+                    } else {
+                        match eval_label_constant(&analyzed_init_expr) {
+                            Ok((label, num)) => {
+                                let mut init_data = Vec::new();
+                                if let Some(label) = label {
+                                    // Label can only be applied to quad.
+                                    debug_assert!(sizeof(ty) == 8);
+                                    init_data.push(ASM_Labeled_Quad(label, num));
+                                    return init_data;
+                                } else {
+                                    let data_directive = match sizeof(ty) {
+                                        // @Note: We don't need to do something like "num as u8"
+                                        // because the assembler will do the truncate stuff.
+                                        1 => ASM_Byte(num),
+                                        2 => ASM_Word(num),
+                                        4 => ASM_Long(num),
+                                        8 => ASM_Quad(num),
+                                        _ => {
+                                            let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
+                                            &analyzed_init_expr.ty, ty);
+                                            report_semantic_error(init.span, &err_info);
+                                            exit(1);
+                                        }
+                                    };
+                                    init_data.push(data_directive);
+                                    return init_data;
+                                }
+                            }
+                            Err(err_info) => {
+                                report_semantic_error(analyzed_init_expr.span, &err_info);
                                 exit(1);
                             }
-                            let mut init_data = Vec::new();
-                            if let Some(label) = label {
-                                // Label can only be applied to quad.
-                                debug_assert!(sizeof(ty) == 8);
-                                init_data.push(ASM_Labeled_Quad(label, num));
-                                return init_data;
-                            } else {
-                                let data_directive = match sizeof(ty) {
-                                    1 => ASM_Byte(num),
-                                    2 => ASM_Word(num),
-                                    4 => ASM_Long(num),
-                                    8 => ASM_Quad(num),
-                                    _ => {
-                                        let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
-                                        &analyzed_init_expr.ty, ty);
-                                        report_semantic_error(init.span, &err_info);
-                                        exit(1);
-                                    }
-                                };
-                                init_data.push(data_directive);
-                                return init_data;
-                            }
-                        }
-                        Err(err_info) => {
-                            report_semantic_error(analyzed_init_expr.span, &err_info);
-                            exit(1);
                         }
                     }
+
                 } else {
                     let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
                     report_semantic_error(span, &err_info);
@@ -1937,6 +1955,12 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
     }
 }
 
+fn is_arith(ty: &Type) -> bool {
+    matches!(ty, 
+        Char  | Short  | Int  | Long  | Enum | Bool |
+        UChar | UShort | UInt | ULong | Float | Double
+    )
+}
 
 fn is_scalar(ty: &Type) -> bool {
     matches!(ty, 
@@ -1956,6 +1980,7 @@ fn array_of(ty: &Type, len: usize) -> Type {
     ArrayOf(base, len)
 }
 
+// @TODO: Move to impl Type
 pub fn is_integer(ty: &Type) -> bool {
     matches!(ty, Char  | Short  | Int  | Long | Bool | Enum |
                  UChar | UShort | UInt | ULong)
@@ -1968,9 +1993,11 @@ fn can_assign(left_type: &Type, mut right_type: &Type) -> bool {
     if let Func {return_type, ..} = right_type {
         right_type = return_type;
     }
-    if is_integer(left_type) && is_integer(right_type) {
+
+    if is_arith(left_type) && is_arith(right_type) {
         return true;
     }
+
     // @Compatibility: In GCC, two pointer types are assign compatible only when the
     // pointee type is the same. However, in chibicc, any types of pointers can be assigned
     // to another pointer variable. We choose to be in line with chibicc.
@@ -2351,14 +2378,21 @@ pub fn align_to(n: usize, align: usize) -> usize {
     }
 }
 
+// @Refactor: Direct print error info, don't return Result, just i64.
+// @Rename: eval_pure_integer_const
 fn eval_pure_constant(expr: &ir::Expr) -> Result<i64, String> {
     let (_, num) = eval_label_constant(expr)?;
     return Ok(num);
 }
 
+// @Rename: eval_label_integer_const
 fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String> {
     use ir::OP::*;
     match &expr.content {
+        _ if expr.ty.is_float() => {
+            let f_num = eval_float(expr);
+            return Ok((None, (f_num as i64)));
+        }
         ir::ExprType::Integer(n) => Ok((None, (*n as i64))),
         ir::ExprType::Neg(expr) => {
             let (label, num) = eval_label_constant(&expr)?;
@@ -2523,8 +2557,62 @@ fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String>
             return eval_label_constant(expr);
         }
         _ => {
-            let error_info = format!("this is not a costant expression: {:?}", expr);
+            let error_info = format!("this cannot be evaluated to integer costant: {:?}", expr);
             return Err(error_info);
+        }
+    }
+}
+
+fn eval_float(expr: &ir::Expr) -> f64 {
+    use ir::OP::*;
+    if is_integer(&expr.ty) {
+        if expr.ty.is_unsigned() {
+            return (eval_pure_constant(expr).unwrap() as u64) as f64;
+        } else {
+            return eval_pure_constant(expr).unwrap() as f64;
+        }
+    }
+    debug_assert!(expr.ty.is_float());
+
+    match &expr.content {
+        ir::ExprType::Float_Const(fnum) => return *fnum as f64,
+        ir::ExprType::Double_Const(fnum) => return *fnum,
+        ir::ExprType::Binary(lhs, rhs, op) => {
+            match op {
+                Plus => return eval_float(lhs) + eval_float(rhs),
+                Minus => return eval_float(lhs) - eval_float(rhs),
+                Mul => return eval_float(lhs) * eval_float(rhs),
+                Div => return eval_float(lhs) / eval_float(rhs),
+                Div => return eval_float(lhs) / eval_float(rhs),
+                _ => {
+                    let error_info = format!("Binary operation '{:?}' cannot be applied to this \
+                        floating point type expression.", op);
+                    report_semantic_error(lhs.span, &error_info);
+                    exit(1);
+                }
+            }
+        }
+        ir::ExprType::Neg(expr) => return -eval_float(expr),
+        ir::ExprType::Conditional{cond, then, otherwise} => {
+            let cond = eval_float(cond);
+            if cond != 0.0 {
+                return eval_float(then);
+            } else {
+                return eval_float(otherwise);
+            }
+        }
+        ir::ExprType::CommaExpression(lhs, rhs) => return eval_float(rhs),
+        ir::ExprType::Cast(expr, ty) => {
+            if expr.ty.is_float() {
+                return eval_float(expr);
+            } else {
+                return eval_pure_constant(expr).unwrap() as f64;
+            }
+        }
+        _ => {
+            let error_info = format!("this cannot be evaluated to a floting point costant: {:?}", expr);
+            report_semantic_error(expr.span, &error_info);
+            exit(1);
         }
     }
 }
