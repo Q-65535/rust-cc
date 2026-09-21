@@ -1740,6 +1740,9 @@ impl ProgramAnalyzer {
                                         analyzed_arg = cast(analyzed_arg, param_type);
                                         casted_analyzed_args.push(analyzed_arg);
                                     } else if is_variadic {
+                                        if analyzed_arg.ty == Float {
+                                            analyzed_arg = cast(analyzed_arg, &Double);
+                                        }
                                         casted_analyzed_args.push(analyzed_arg);
                                     } else {
                                         report_semantic_error(span, "Compiler bug: Too many arguments error should be reported earlier.");

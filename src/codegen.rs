@@ -590,7 +590,13 @@ impl Generator {
                         if needs_align {
                             emit!("  sub $8, %rsp");
                         }
-                        emit!("  mov $0, %rax");
+                        let fp_args_count = match &obj.ty {
+                            Func{is_variadic, ..} if *is_variadic => fp_reg_index,
+                            _ => 0,
+                        };
+                        // In x64 ABI, When calling variadic function, %al indicates how many
+                        // floting point number are passed as arguments.
+                        emit!("  mov ${}, %rax", fp_args_count);
                         emit!("  call {}", obj.name);
                         if needs_align {
                             emit!("  add $8, %rsp");
