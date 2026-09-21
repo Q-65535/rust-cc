@@ -153,8 +153,15 @@ impl Generator {
 
         // Save arg registers if function is variadic
         if let Some(var_area) = fun.var_area {
-            // gp: general purpose
-            let gp = fun.params.len().min(self.argregs64.len());
+            let mut gp = 0;
+            let mut fp = 0;
+            for param in &fun.params {
+                if param.ty.is_float() {
+                    fp += 1;
+                } else {
+                    gp += 1;
+                }
+            }
             let var_area_offset = self.get_absolute_offset(&var_area);
             /*
                     the struct layout is:
@@ -165,8 +172,14 @@ impl Generator {
                       void *reg_save_area;
                     } __va_elem;
             */
-            emit!("  movl ${}, {}(%rbp)", gp * 8, var_area_offset); // set gp_offset
-            emit!("  movl $48, {}(%rbp)", var_area_offset + 4);  // set fp_offset
+            // gp_offset is the byte offset into reg_save_area for
+            // the first integer arg in the variadic args.
+            emit!("  movl ${}, {}(%rbp)", gp * 8, var_area_offset);
+            // fp_offset is the byte offset into reg_save_area for
+            // the first floating point arg in the variadic args.
+            // Why we here add extra 48 to offset? Because the first 48 bytes in reg_save_area
+            // is occupied by 6 gp register values and each gp register is 8 bytes (6x8=48).
+            emit!("  movl ${}, {}(%rbp)", fp * 8 + 48, var_area_offset + 4);
 
             // set reg_save_area
             emit!("  movq %rbp, {}(%rbp)", var_area_offset + 16);
