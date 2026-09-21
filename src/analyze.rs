@@ -1093,6 +1093,7 @@ impl ProgramAnalyzer {
                 _ if count == UNSIGNED + LONG + LONG + INT => Type::ULong,
                 _ if count == FLOAT                        => Type::Float,
                 _ if count == DOUBLE                       => Type::Double,
+                _ if count == LONG + DOUBLE                => Type::Double,
                 _ => {
                     let error_info = format!("Invalid type.");
                     report_semantic_error(whole_span, &error_info);
