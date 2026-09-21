@@ -15,6 +15,12 @@ use crate::ir::{self, *};
 use crate::analyze::{self, *};
 use crate::common::{self, *};
 
+/*----------------------abbriviation----------------------
+    gp: general purpose
+    fp: floating point
+----------------------abbriviation----------------------*/
+
+
 // Where generated assembly is written.
 enum Output {
     Stdout,
@@ -146,54 +152,62 @@ impl Generator {
         emit!();
 
         // Save arg registers if function is variadic
-        if let Some(va_area) = fun.var_area {
+        if let Some(var_area) = fun.var_area {
+            // gp: general purpose
             let gp = fun.params.len().min(self.argregs64.len());
-            let va_area_offset = self.get_concrete_obj_offset_to_rbp(&va_area);
+            let var_area_offset = self.get_absolute_offset(&var_area);
+            /*
+                    the struct layout is:
+                    typedef struct {
+                      int gp_offset;
+                      int fp_offset;
+                      void *overflow_arg_area;
+                      void *reg_save_area;
+                    } __va_elem;
+            */
+            emit!("  movl ${}, {}(%rbp)", gp * 8, var_area_offset); // set gp_offset
+            emit!("  movl $48, {}(%rbp)", var_area_offset + 4);  // set fp_offset
 
-            // va_elem
-            emit!("  movl ${}, {}(%rbp)", gp * 8, va_area_offset);
-            emit!("  movl $48, {}(%rbp)", va_area_offset + 4);
-            emit!("  leaq 16(%rbp), %rax");
-            emit!("  movq %rax, {}(%rbp)", va_area_offset + 8);
-            emit!("  leaq {}(%rbp), %rax", va_area_offset + 24);
-            emit!("  movq %rax, {}(%rbp)", va_area_offset + 16);
+            // set reg_save_area
+            emit!("  movq %rbp, {}(%rbp)", var_area_offset + 16);
+            emit!("  addq ${}, {}(%rbp)", var_area_offset + 24, var_area_offset + 16);
 
             // __reg_save_area__
-            emit!("  movq %rdi, {}(%rbp)", va_area_offset + 24);
-            emit!("  movq %rsi, {}(%rbp)", va_area_offset + 32);
-            emit!("  movq %rdx, {}(%rbp)", va_area_offset + 40);
-            emit!("  movq %rcx, {}(%rbp)", va_area_offset + 48);
-            emit!("  movq %r8, {}(%rbp)", va_area_offset + 56);
-            emit!("  movq %r9, {}(%rbp)", va_area_offset + 64);
-            emit!("  movsd %xmm0, {}(%rbp)", va_area_offset + 72);
-            emit!("  movsd %xmm1, {}(%rbp)", va_area_offset + 80);
-            emit!("  movsd %xmm2, {}(%rbp)", va_area_offset + 88);
-            emit!("  movsd %xmm3, {}(%rbp)", va_area_offset + 96);
-            emit!("  movsd %xmm4, {}(%rbp)", va_area_offset + 104);
-            emit!("  movsd %xmm5, {}(%rbp)", va_area_offset + 112);
-            emit!("  movsd %xmm6, {}(%rbp)", va_area_offset + 120);
-            emit!("  movsd %xmm7, {}(%rbp)", va_area_offset + 128);
+            emit!("  movq %rdi, {}(%rbp)", var_area_offset + 24);
+            emit!("  movq %rsi, {}(%rbp)", var_area_offset + 32);
+            emit!("  movq %rdx, {}(%rbp)", var_area_offset + 40);
+            emit!("  movq %rcx, {}(%rbp)", var_area_offset + 48);
+            emit!("  movq %r8, {}(%rbp)", var_area_offset + 56);
+            emit!("  movq %r9, {}(%rbp)", var_area_offset + 64);
+            emit!("  movsd %xmm0, {}(%rbp)", var_area_offset + 72);
+            emit!("  movsd %xmm1, {}(%rbp)", var_area_offset + 80);
+            emit!("  movsd %xmm2, {}(%rbp)", var_area_offset + 88);
+            emit!("  movsd %xmm3, {}(%rbp)", var_area_offset + 96);
+            emit!("  movsd %xmm4, {}(%rbp)", var_area_offset + 104);
+            emit!("  movsd %xmm5, {}(%rbp)", var_area_offset + 112);
+            emit!("  movsd %xmm6, {}(%rbp)", var_area_offset + 120);
+            emit!("  movsd %xmm7, {}(%rbp)", var_area_offset + 128);
         }
 
-        let mut float_reg_index = 0;
-        let mut integer_reg_index = 0;
+        let mut fp_reg_index = 0;
+        let mut gp_reg_index = 0;
         for param in fun.params {
-            let concrete_param_offset = self.get_concrete_obj_offset_to_rbp(&param);
+            let concrete_param_offset = self.get_absolute_offset(&param);
             if param.ty.is_float() {
                 if param.ty == Float {
-                    emit!("  movss %xmm{}, {}(%rbp)\n", float_reg_index,  concrete_param_offset);
+                    emit!("  movss %xmm{}, {}(%rbp)\n", fp_reg_index,  concrete_param_offset);
                 } else if param.ty == Double {
-                    emit!("  movsd %xmm{}, {}(%rbp)\n", float_reg_index,  concrete_param_offset);
+                    emit!("  movsd %xmm{}, {}(%rbp)\n", fp_reg_index,  concrete_param_offset);
                 }
-                float_reg_index += 1;
+                fp_reg_index += 1;
             } else {
                 match sizeof(&param.ty) {
-                    1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[integer_reg_index],  concrete_param_offset),
-                    2 => emit!("  mov {}, {}(%rbp)\n", self.argregs16[integer_reg_index], concrete_param_offset),
-                    4 => emit!("  mov {}, {}(%rbp)\n", self.argregs32[integer_reg_index], concrete_param_offset),
-                    _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[integer_reg_index], concrete_param_offset),
+                    1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[gp_reg_index], concrete_param_offset),
+                    2 => emit!("  mov {}, {}(%rbp)\n", self.argregs16[gp_reg_index], concrete_param_offset),
+                    4 => emit!("  mov {}, {}(%rbp)\n", self.argregs32[gp_reg_index], concrete_param_offset),
+                    _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[gp_reg_index], concrete_param_offset),
                 }
-                integer_reg_index += 1;
+                gp_reg_index += 1;
             }
         }
         self.block_gen(&fun.stmts);
@@ -558,15 +572,15 @@ impl Generator {
                             }
                         }
                         // Then put those args on the stack into designated registers.
-                        let mut float_reg_index = 0;
-                        let mut integer_reg_index = 0;
+                        let mut fp_reg_index = 0;
+                        let mut gp_reg_index = 0;
                         for arg in args {
                             if arg.ty.is_float() {
-                                self.pop_float(float_reg_index);
-                                float_reg_index += 1;
+                                self.pop_float(fp_reg_index);
+                                fp_reg_index += 1;
                             } else {
-                                self.pop(self.argregs64[integer_reg_index]);
-                                integer_reg_index += 1;
+                                self.pop(self.argregs64[gp_reg_index]);
+                                gp_reg_index += 1;
                             }
                         }
                         // The x86-64 ABI requires RSP to be 16-byte aligned
@@ -631,7 +645,7 @@ impl Generator {
                 if obj.is_global || obj.is_extern {
                     emit!("  lea {}(%rip), %rax", obj.name);
                 } else {
-                    let concrete_offset = self.get_concrete_obj_offset_to_rbp(&obj);
+                    let concrete_offset = self.get_absolute_offset(&obj);
                     emit!("  lea {}(%rbp), %rax", concrete_offset);
                 }
 
@@ -659,7 +673,7 @@ impl Generator {
         }
     }
 
-    fn get_concrete_obj_offset_to_rbp(&self, obj: &Obj) -> i64 {
+    fn get_absolute_offset(&self, obj: &Obj) -> i64 {
         let stack_bottom_offset_to_rbp = -(self.cur_function_stack_size as i64);
         return stack_bottom_offset_to_rbp + (obj.offset as i64);
     }
