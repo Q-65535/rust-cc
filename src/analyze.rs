@@ -79,7 +79,34 @@ impl Type {
         }
     }
 
-    pub fn is_float(&self) -> bool {
+    pub fn is_arith(&self) -> bool {
+        matches!(self, 
+            Char  | Short  | Int  | Long  | Enum | Bool |
+            UChar | UShort | UInt | ULong | Float | Double
+        )
+    }
+
+    fn is_scalar(&self) -> bool {
+        matches!(self, 
+            Char  | Short  | Int  | Long  | Enum | Bool |
+            UChar | UShort | UInt | ULong | Float | Double |
+            Pointer_To(..) | ArrayOf(..)
+        )
+    }
+
+    pub fn is_integer(&self) -> bool {
+        matches!(self, Char  | Short  | Int  | Long | Bool | Enum |
+                     UChar | UShort | UInt | ULong)
+    }
+
+    pub fn is_pointer_or_array(&self) -> bool {
+        match self {
+            Pointer_To(_) | ArrayOf(_, _) => true,
+            _ => false
+        }
+    }
+
+    pub fn is_fp(&self) -> bool {
         return matches!(self, Float | Double);
     }
 
@@ -576,9 +603,9 @@ impl ProgramAnalyzer {
                         exit(1);
                     }
 
-                    if ty.is_float() {
+                    if ty.is_fp() {
                         let mut init_data = Vec::new();
-                        let fnum = eval_float(&analyzed_init_expr);
+                        let fnum = eval_fp_const(&analyzed_init_expr);
                         let data_directive = if *ty == Float {
                             let bit_pattern = (fnum as f32).to_bits() as i64;
                             ASM_Long(bit_pattern)
@@ -589,37 +616,30 @@ impl ProgramAnalyzer {
                         init_data.push(data_directive);
                         return init_data;
                     } else {
-                        match eval_label_constant(&analyzed_init_expr) {
-                            Ok((label, num)) => {
-                                let mut init_data = Vec::new();
-                                if let Some(label) = label {
-                                    // Label can only be applied to quad.
-                                    debug_assert!(sizeof(ty) == 8);
-                                    init_data.push(ASM_Labeled_Quad(label, num));
-                                    return init_data;
-                                } else {
-                                    let data_directive = match sizeof(ty) {
-                                        // @Note: We don't need to do something like "num as u8"
-                                        // because the assembler will do the truncate stuff.
-                                        1 => ASM_Byte(num),
-                                        2 => ASM_Word(num),
-                                        4 => ASM_Long(num),
-                                        8 => ASM_Quad(num),
-                                        _ => {
-                                            let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
-                                            &analyzed_init_expr.ty, ty);
-                                            report_semantic_error(init.span, &err_info);
-                                            exit(1);
-                                        }
-                                    };
-                                    init_data.push(data_directive);
-                                    return init_data;
+                        let (label, num) = eval_integer_label_const(&analyzed_init_expr);
+                        let mut init_data = Vec::new();
+                        if let Some(label) = label {
+                            // Label can only be applied to quad.
+                            debug_assert!(sizeof(ty) == 8);
+                            init_data.push(ASM_Labeled_Quad(label, num));
+                            return init_data;
+                        } else {
+                            let data_directive = match sizeof(ty) {
+                                // @Note: We don't need to do something like "num as u8"
+                                // because the assembler will do the truncate stuff.
+                                1 => ASM_Byte(num),
+                                2 => ASM_Word(num),
+                                4 => ASM_Long(num),
+                                8 => ASM_Quad(num),
+                                _ => {
+                                    let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
+                                    &analyzed_init_expr.ty, ty);
+                                    report_semantic_error(init.span, &err_info);
+                                    exit(1);
                                 }
-                            }
-                            Err(err_info) => {
-                                report_semantic_error(analyzed_init_expr.span, &err_info);
-                                exit(1);
-                            }
+                            };
+                            init_data.push(data_directive);
+                            return init_data;
                         }
                     }
 
@@ -639,23 +659,15 @@ impl ProgramAnalyzer {
 
                 if let Some(len_expr) = len_expr {
                     let analyzed_len_expr = self.analyze_expr(len_expr);
-                    let result = eval_pure_constant(&analyzed_len_expr);
-                    match result {
-                        Err(e) => {
-                            report_semantic_error(len_expr.span, &e);
-                            exit(1);
-                        }
-                        Ok(num) => {
-                            final_len = if num >= 0 {
-                                // We must truncate i64 to i32 before use it as array length.
-                                (num as i32) as usize
-                            } else {
-                                let err_info = format!("semantic error: array size is negative number: {}", num);
-                                report_semantic_error(len_expr.span, &err_info);
-                                exit(1);
-                            };
-                        }
-                    }
+                    let num = eval_integer_const(&analyzed_len_expr);
+                    final_len = if num >= 0 {
+                        // We must truncate i64 to i32 before use it as array length.
+                        (num as i32) as usize
+                    } else {
+                        let err_info = format!("semantic error: array size is negative number: {}", num);
+                        report_semantic_error(len_expr.span, &err_info);
+                        exit(1);
+                    };
                 } else {
                     final_len = 0;
                 }
@@ -1000,14 +1012,8 @@ impl ProgramAnalyzer {
                 }
                 Alignas_Expr(operand) => {
                     let analyzed_expr = self.analyze_expr(operand);
-                    let result = eval_pure_constant(&analyzed_expr);
-                    if let Ok(num) = result {
-                        var_attribute.align = num as usize;
-                    } else {
-                        let error_info = format!("The operand of _Alignas must be constant \
-                        but this is not.");
-                        report_semantic_error(operand.span, &error_info);
-                    }
+                    let num = eval_integer_const(&analyzed_expr);
+                    var_attribute.align = num as usize;
                     continue;
                 }
                 // For now, we just skip some decl specs:
@@ -1195,13 +1201,7 @@ impl ProgramAnalyzer {
                     for e in enumerators {
                         if let Some(expr) = &e.constant_expr {
                             let value_expr = self.analyze_expr(expr);
-                            value = match eval_pure_constant(&value_expr) {
-                                Err(e) => {
-                                    report_semantic_error(expr.span, &e);
-                                    exit(1);
-                                }
-                                Ok(num) => num
-                            }
+                            value = eval_integer_const(&value_expr);
                         }
                         self.scope_manager.add_enum(&e.ident.name, value);
                         value += 1;
@@ -1219,13 +1219,7 @@ impl ProgramAnalyzer {
                 for e in enumerators {
                     if let Some(expr) = &e.constant_expr {
                         let value_expr = self.analyze_expr(expr);
-                        value = match eval_pure_constant(&value_expr) {
-                            Err(e) => {
-                                report_semantic_error(expr.span, &e);
-                                exit(1);
-                            }
-                            Ok(num) => num
-                        }
+                        value = eval_integer_const(&value_expr);
                     }
                     self.scope_manager.add_enum(&e.ident.name, value);
                     value += 1;
@@ -1398,14 +1392,7 @@ impl ProgramAnalyzer {
                 let unique_label = self.next_case_label();
                 let stmt = self.analyze_stmt(stmt);
                 if let Some(cur_switch) = self.get_cur_switch() {
-                    let result = eval_pure_constant(&analyzed_cond_expr);
-                    let cond_value = match result {
-                        Err(e) => {
-                            report_semantic_error(cond_expr.span, &e);
-                            exit(1);
-                        }
-                        Ok(num) => num
-                    };
+                    let cond_value = eval_integer_const(&analyzed_cond_expr);
                     let case = ir::Case{cond_value, unique_label: unique_label.clone()};
                     cur_switch.cases.push(case.clone());
                     ir::StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
@@ -1946,7 +1933,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
     if matches!(to_type, ArrayOf(..)) {
         report_semantic_error(span, "the cast-to type must not be array type!");
     }
-    if !is_scalar(&from_type) || !is_scalar(&to_type) {
+    if !from_type.is_scalar() || !to_type.is_scalar() {
         let error_info = format!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
         when doing type casting! Don't blame me, ChatGPT told me that.");
         report_semantic_error(span, &error_info);
@@ -1954,21 +1941,6 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
     } else {
         return expr;
     }
-}
-
-fn is_arith(ty: &Type) -> bool {
-    matches!(ty, 
-        Char  | Short  | Int  | Long  | Enum | Bool |
-        UChar | UShort | UInt | ULong | Float | Double
-    )
-}
-
-fn is_scalar(ty: &Type) -> bool {
-    matches!(ty, 
-        Char  | Short  | Int  | Long  | Enum | Bool |
-        UChar | UShort | UInt | ULong | Float | Double |
-        Pointer_To(..) | ArrayOf(..)
-    )
 }
 
 fn pointer_to(ty: &Type) -> Type {
@@ -1981,12 +1953,6 @@ fn array_of(ty: &Type, len: usize) -> Type {
     ArrayOf(base, len)
 }
 
-// @TODO: Move to impl Type
-pub fn is_integer(ty: &Type) -> bool {
-    matches!(ty, Char  | Short  | Int  | Long | Bool | Enum |
-                 UChar | UShort | UInt | ULong)
-}
-
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
 fn can_assign(left_type: &Type, mut right_type: &Type) -> bool {
@@ -1995,7 +1961,7 @@ fn can_assign(left_type: &Type, mut right_type: &Type) -> bool {
         right_type = return_type;
     }
 
-    if is_arith(left_type) && is_arith(right_type) {
+    if left_type.is_arith() && right_type.is_arith() {
         return true;
     }
 
@@ -2021,10 +1987,10 @@ fn can_assign_expr(left_type: &Type, right_expr: &ir::Expr) -> bool {
 }
 
 fn is_null_pointer_constant(expr: &ir::Expr) -> bool {
-    if !is_integer(&expr.ty) {
+    if !expr.is_integer() {
         return false;
     }
-    return matches!(eval_pure_constant(expr), Ok(0));
+    return matches!(eval_integer_const(expr), 0);
 }
 
 
@@ -2043,13 +2009,6 @@ fn can_be_lvalue(expr: &ir::Expr) -> bool {
             return can_be_lvalue(rhs);
         },
 		_ => true,
-    }
-}
-
-pub fn is_pointer_or_array(t: &Type) -> bool {
-    match t {
-        Pointer_To(_) | ArrayOf(_, _) => true,
-        _ => false
     }
 }
 
@@ -2144,7 +2103,7 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
             if lhs.is_integer() && rhs.is_pointer_or_array() {
                 report_semantic_error(rhs.span, "error: integer - ptr");
             }
-            if is_pointer_or_array(&lhs.ty) && rhs.is_integer() {
+            if lhs.is_pointer_or_array() && rhs.is_integer() {
                 let scale = match &lhs.ty {
                     Pointer_To(pointee_type) => sizeof(pointee_type),
                     ArrayOf(element_type, _) => sizeof(element_type),
@@ -2156,7 +2115,7 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                 };
                 rhs = scale_expr(rhs, scale, ir::OP::Mul);
                 gen_promoted_binary_expr(lhs, rhs, ir::OP::Minus)
-            } else if is_pointer_or_array(&lhs.ty) && is_pointer_or_array(&rhs.ty) {
+            } else if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
                 let basic_ty = match &lhs.ty {
                     ArrayOf(basic, _) => *basic.clone(),
                     Pointer_To(basic) => *basic.clone(),
@@ -2379,212 +2338,207 @@ pub fn align_to(n: usize, align: usize) -> usize {
     }
 }
 
-// @Refactor: Direct print error info, don't return Result, just i64.
-// @Rename: eval_pure_integer_const
-fn eval_pure_constant(expr: &ir::Expr) -> Result<i64, String> {
-    let (_, num) = eval_label_constant(expr)?;
-    return Ok(num);
+fn eval_integer_const(expr: &ir::Expr) -> i64 {
+    let (_, num) = eval_integer_label_const(expr);
+    return num;
 }
 
-// @Rename: eval_label_integer_const
-fn eval_label_constant(expr: &ir::Expr) -> Result<(Option<String>, i64), String> {
+fn eval_integer_label_const(expr: &ir::Expr) -> (Option<String>, i64) {
     use ir::OP::*;
     match &expr.content {
-        _ if expr.ty.is_float() => {
-            let f_num = eval_float(expr);
-            return Ok((None, (f_num as i64)));
+        _ if expr.is_fp() => {
+            let f_num = eval_fp_const(expr);
+            return (None, (f_num as i64));
         }
-        ir::ExprType::Integer(n) => Ok((None, (*n as i64))),
+        ir::ExprType::Integer(n) => (None, (*n as i64)),
         ir::ExprType::Neg(expr) => {
-            let (label, num) = eval_label_constant(&expr)?;
-            return Ok((label, -num));
+            let (label, num) = eval_integer_label_const(&expr);
+            return (label, -num);
         }
         ir::ExprType::Not(expr) => {
-            let value = eval_pure_constant(expr)?;
+            let value = eval_integer_const(expr);
             if value == 0 {
-                return Ok((None, 1));
+                return (None, 1);
             } else {
-                return Ok((None, 0));
+                return (None, 0);
             }
         }
         ir::ExprType::Binary(lhs, rhs, op) => {
-            let (label, left_num) = eval_label_constant(lhs)?;
-            let right_num = eval_pure_constant(rhs)?;
+            let (label, left_num) = eval_integer_label_const(lhs);
+            let right_num = eval_integer_const(rhs);
             match op {
                 Plus => {
-                    return Ok((label, left_num + right_num));
+                    return (label, left_num + right_num);
                 }
                 Minus => {
-                    return Ok((label, left_num - right_num));
+                    return (label, left_num - right_num);
                 }
                 Mul => {
-                    return Ok((label, left_num * right_num));
+                    return (label, left_num * right_num);
                 }
                 Div => {
                     if expr.ty.is_unsigned() {
-                        return Ok((label, ((left_num as u64) / (right_num as u64)) as i64));
+                        return (label, ((left_num as u64) / (right_num as u64)) as i64);
                     } else {
-                        return Ok((label, left_num / right_num));
+                        return (label, left_num / right_num);
                     }
                 }
                 Modulus => {
                     if expr.ty.is_unsigned() {
-                        return Ok((label, ((left_num as u64) % (right_num as u64)) as i64));
+                        return (label, ((left_num as u64) % (right_num as u64)) as i64);
                     } else {
-                        return Ok((label, left_num % right_num));
+                        return (label, left_num % right_num);
                     }
                 }
                 BitAnd => {
-                    return Ok((label, left_num & right_num));
+                    return (label, left_num & right_num);
                 }
                 BitXOR => {
-                    return Ok((label, left_num ^ right_num));
+                    return (label, left_num ^ right_num);
                 }
                 BitOR => {
-                    return Ok((label, left_num | right_num));
+                    return (label, left_num | right_num);
                 }
                 SHL => {
-                    return Ok((label, left_num << right_num));
+                    return (label, left_num << right_num);
                 }
                 SHR => {
                     if expr.ty.is_unsigned() {
-                        return Ok((label, ((left_num as u64) >> (right_num as u64)) as i64));
+                        return (label, ((left_num as u64) >> (right_num as u64)) as i64);
                     } else {
-                        return Ok((label, left_num >> right_num));
+                        return (label, left_num >> right_num);
                     }
                 }
                 Eq => {
-                    return Ok((label, (left_num == right_num) as i64));
+                    return (label, (left_num == right_num) as i64);
                 }
                 Neq => {
-                    return Ok((label, (left_num != right_num) as i64));
+                    return (label, (left_num != right_num) as i64);
                 }
                 LT => {
                     if expr.ty.is_unsigned() {
-                        return Ok((label, ((left_num as u64) < (right_num as u64)) as i64));
+                        return (label, ((left_num as u64) < (right_num as u64)) as i64);
                     } else {
-                        return Ok((label, (left_num < right_num) as i64));
+                        return (label, (left_num < right_num) as i64);
                     }
                 }
                 LE => {
                     if expr.ty.is_unsigned() {
-                        return Ok((label, ((left_num as u64) <= (right_num as u64)) as i64));
+                        return (label, ((left_num as u64) <= (right_num as u64)) as i64);
                     } else {
-                        return Ok((label, (left_num <= right_num) as i64));
+                        return (label, (left_num <= right_num) as i64);
                     }
                 }
                 GT => {
                     if expr.ty.is_unsigned() {
-                        return Ok((label, ((left_num as u64) > (right_num as u64)) as i64));
+                        return (label, ((left_num as u64) > (right_num as u64)) as i64);
                     } else {
-                        return Ok((label, (left_num > right_num) as i64));
+                        return (label, (left_num > right_num) as i64);
                     }
                 }
                 GE => {
                     if expr.ty.is_unsigned() {
-                        return Ok((label, ((left_num as u64) >= (right_num as u64)) as i64));
+                        return (label, ((left_num as u64) >= (right_num as u64)) as i64);
                     } else {
-                        return Ok((label, (left_num >= right_num) as i64));
+                        return (label, (left_num >= right_num) as i64);
                     }
                 }
                 LOGAND => {
                     if (left_num != 0) && (right_num != 0) {
-                        return Ok((label, 1));
+                        return (label, 1);
                     } else {
-                        return Ok((label, 0));
+                        return (label, 0);
                     }
                 }
                 LOGOR => {
                     if (left_num != 0) || (right_num != 0) {
-                        return Ok((label, 1));
+                        return (label, 1);
                     } else {
-                        return Ok((label, 0));
+                        return (label, 0);
                     }
                 }
             }
         }
         ir::ExprType::CommaExpression(lhs, rhs) => {
-            return eval_label_constant(rhs);
+            return eval_integer_label_const(rhs);
         }
         ir::ExprType::Conditional{cond, then, otherwise} => {
-            let cond = eval_pure_constant(cond)?;
+            let cond = eval_integer_const(cond);
             if cond != 0 {
-                return eval_label_constant(then);
+                return eval_integer_label_const(then);
             } else {
-                return eval_label_constant(otherwise);
+                return eval_integer_label_const(otherwise);
             }
         }
         // ~
         ir::ExprType::BitNot(expr) => {
-            let value = eval_pure_constant(expr)?;
+            let value = eval_integer_const(expr);
             let result = !value;
-            return Ok((None, result));
+            return (None, result);
         }
         ir::ExprType::Cast(expr, ty) => {
-            if (is_integer(ty)) {
-                let (label, num) = eval_label_constant(expr)?;
+            if ty.is_integer() {
+                let (label, num) = eval_integer_label_const(expr);
                 let truncated_num = match sizeof(ty) {
                     1 => if ty.is_unsigned() { (num as u8) as i64 } else {(num as i8) as i64},
                     2 => if ty.is_unsigned() { (num as u16) as i64 } else {(num as i16) as i64},
                     4 => if ty.is_unsigned() { (num as u32) as i64 } else {(num as i32) as i64},
                     _ => num,
                 };
-                return Ok((label, truncated_num));
+                return (label, truncated_num);
             } else {
-                return eval_label_constant(expr);
+                return eval_integer_label_const(expr);
             }
         }
         ir::ExprType::Object(obj) => {
-            // if !matches!(obj.ty, ArrayOf(..) | Func{..} | Pointer_To(..)) {
-            //     let error_info = format!("invalid constant reference to symbol {}", obj.name);
-            //     return Err(error_info);
-            // }
             if !obj.is_global {
                 let error_info = format!("not a compile-time constant");
-                return Err(error_info);
+                report_semantic_error(expr.span, &error_info);
+                exit(1);
             }
-            return Ok((Some(obj.name.clone()), 0));
+            return (Some(obj.name.clone()), 0);
         }
         ir::ExprType::RequestStructMember(expr, offset) => {
-            let (label, num) = eval_label_constant(expr)?;
-            return Ok((label, num+(*offset as i64)));
+            let (label, num) = eval_integer_label_const(expr);
+            return (label, num+(*offset as i64));
         }
         // In assembly, the address of some symbol is just the symbol name of itself.
         // The linker will eventually resolve the actual address of this symbol.
         ir::ExprType::AddrOf(expr) => {
-            return eval_label_constant(expr);
+            return eval_integer_label_const(expr);
         }
         ir::ExprType::Deref(expr) => {
-            return eval_label_constant(expr);
+            return eval_integer_label_const(expr);
         }
         _ => {
             let error_info = format!("this cannot be evaluated to integer costant: {:?}", expr);
-            return Err(error_info);
+            report_semantic_error(expr.span, &error_info);
+            exit(1);
         }
     }
 }
 
-fn eval_float(expr: &ir::Expr) -> f64 {
+fn eval_fp_const(expr: &ir::Expr) -> f64 {
     use ir::OP::*;
-    if is_integer(&expr.ty) {
+    if expr.is_integer() {
         if expr.ty.is_unsigned() {
-            return (eval_pure_constant(expr).unwrap() as u64) as f64;
+            return (eval_integer_const(expr) as u64) as f64;
         } else {
-            return eval_pure_constant(expr).unwrap() as f64;
+            return eval_integer_const(expr) as f64;
         }
     }
-    debug_assert!(expr.ty.is_float());
+    debug_assert!(expr.is_fp());
 
     match &expr.content {
         ir::ExprType::Float_Const(fnum) => return *fnum as f64,
         ir::ExprType::Double_Const(fnum) => return *fnum,
         ir::ExprType::Binary(lhs, rhs, op) => {
             match op {
-                Plus => return eval_float(lhs) + eval_float(rhs),
-                Minus => return eval_float(lhs) - eval_float(rhs),
-                Mul => return eval_float(lhs) * eval_float(rhs),
-                Div => return eval_float(lhs) / eval_float(rhs),
-                Div => return eval_float(lhs) / eval_float(rhs),
+                Plus => return eval_fp_const(lhs) + eval_fp_const(rhs),
+                Minus => return eval_fp_const(lhs) - eval_fp_const(rhs),
+                Mul => return eval_fp_const(lhs) * eval_fp_const(rhs),
+                Div => return eval_fp_const(lhs) / eval_fp_const(rhs),
+                Div => return eval_fp_const(lhs) / eval_fp_const(rhs),
                 _ => {
                     let error_info = format!("Binary operation '{:?}' cannot be applied to this \
                         floating point type expression.", op);
@@ -2593,21 +2547,21 @@ fn eval_float(expr: &ir::Expr) -> f64 {
                 }
             }
         }
-        ir::ExprType::Neg(expr) => return -eval_float(expr),
+        ir::ExprType::Neg(expr) => return -eval_fp_const(expr),
         ir::ExprType::Conditional{cond, then, otherwise} => {
-            let cond = eval_float(cond);
+            let cond = eval_fp_const(cond);
             if cond != 0.0 {
-                return eval_float(then);
+                return eval_fp_const(then);
             } else {
-                return eval_float(otherwise);
+                return eval_fp_const(otherwise);
             }
         }
-        ir::ExprType::CommaExpression(lhs, rhs) => return eval_float(rhs),
+        ir::ExprType::CommaExpression(lhs, rhs) => return eval_fp_const(rhs),
         ir::ExprType::Cast(expr, ty) => {
-            if expr.ty.is_float() {
-                return eval_float(expr);
+            if expr.is_fp() {
+                return eval_fp_const(expr);
             } else {
-                return eval_pure_constant(expr).unwrap() as f64;
+                return eval_integer_const(expr) as f64;
             }
         }
         _ => {

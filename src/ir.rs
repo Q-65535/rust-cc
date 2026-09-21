@@ -60,12 +60,14 @@ pub struct Expr {
 }
 
 impl Expr {
-    // @Refactor: duplicate functions
     pub fn is_integer(&self) -> bool {
-        return analyze::is_integer(&self.ty);
+        return self.ty.is_integer();
+    }
+    pub fn is_fp(&self) -> bool {
+        return self.ty.is_fp();
     }
     pub fn is_pointer_or_array(&self) -> bool {
-        return analyze::is_pointer_or_array(&self.ty);
+        return self.ty.is_pointer_or_array();
     }
 }
 

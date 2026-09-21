@@ -156,7 +156,7 @@ impl Generator {
             let mut gp = 0;
             let mut fp = 0;
             for param in &fun.params {
-                if param.ty.is_float() {
+                if param.ty.is_fp() {
                     fp += 1;
                 } else {
                     gp += 1;
@@ -206,7 +206,7 @@ impl Generator {
         let mut gp_reg_index = 0;
         for param in fun.params {
             let concrete_param_offset = self.get_absolute_offset(&param);
-            if param.ty.is_float() {
+            if param.ty.is_fp() {
                 if param.ty == Float {
                     emit!("  movss %xmm{}, {}(%rbp)\n", fp_reg_index,  concrete_param_offset);
                 } else if param.ty == Double {
@@ -578,7 +578,7 @@ impl Generator {
                         // Generate all the args and put them temorary on stack.
                         for arg in args.into_iter().rev() {
                             self.expr_gen(arg);
-                            if arg.ty.is_float() {
+                            if arg.is_fp() {
                                 self.push_float("%xmm0");
                             } else {
                                 self.push("%rax");
@@ -588,7 +588,7 @@ impl Generator {
                         let mut fp_reg_index = 0;
                         let mut gp_reg_index = 0;
                         for arg in args {
-                            if arg.ty.is_float() {
+                            if arg.is_fp() {
                                 self.pop_float(fp_reg_index);
                                 fp_reg_index += 1;
                             } else {
@@ -757,7 +757,7 @@ fn cmp_zero(ty: &Type) {
             emit!("  ucomisd %xmm1, %xmm0");
         }
         _ => {
-            if is_integer(ty) && sizeof(ty) <= 4 {
+            if ty.is_integer() && sizeof(ty) <= 4 {
                 emit!("  cmp $0, %eax");
             } else {
                 emit!("  cmp $0, %rax");
