@@ -1824,14 +1824,25 @@ impl ProgramAnalyzer {
             FunCall(func_ref, args) => {
                 // @Incomplete: GCC lets you to call a undeclared function,
                 // linker reports the error if function name doesn't exist.
-                let mut analyzed_func_ref = self.analyze_expr(func_ref);
-                if let Pointer_To(base_type) = analyzed_func_ref.ty {
-                    analyzed_func_ref.ty = *base_type.clone();
+                let analyzed_func_ref = self.analyze_expr(func_ref);
+                // Keep the callee expression's original type. Codegen needs to
+                // distinguish a function designator from a variable containing
+                // a function pointer so that the latter is loaded from memory.
+                // Only unwrap the pointer in the separate type used for checking
+                // the call signature.
+                let target_func_ty = match &analyzed_func_ref.ty {
+                    Pointer_To(base_type) => {
+                        if matches!(base_type.as_ref(), Func{..}) {
+                            base_type.as_ref().clone()
+                        } else {
+                            report_semantic_error(expr.span, "This is not function pointer.");
+                            exit(1);
+                        }
+                    }
+                    ty => ty.clone(),
+                };
 
-                }
-
-                let mut func_ref_ty = analyzed_func_ref.ty.clone();
-                if let Func{return_type, param_types, is_variadic} = func_ref_ty {
+                if let Func{return_type, param_types, is_variadic} = target_func_ty {
                     let ty = *return_type;
                     let mut casted_analyzed_args = Vec::new();
 
@@ -1869,7 +1880,7 @@ impl ProgramAnalyzer {
                     let content = ExprType::FunCall(Box::new(analyzed_func_ref), casted_analyzed_args);
                     ir::Expr {content, ty, span}
                 } else {
-                    let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &func_ref_ty);
+                    let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &target_func_ty);
                     report_semantic_error(func_ref.span, &error_message);
                     exit(1);
                 }
@@ -2031,6 +2042,13 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
     let expr = ir::Expr {content, ty: to_type.clone(), span};
     if *to_type == Void {
         return expr;
+    }
+    // A function designator is converted to a pointer to that function type
+    // without changing the address value held in the result register.
+    if let (Func{..}, Pointer_To(base_type)) = (&from_type, to_type) {
+        if from_type == **base_type {
+            return expr;
+        }
     }
     if matches!(to_type, ArrayOf(..)) {
         report_semantic_error(span, "the cast-to type must not be array type!");

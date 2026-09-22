@@ -225,7 +225,7 @@ int main() {
   ASSERT(5, (add2)(2,3));
   ASSERT(5, (&add2)(2,3));
   ASSERT(7, ({ int (*fn)(int,int) = add2; fn(2,5); }));
-  // ASSERT(6, fnptr(add_all)(3, 1, 2, 3));
+  ASSERT(6, fnptr(add_all)(3, 1, 2, 3));
 
   printf("OK\n");
   return 0;

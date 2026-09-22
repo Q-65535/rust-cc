@@ -337,7 +337,7 @@ impl Generator {
     }
 
     fn expr_gen(&mut self, expr: &ir::Expr) {
-        emit!("  .loc 1 {}", expr.span.get_start_line());
+        //emit!("  .loc 1 {}", expr.span.get_start_line());
         let content = &expr.content;
         match content {
             Integer(n) => emit!("  mov ${}, %rax", n),
@@ -582,6 +582,8 @@ impl Generator {
                         self.push("%rax");
                     }
                 }
+
+                self.expr_gen(func_ref);
                 // Then put those args on the stack into designated registers.
                 let mut fp_reg_index = 0;
                 let mut gp_reg_index = 0;
@@ -606,9 +608,11 @@ impl Generator {
                     _ => 0,
                 };
 
-                self.expr_gen(func_ref);
                 // In x64 ABI, When calling variadic function, %al indicates how many
                 // floting point number are passed as arguments.
+                // @Wrong?: Since we support function pointer, %rax register now
+                // stores the callee address, it has nothing to do with floating pointer
+                // arguments anymore!
                 // emit!("  mov ${}, %rax", fp_args_count);
                 // emit!("  call {}", obj.name);
                 emit!("  call *%rax");
@@ -659,30 +663,25 @@ impl Generator {
     fn gen_addr(&mut self, expr: &Expr) {
         match &expr.content {
             Object(obj) => {
-                if matches!(obj.ty, Func{..}) {
-                    if obj.is_extern {
-                        emit!("  mov {}@GOTPCREL(%rip), %rax", obj.name);
-                    } else {
-                        emit!("  lea {}(%rip), %rax", obj.name);
-                    }
-                    return;
-                }
-                if !obj.is_global && !obj.is_extern {
+                if !obj.is_global && !obj.is_extern { // local variable
                     let concrete_offset = self.get_absolute_offset(&obj);
                     emit!("  lea {}(%rbp), %rax", concrete_offset);
                     return;
                 }
-                if obj.is_global ||  obj.is_extern {
+                if matches!(obj.ty, Func{..}) {
+                    if obj.is_extern {
+                        // Dynamic link situation:
+                        emit!("  mov {}@GOTPCREL(%rip), %rax", obj.name);
+                    } else {
+                        // Static link situation:
+                        emit!("  lea {}(%rip), %rax", obj.name);
+                    }
+                    return;
+                }
+                if obj.is_global || obj.is_extern { // other non-funtion symbols
                     emit!("  lea {}(%rip), %rax", obj.name);
                     return;
                 }
-
-                // if obj.is_global || obj.is_extern {
-                //     emit!("  lea {}(%rip), %rax", obj.name);
-                // } else {
-                //     let concrete_offset = self.get_absolute_offset(&obj);
-                //     emit!("  lea {}(%rbp), %rax", concrete_offset);
-                // }
             }
             Deref(expr) => {
                 self.expr_gen(expr);
@@ -811,8 +810,7 @@ fn get_fundemental_type(ty: &Type) -> Fundemental_Type {
         ULong  =>   U64, 
         Float  =>   F32,
         Double =>   F64,
-        Pointer_To(..) | ArrayOf(..) => I64,
-        Func{return_type, ..} => get_fundemental_type(return_type),
+        Pointer_To(..) | ArrayOf(..) | Func{..} => U64,
         _ => {
             println!("cannot get the fundemental type of this type: {:?}", ty);
             exit(1);
