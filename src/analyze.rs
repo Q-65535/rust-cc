@@ -108,6 +108,10 @@ impl Type {
         }
     }
 
+    pub fn is_func(&self) -> bool {
+        return matches!(self, Func{..});
+    }
+
     pub fn is_fp(&self) -> bool {
         return matches!(self, Float | Double);
     }
@@ -554,22 +558,19 @@ impl ProgramAnalyzer {
                 }
             }
             let mut object = create_global_obj_with_attribute(&name, &final_type, &symbol_attribute);
+
             if let Type::Func{..} = final_type {
                 if !self.defined_functions.contains(&name) {
+                    // All functions, if not defined, are implicitly extern by default.
                     object.is_extern = true;
                     self.register_global_object(object.clone(), cur_dector.span);
                 }
+                // We allow duplicate declarations for function.
+                // So we don't do the check in the code below, just continue.
                 continue;
             }
 
             self.register_global_object(object.clone(), cur_dector.span);
-            // A function declarator with no body (e.g. `int printf();`) is a
-            // prototype, not a variable definition. Register it in scope so
-            // calls resolve, but do NOT emit a data object for it — doing so
-            // would define a bogus symbol that overrides the real function.
-            if let Type::Func{..} = final_type {
-                continue;
-            }
             // An extern declaration introduces the object to name lookup but
             // does not allocate storage.  A later compatible definition may
             // replace it and emit the actual data object.
@@ -2075,12 +2076,7 @@ fn array_of(ty: &Type, len: usize) -> Type {
 
 // evaluate whether a expression of right type can be assigned to a "stuff"
 // of left type
-fn can_assign(left_type: &Type, mut right_type: &Type) -> bool {
-    // If the right is a function call, we only consdier its return type.
-    if let Func {return_type, ..} = right_type {
-        right_type = return_type;
-    }
-
+fn can_assign(left_type: &Type, right_type: &Type) -> bool {
     if left_type.is_arith() && right_type.is_arith() {
         return true;
     }
@@ -2095,6 +2091,10 @@ fn can_assign(left_type: &Type, mut right_type: &Type) -> bool {
     if matches!(left_type, Pointer_To(..)) && matches!(right_type, ArrayOf(..)) {
         return true;
     }
+    // Like array, function can be assigned to a pointer type.
+    if matches!(left_type, Pointer_To(..)) && right_type.is_func() {
+        return true;
+    }
 
     return left_type == right_type;
 }
@@ -2102,14 +2102,9 @@ fn can_assign(left_type: &Type, mut right_type: &Type) -> bool {
 fn can_assign_expr(left_type: &Type, right_expr: &ir::Expr) -> bool {
     if can_assign(left_type, &right_expr.ty) {
         return true;
+    } else {
+        return matches!(left_type, Pointer_To(..)) && is_null_pointer_constant(right_expr);
     }
-    if matches!(left_type, Pointer_To(..)) {
-        if is_null_pointer_constant(right_expr) || matches!(right_expr.ty, Func{..}) {
-            return true;
-        }
-    }
-    return false;
-    // return matches!(left_type, Pointer_To(..)) && is_null_pointer_constant(right_expr);
 }
 
 fn is_null_pointer_constant(expr: &ir::Expr) -> bool {
