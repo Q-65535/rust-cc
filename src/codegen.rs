@@ -573,66 +573,64 @@ impl Generator {
                 self.expr_gen(expr);
             }
             FunCall(func_ref, args) => {
-                match &func_ref.content {
-                    Object(obj) => {
-                        // Generate all the args and put them temorary on stack.
-                        for arg in args.into_iter().rev() {
-                            self.expr_gen(arg);
-                            if arg.is_fp() {
-                                self.push_float("%xmm0");
-                            } else {
-                                self.push("%rax");
-                            }
-                        }
-                        // Then put those args on the stack into designated registers.
-                        let mut fp_reg_index = 0;
-                        let mut gp_reg_index = 0;
-                        for arg in args {
-                            if arg.is_fp() {
-                                self.pop_float(fp_reg_index);
-                                fp_reg_index += 1;
-                            } else {
-                                self.pop(self.argregs64[gp_reg_index]);
-                                gp_reg_index += 1;
-                            }
-                        }
-                        // The x86-64 ABI requires RSP to be 16-byte aligned
-                        // at the point of a `call`. If an odd number of
-                        // 8-byte values are live on the stack, realign first.
-                        let needs_align = self.depth % 2 == 1;
-                        if needs_align {
-                            emit!("  sub $8, %rsp");
-                        }
-                        let fp_args_count = match &obj.ty {
-                            Func{is_variadic, ..} if *is_variadic => fp_reg_index,
-                            _ => 0,
-                        };
-                        // In x64 ABI, When calling variadic function, %al indicates how many
-                        // floting point number are passed as arguments.
-                        emit!("  mov ${}, %rax", fp_args_count);
-                        emit!("  call {}", obj.name);
-                        if needs_align {
-                            emit!("  add $8, %rsp");
-                        }
-                        // @Temporary: This is just for being compatible with chibicc's
-                        // test suits which is, weird. In its commit "Handle a function
-                        // returning bool, char or short", the return type of the 
-                        // functions declared in common is different to that in function.c
-                        // If they are the same, we don't need the following match cases.
-                        // You might be wondering why redeclaring a function with a different
-                        // return type doesn't cause a compile error? Well, that's because
-                        // the file "common" is not processed in our compiler, it is processed
-                        // after the compilation as specified in Makefile.
-                        match &expr.ty {
-                            Bool  =>   emit!("  movzx %al, %eax"),
-                            Char  =>   emit!("  movsbl %al, %eax"),
-                            Short =>   emit!("  movswl %ax, %eax"),
-                            UChar  =>  emit!("  movzbl %al, %eax"),
-                            UShort =>  emit!("  movzwl %ax, %eax"),
-                            _ => (),
-                        }
+                // Generate all the args and put them temorary on stack.
+                for arg in args.into_iter().rev() {
+                    self.expr_gen(arg);
+                    if arg.is_fp() {
+                        self.push_float("%xmm0");
+                    } else {
+                        self.push("%rax");
                     }
-                    _ => eprintln!("currently only support function name as call reference"),
+                }
+                // Then put those args on the stack into designated registers.
+                let mut fp_reg_index = 0;
+                let mut gp_reg_index = 0;
+                for arg in args {
+                    if arg.is_fp() {
+                        self.pop_float(fp_reg_index);
+                        fp_reg_index += 1;
+                    } else {
+                        self.pop(self.argregs64[gp_reg_index]);
+                        gp_reg_index += 1;
+                    }
+                }
+                // The x86-64 ABI requires RSP to be 16-byte aligned
+                // at the point of a `call`. If an odd number of
+                // 8-byte values are live on the stack, realign first.
+                let needs_align = self.depth % 2 == 1;
+                if needs_align {
+                    emit!("  sub $8, %rsp");
+                }
+                let fp_args_count = match &func_ref.ty {
+                    Func{is_variadic, ..} if *is_variadic => fp_reg_index,
+                    _ => 0,
+                };
+
+                self.expr_gen(func_ref);
+                // In x64 ABI, When calling variadic function, %al indicates how many
+                // floting point number are passed as arguments.
+                // emit!("  mov ${}, %rax", fp_args_count);
+                // emit!("  call {}", obj.name);
+                emit!("  call *%rax");
+                if needs_align {
+                    emit!("  add $8, %rsp");
+                }
+                // @Temporary: This is just for being compatible with chibicc's
+                // test suits which is, weird. In its commit "Handle a function
+                // returning bool, char or short", the return type of the 
+                // functions declared in common is different to that in function.c
+                // If they are the same, we don't need the following match cases.
+                // You might be wondering why redeclaring a function with a different
+                // return type doesn't cause a compile error? Well, that's because
+                // the file "common" is not processed in our compiler, it is processed
+                // after the compilation as specified in Makefile.
+                match &expr.ty {
+                    Bool  =>   emit!("  movzx %al, %eax"),
+                    Char  =>   emit!("  movsbl %al, %eax"),
+                    Short =>   emit!("  movswl %ax, %eax"),
+                    UChar  =>  emit!("  movzbl %al, %eax"),
+                    UShort =>  emit!("  movzwl %ax, %eax"),
+                    _ => (),
                 }
             }
             StmtExpr(stmts) => self.block_gen(stmts),
@@ -661,14 +659,31 @@ impl Generator {
     fn gen_addr(&mut self, expr: &Expr) {
         match &expr.content {
             Object(obj) => {
-                if obj.is_global || obj.is_extern {
-                    emit!("  lea {}(%rip), %rax", obj.name);
-                } else {
+                if matches!(obj.ty, Func{..}) {
+                    if obj.is_extern {
+                        emit!("  mov {}@GOTPCREL(%rip), %rax", obj.name);
+                    } else {
+                        emit!("  lea {}(%rip), %rax", obj.name);
+                    }
+                    return;
+                }
+                if !obj.is_global && !obj.is_extern {
                     let concrete_offset = self.get_absolute_offset(&obj);
                     emit!("  lea {}(%rbp), %rax", concrete_offset);
+                    return;
+                }
+                if obj.is_global ||  obj.is_extern {
+                    emit!("  lea {}(%rip), %rax", obj.name);
+                    return;
                 }
 
-            },
+                // if obj.is_global || obj.is_extern {
+                //     emit!("  lea {}(%rip), %rax", obj.name);
+                // } else {
+                //     let concrete_offset = self.get_absolute_offset(&obj);
+                //     emit!("  lea {}(%rbp), %rax", concrete_offset);
+                // }
+            }
             Deref(expr) => {
                 self.expr_gen(expr);
             },
@@ -974,7 +989,7 @@ fn gen_cast_operation(from: Fundemental_Type, to: Fundemental_Type) {
 }
 
 fn load_according_to_type(ty: &Type) {
-    if matches!(ty, ArrayOf(..) | Struct(..) | Union(..)) {return;}
+    if matches!(ty, ArrayOf(..) | Struct(..) | Union(..) | Func{..}) {return;}
 
     if *ty == Type::Float {
         emit!("  movss (%rax), %xmm0");

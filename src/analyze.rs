@@ -9,6 +9,8 @@ use ir::Data_Directive::{self, *};
 use ir::Global_Data_Decl;
 use ExprType::*;
 use Struct_Or_Union::*;
+use DeclaratorSuffix::*;
+use Direct_Declarator::*;
 use StmtType::*;
 use TokenKind::{Plus, Minus, Mul, Div, Modulus, PlusAssignment, ModulusAssignment,
     MinusAssignment, MulAssignment, DivAssignment, Eq, Neq, LT, LE,
@@ -407,7 +409,8 @@ impl ProgramAnalyzer {
         for unit in &mut program.translation_units {
             match unit {
                 parse::TranslationUnit::FunctionDef(fun) => {
-                    let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
+                    let (base_type, mut symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
+
                     let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.dector);
                     if !self.defined_functions.insert(name.clone()) {
                         let err_info = format!("semantic error: function {} redefined", name);
@@ -446,11 +449,9 @@ impl ProgramAnalyzer {
             self.unique_stmt_labels_map_in_cur_function.insert(label.clone(), unique_label);
         }
 
-        
-
         let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
         let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.dector);
-        if let Func{return_type, ..} = final_type {
+        if let Func{return_type, param_types, ..} = final_type {
             self.current_function_return_type = *return_type;
         } else {
             let err_info = format!("compiler bug: we are analyzing a function definition,
@@ -463,20 +464,16 @@ impl ProgramAnalyzer {
         self.scope_manager.enter_new_scope();
         let mut var_area = None;
         let mut analyzed_params: Vec<Obj> = Vec::new();
-        if let Some(DeclaratorSuffix::FunParam{params, is_variadic}) = &fun.dector.suffix {
-            for param in params {
-                let p = self.analyze_param(param);
-                analyzed_params.push(p);
-            }
-            if *is_variadic {
-                let var_area_type = Type::ArrayOf(Box::new(Char), 136);
-                let va_area_obj = self.create_local_obj("__va_area__", &var_area_type);
-                self.scope_manager.add_object(va_area_obj.clone());
-                var_area = Some(va_area_obj);
-            }
-        } else {
-            let err_info = format!("compiler bug: the function doesn't have parameter field.");
-            report_semantic_error(fun.dector.span, &err_info);
+        let (params, is_variadic) = self.find_fun_params(&fun.dector);
+        for param in &params {
+            let p = self.analyze_param(param);
+            analyzed_params.push(p);
+        }
+        if is_variadic {
+            let var_area_type = Type::ArrayOf(Box::new(Char), 136);
+            let va_area_obj = self.create_local_obj("__va_area__", &var_area_type);
+            self.scope_manager.add_object(va_area_obj.clone());
+            var_area = Some(va_area_obj);
         }
         let mut stmts = self.analyze_block(&mut fun.items);
         let stack_size = self.current_local_var_offset;
@@ -487,6 +484,21 @@ impl ProgramAnalyzer {
             stmts, stack_size,
             is_static: symbol_attribute.is_static,
             var_area,
+        }
+    }
+
+    pub fn find_fun_params(&self, dector: &Declarator) -> (Vec<Func_Parameter>, bool) {
+        if let Paren_Enclosed_Declarator(inner_dector) = &*dector.direct_dector {
+            return self.find_fun_params(&inner_dector);
+        } else {
+            if let FunParam{params, is_variadic}  = &dector.suffix.clone().unwrap() {
+                return (params.clone(), *is_variadic);
+            } else {
+                let err_info = format!("compiler bug: the suffix of the declarator of
+                    function definition is not param-list.");
+                report_semantic_error(dector.span, &err_info);
+                exit(1);
+            }
         }
     }
 
@@ -541,7 +553,15 @@ impl ProgramAnalyzer {
                     report_semantic_error(cur_dector.span, &err_info);
                 }
             }
-            let object = create_global_obj_with_attribute(&name, &final_type, &symbol_attribute);
+            let mut object = create_global_obj_with_attribute(&name, &final_type, &symbol_attribute);
+            if let Type::Func{..} = final_type {
+                if !self.defined_functions.contains(&name) {
+                    object.is_extern = true;
+                    self.register_global_object(object.clone(), cur_dector.span);
+                }
+                continue;
+            }
+
             self.register_global_object(object.clone(), cur_dector.span);
             // A function declarator with no body (e.g. `int printf();`) is a
             // prototype, not a variable definition. Register it in scope so
@@ -692,7 +712,7 @@ impl ProgramAnalyzer {
 
     fn resolve_type_with_suffix(&mut self, base_type: &Type, suffix: &DeclaratorSuffix) -> Type {
         match suffix {
-            DeclaratorSuffix::ArrayLen(len_expr, inner_suffix) => {
+            ArrayLen(len_expr, inner_suffix) => {
                 let mut final_len: usize;
 
                 if let Some(len_expr) = len_expr {
@@ -717,7 +737,7 @@ impl ProgramAnalyzer {
                     return array_of(base_type, final_len);
                 }
             },
-            DeclaratorSuffix::FunParam{params, is_variadic} => {
+            FunParam{params, is_variadic} => {
                 let return_type = base_type.clone();
                 let mut param_types = Vec::new();
                 let mut param_final_type: Type;
@@ -790,10 +810,10 @@ impl ProgramAnalyzer {
         }
         let name: String;
         match &*dector.direct_dector {
-            Direct_Declarator::Identifier(ident) => {
+            Identifier(ident) => {
                 name = ident.name.clone();
             }
-            Direct_Declarator::Paren_Enclosed_Declarator(inner_dector) => {
+            Paren_Enclosed_Declarator(inner_dector) => {
                 (cur_type, name) = self.resolve_declarator(attribute, &cur_type, &inner_dector);
             }
         }
@@ -1801,69 +1821,57 @@ impl ProgramAnalyzer {
                 let pointer_arithmatic_expr = gen_binary_expr(base_position, index, OP::Plus);
                 return gen_deref_expr(pointer_arithmatic_expr);
             },
-            FunCall(ident, args) => {
-                match &ident.content {
-                    Ident(name) => {
-                        // @Incomplete: GCC lets you to call a undeclared function,
-                        // linker reports the error if function name doesn't exist.
-                        if let Some(obj) = self.scope_manager.resolve_object(name) {
-                            let obj_ty = obj.ty.clone();
-                            if let Func{return_type, param_types, is_variadic} = obj_ty {
-                                let ty = *return_type;
-                                let ident = self.analyze_expr(ident);
-                                let mut casted_analyzed_args = Vec::new();
+            FunCall(func_ref, args) => {
+                // @Incomplete: GCC lets you to call a undeclared function,
+                // linker reports the error if function name doesn't exist.
+                let mut analyzed_func_ref = self.analyze_expr(func_ref);
+                if let Pointer_To(base_type) = analyzed_func_ref.ty {
+                    analyzed_func_ref.ty = *base_type.clone();
 
-                                // In C, `f()` is an old-style declaration with
-                                // unspecified parameters, so calls may supply
-                                // arguments even though no parameter types are
-                                // recorded here.
-                                let has_unspecified_params = param_types.is_empty();
-                                if args.len() > param_types.len() && !is_variadic && !has_unspecified_params {
-                                    report_semantic_error(span, "Too many arguments to call this function.");
-                                }
-                                if args.len() < param_types.len() {
-                                    report_semantic_error(span, "Too few arguments to call this function.");
-                                }
-                                for arg_index in 0..args.len() {
-                                    let arg = &args[arg_index];
-                                    let mut analyzed_arg = self.analyze_expr(arg);
-                                    if arg_index < param_types.len() {
-                                        let param_type = &param_types[arg_index];
-                                        if matches!(param_type, Type::Struct(..) | Type::Union(..) | Type::Tag(..)) {
-                                            report_semantic_error(span, "passing struct or union is not supported yet");
-                                        }
-                                        analyzed_arg = cast(analyzed_arg, param_type);
-                                        casted_analyzed_args.push(analyzed_arg);
-                                    } else if is_variadic || has_unspecified_params {
-                                        if analyzed_arg.ty == Float {
-                                            analyzed_arg = cast(analyzed_arg, &Double);
-                                        }
-                                        casted_analyzed_args.push(analyzed_arg);
-                                    } else {
-                                        report_semantic_error(span, "Compiler bug: Too many arguments error should be reported earlier.");
-                                    }
+                }
 
-                                }
-                                let content = ExprType::FunCall(Box::new(ident), casted_analyzed_args);
-                                ir::Expr {content, ty, span}
-                            } else {
-                                let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &obj_ty);
-                                report_semantic_error(ident.span, &error_message);
-                                exit(1);
+                let mut func_ref_ty = analyzed_func_ref.ty.clone();
+                if let Func{return_type, param_types, is_variadic} = func_ref_ty {
+                    let ty = *return_type;
+                    let mut casted_analyzed_args = Vec::new();
+
+                    // In C, `f()` is an old-style declaration with
+                    // unspecified parameters, so calls may supply
+                    // arguments even though no parameter types are
+                    // recorded here.
+                    let has_unspecified_params = param_types.is_empty();
+                    if args.len() > param_types.len() && !is_variadic && !has_unspecified_params {
+                        report_semantic_error(span, "Too many arguments to call this function.");
+                    }
+                    if args.len() < param_types.len() {
+                        report_semantic_error(span, "Too few arguments to call this function.");
+                    }
+                    for arg_index in 0..args.len() {
+                        let arg = &args[arg_index];
+                        let mut analyzed_arg = self.analyze_expr(arg);
+                        if arg_index < param_types.len() {
+                            let param_type = &param_types[arg_index];
+                            if matches!(param_type, Type::Struct(..) | Type::Union(..) | Type::Tag(..)) {
+                                report_semantic_error(span, "passing struct or union is not supported yet");
                             }
+                            analyzed_arg = cast(analyzed_arg, param_type);
+                            casted_analyzed_args.push(analyzed_arg);
+                        } else if is_variadic || has_unspecified_params {
+                            if analyzed_arg.ty == Float {
+                                analyzed_arg = cast(analyzed_arg, &Double);
+                            }
+                            casted_analyzed_args.push(analyzed_arg);
                         } else {
-                            if self.scope_manager.contains_symbol(name) {
-                                report_semantic_error(ident.span, "This symbol is not a function name!");
-                            } else {
-                                report_semantic_error(ident.span, "This is an unknown symbol");
-                            }
-                            exit(1);
+                            report_semantic_error(span, "Compiler bug: Too many arguments error should be reported earlier.");
                         }
+
                     }
-                    _ => {
-                        report_semantic_error(ident.span, "currently only support function name as call reference");
-                        exit(1);
-                    }
+                    let content = ExprType::FunCall(Box::new(analyzed_func_ref), casted_analyzed_args);
+                    ir::Expr {content, ty, span}
+                } else {
+                    let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &func_ref_ty);
+                    report_semantic_error(func_ref.span, &error_message);
+                    exit(1);
                 }
             }
             // @Temp: We only consider compile time sizeof for now
@@ -2077,7 +2085,13 @@ fn can_assign_expr(left_type: &Type, right_expr: &ir::Expr) -> bool {
     if can_assign(left_type, &right_expr.ty) {
         return true;
     }
-    return matches!(left_type, Pointer_To(..)) && is_null_pointer_constant(right_expr);
+    if matches!(left_type, Pointer_To(..)) {
+        if is_null_pointer_constant(right_expr) || matches!(right_expr.ty, Func{..}) {
+            return true;
+        }
+    }
+    return false;
+    // return matches!(left_type, Pointer_To(..)) && is_null_pointer_constant(right_expr);
 }
 
 fn is_null_pointer_constant(expr: &ir::Expr) -> bool {

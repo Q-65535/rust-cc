@@ -114,6 +114,8 @@ test-stage2: $(STAGE2_TESTS)
 	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
 	test/driver.sh ./stage2/chibicc chibicc
 
+test-stage2-compile: stage2/chibicc
+
 # These are command names, not files to produce, so always run them even if a
 # file of the same name happens to exist in the directory.
 .PHONY: build rebuild test test-all test-stage2 clean

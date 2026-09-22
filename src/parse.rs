@@ -203,15 +203,15 @@ pub struct Declarator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Identifier {
-    pub name: String,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum Direct_Declarator {
     Identifier(Identifier),
     Paren_Enclosed_Declarator(Declarator),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Identifier {
+    pub name: String,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
