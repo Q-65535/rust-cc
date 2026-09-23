@@ -340,7 +340,7 @@ impl Generator {
         //emit!("  .loc 1 {}", expr.span.get_start_line());
         let content = &expr.content;
         match content {
-            Integer(n) => emit!("  mov ${}, %rax", n),
+            Integer_Const(n) => emit!("  mov ${}, %rax", n),
             ExprType::Float_Const(f) => {
                 emit!("  mov ${}, %eax  # float {}", f.to_bits(), f);
                 emit!("  movq %rax, %xmm0");
@@ -572,7 +572,7 @@ impl Generator {
                 self.block_gen(stmts);
                 self.expr_gen(expr);
             }
-            FunCall(func_ref, args) => {
+            FuncCall(func_ref, args) => {
                 // Generate all the args and put them temorary on stack.
                 for arg in args.into_iter().rev() {
                     self.expr_gen(arg);

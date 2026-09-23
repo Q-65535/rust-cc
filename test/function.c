@@ -143,7 +143,10 @@ int (*fnptr(int (*fn)(int n, ...)))(int, ...) {
   return fn;
 }
 
+int param_decay2(int x()) { return x(); }
+
 int main() {
+  ASSERT(3, param_decay2(ret3));
   ASSERT(8, add_double5(1, 5, 2.0));
   ASSERT(9, add_double5(1.5, 5.5, 2));
 

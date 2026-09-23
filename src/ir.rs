@@ -31,7 +31,7 @@ pub struct Case {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Integer(i64),
+    Integer_Const(i64),
     Float_Const(f32),
     Double_Const(f64),
     Binary(Box<Expr>, Box<Expr>, OP),
@@ -46,7 +46,7 @@ pub enum ExprType {
     Object(Obj),
     ArrayIndexing(Box<Expr>, Vec<Expr>),
     CommaExpression(Box<Expr>, Box<Expr>),
-    FunCall(Box<Expr>, Vec<Expr>),
+    FuncCall(Box<Expr>, Vec<Expr>),
     StmtExpr(Vec<StmtType>),
     Cast(Box<Expr>, Type),
     CompLit(Vec<StmtType>, Box<Expr>),

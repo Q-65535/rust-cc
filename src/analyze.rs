@@ -412,16 +412,16 @@ impl ProgramAnalyzer {
         // Record all symbols at first pass.
         for unit in &mut program.translation_units {
             match unit {
-                parse::TranslationUnit::FunctionDef(fun) => {
-                    let (base_type, mut symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
+                parse::TranslationUnit::FuncDef(func) => {
+                    let (base_type, mut symbol_attribute) = self.analyze_decl_specs(&func.specs);
 
-                    let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.dector);
+                    let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &func.dector);
                     if !self.defined_functions.insert(name.clone()) {
                         let err_info = format!("semantic error: function {} redefined", name);
-                        report_semantic_error(fun.dector.span, &err_info);
+                        report_semantic_error(func.dector.span, &err_info);
                     }
                     let object = create_global_obj_with_attribute(&name, &function_type, &symbol_attribute);
-                    self.register_global_object(object, fun.dector.span);
+                    self.register_global_object(object, func.dector.span);
                 }
                 parse::TranslationUnit::GlobalDecl(decl) => {
                     let mut batch_global_data_decls = self.analyze_global_decl(decl);
@@ -431,7 +431,7 @@ impl ProgramAnalyzer {
         }
         // Analyze function bodies at second pass.
         for unit in &mut program.translation_units {
-            if let parse::TranslationUnit::FunctionDef(fun) = unit {
+            if let parse::TranslationUnit::FuncDef(fun) = unit {
                 let afun = self.analyze_function(fun);
                 afuns.push(afun);
             }
@@ -453,9 +453,9 @@ impl ProgramAnalyzer {
             self.unique_stmt_labels_map_in_cur_function.insert(label.clone(), unique_label);
         }
 
-        let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.return_type_specifier);
+        let (base_type, symbol_attribute) = self.analyze_decl_specs(&fun.specs);
         let (final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &fun.dector);
-        if let Func{return_type, param_types, ..} = final_type {
+        if let Func{return_type, ..} = final_type {
             self.current_function_return_type = *return_type;
         } else {
             let err_info = format!("compiler bug: we are analyzing a function definition,
@@ -468,7 +468,8 @@ impl ProgramAnalyzer {
         self.scope_manager.enter_new_scope();
         let mut var_area = None;
         let mut analyzed_params: Vec<Obj> = Vec::new();
-        let (params, is_variadic) = self.find_fun_params(&fun.dector);
+        let (params, is_variadic) = retrive_fun_params(&fun.dector);
+
         for param in &params {
             let p = self.analyze_param(param);
             analyzed_params.push(p);
@@ -488,21 +489,6 @@ impl ProgramAnalyzer {
             stmts, stack_size,
             is_static: symbol_attribute.is_static,
             var_area,
-        }
-    }
-
-    pub fn find_fun_params(&self, dector: &Declarator) -> (Vec<Func_Parameter>, bool) {
-        if let Paren_Enclosed_Declarator(inner_dector) = &*dector.direct_dector {
-            return self.find_fun_params(&inner_dector);
-        } else {
-            if let FunParam{params, is_variadic}  = &dector.suffix.clone().unwrap() {
-                return (params.clone(), *is_variadic);
-            } else {
-                let err_info = format!("compiler bug: the suffix of the declarator of
-                    function definition is not param-list.");
-                report_semantic_error(dector.span, &err_info);
-                exit(1);
-            }
         }
     }
 
@@ -738,7 +724,7 @@ impl ProgramAnalyzer {
                     return array_of(base_type, final_len);
                 }
             },
-            FunParam{params, is_variadic} => {
+            FuncParam{params, is_variadic} => {
                 let return_type = base_type.clone();
                 let mut param_types = Vec::new();
                 let mut param_final_type: Type;
@@ -759,6 +745,10 @@ impl ProgramAnalyzer {
                     // Function accepts parameters with array type, but treat it as a pointer.
                     if let ArrayOf(ref element_ty, _) = param_final_type {
                         param_final_type = pointer_to(&element_ty);
+                    }
+                    // Function accepts function type, but treat it as a function pointer.
+                    if let Func{..} = param_final_type {
+                        param_final_type = pointer_to(&param_final_type);
                     }
                     param_types.push(param_final_type);
                 }
@@ -874,6 +864,10 @@ impl ProgramAnalyzer {
         // Function accepts parameters with array type, but treat it as a pointer.
         if let ArrayOf(ref element_ty, _) = final_type {
             final_type = pointer_to(&element_ty);
+        }
+        // Function accepts function type, but treat it as a function pointer.
+        if let Func{..} = final_type {
+            final_type = pointer_to(&final_type);
         }
         
         if self.scope_manager.contains_symbol_at_current_scope(&name) {
@@ -1822,7 +1816,7 @@ impl ProgramAnalyzer {
                 let pointer_arithmatic_expr = gen_binary_expr(base_position, index, OP::Plus);
                 return gen_deref_expr(pointer_arithmatic_expr);
             },
-            FunCall(func_ref, args) => {
+            FuncCall(func_ref, args) => {
                 // @Incomplete: GCC lets you to call a undeclared function,
                 // linker reports the error if function name doesn't exist.
                 let analyzed_func_ref = self.analyze_expr(func_ref);
@@ -1878,7 +1872,7 @@ impl ProgramAnalyzer {
                         }
 
                     }
-                    let content = ExprType::FunCall(Box::new(analyzed_func_ref), casted_analyzed_args);
+                    let content = ExprType::FuncCall(Box::new(analyzed_func_ref), casted_analyzed_args);
                     ir::Expr {content, ty, span}
                 } else {
                     let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &target_func_ty);
@@ -1891,28 +1885,28 @@ impl ProgramAnalyzer {
                 let content = self.analyze_expr(expr_content);
                 let size = sizeof(&content.ty);
                 let ty = Type::ULong;
-                let content = ir::ExprType::Integer(size.try_into().unwrap());
+                let content = ir::ExprType::Integer_Const(size.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Sizeof_Type_Name(type_name) => {
                 let the_type = self.resolve_type_name(type_name);
                 let size = sizeof(&the_type);
                 let ty = Type::ULong;
-                let content = ir::ExprType::Integer(size.try_into().unwrap());
+                let content = ir::ExprType::Integer_Const(size.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Alignof_Expr(expr_content) => {
                 let content = self.analyze_expr(expr_content);
                 let align = content.ty.align();
                 let ty = Type::ULong;
-                let content = ir::ExprType::Integer(align.try_into().unwrap());
+                let content = ir::ExprType::Integer_Const(align.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Alignof_Type_Name(type_name) => {
                 let the_type = self.resolve_type_name(type_name);
                 let align = the_type.align();
                 let ty = Type::ULong;
-                let content = ir::ExprType::Integer(align.try_into().unwrap());
+                let content = ir::ExprType::Integer_Const(align.try_into().unwrap());
                 ir::Expr {content, ty, span}
             }
             Cast(to_be_casted_expr, type_name) => {
@@ -2055,8 +2049,14 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
         report_semantic_error(span, "the cast-to type must not be array type!");
     }
     if !from_type.is_scalar() || !to_type.is_scalar() {
-        let error_info = format!("Oops! If cast-to type is not void, both cast-from and cast-to type must be scalar
-        when doing type casting! Don't blame me, ChatGPT told me that.");
+        let error_info = format!("Oops! If cast-to type is not void, both cast-from and \
+        cast-to type must be scalar when doing type casting! Don't blame me, ChatGPT told \
+        me that.
+        from type is:
+        {:#?}
+        to type is:
+        {:#?}", from_type, to_type);
+        
         report_semantic_error(span, &error_info);
         exit(1);
     } else {
@@ -2118,7 +2118,7 @@ fn is_null_pointer_constant(expr: &ir::Expr) -> bool {
 fn can_be_lvalue(expr: &ir::Expr) -> bool {
     use ir::ExprType;
     match &expr.content {
-        ExprType::FunCall(_, _) => false,
+        ExprType::FuncCall(_, _) => false,
         ExprType::Object(_) => {
             if let ArrayOf(_, _) = expr.ty {
                 false
@@ -2167,7 +2167,7 @@ fn gen_double_expr(number: f64, span: Span) -> ir::Expr {
 
 // @Rename: gen_integer
 fn gen_num_expr(number: i64, span: Span) -> ir::Expr {
-        let content = ir::ExprType::Integer(number);
+        let content = ir::ExprType::Integer_Const(number);
         let ty = if number > i32::MAX as i64 {
             Type::Long
         } else {
@@ -2177,7 +2177,7 @@ fn gen_num_expr(number: i64, span: Span) -> ir::Expr {
 }
 
 fn gen_num_expr_with_specified_type(number: i64, ty: &Integer_Const_Type, span: Span) -> ir::Expr {
-        let content = ir::ExprType::Integer(number);
+        let content = ir::ExprType::Integer_Const(number);
         let ty = match ty {
             tInt   => Int,
             tLong  => Long,
@@ -2190,7 +2190,7 @@ fn gen_num_expr_with_specified_type(number: i64, ty: &Integer_Const_Type, span: 
 fn scale_expr(expr: ir::Expr, factor: usize, op: ir::OP) -> ir::Expr {
     // expr for scale num
     let span = expr.span;
-    let factor_expr_content = ir::ExprType::Integer(factor.try_into().unwrap());
+    let factor_expr_content = ir::ExprType::Integer_Const(factor.try_into().unwrap());
     let factor_expr = ir::Expr {
         content: factor_expr_content,
         ty: Type::Long,
@@ -2300,6 +2300,13 @@ fn get_common_type(lt: &Type, rt: &Type) -> Type {
         return Float;
     }
 
+    if lt.is_func() {
+        return pointer_to(&lt);
+    }
+
+    if rt.is_func() {
+        return pointer_to(&rt);
+    }
 
     if lt.size() < 4 {
         lt = Int;
@@ -2471,7 +2478,7 @@ fn eval_integer_label_const(expr: &ir::Expr) -> (Option<String>, i64) {
             let f_num = eval_fp_const(expr);
             return (None, (f_num as i64));
         }
-        ir::ExprType::Integer(n) => (None, (*n as i64)),
+        ir::ExprType::Integer_Const(n) => (None, (*n as i64)),
         ir::ExprType::Neg(expr) => {
             let (label, num) = eval_integer_label_const(&expr);
             return (label, -num);
@@ -3116,3 +3123,19 @@ fn data_bytes_count(init_data: &Vec<Data_Directive>) -> usize {
     }
     return total_bytes_count;
 }
+
+pub fn retrive_fun_params(dector: &Declarator) -> (Vec<Func_Parameter>, bool) {
+    if let Paren_Enclosed_Declarator(inner_dector) = &*dector.direct_dector {
+        return retrive_fun_params(&inner_dector);
+    } else {
+        if let FuncParam{params, is_variadic}  = &dector.suffix.clone().unwrap() {
+            return (params.clone(), *is_variadic);
+        } else {
+            let err_info = format!("compiler bug: the suffix of the declarator of
+                function definition is not param-list.");
+            report_semantic_error(dector.span, &err_info);
+            exit(1);
+        }
+    }
+}
+

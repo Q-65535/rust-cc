@@ -50,14 +50,14 @@ use BlockItem::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorSuffix {
     ArrayLen(Option<Box<Expr>>, Option<Box<DeclaratorSuffix>>),
-    FunParam{params: Vec<Func_Parameter>, is_variadic: bool},
+    FuncParam{params: Vec<Func_Parameter>, is_variadic: bool},
 }
 use DeclaratorSuffix::*;
 
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TranslationUnit {
-    FunctionDef(Function),
+    FuncDef(Function),
     GlobalDecl(Declaration),
 }
 use TranslationUnit::*;
@@ -69,7 +69,7 @@ pub struct Program {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
-    pub return_type_specifier: Vec<Decl_Spec>,
+    pub specs: Vec<Decl_Spec>,
     pub dector: Declarator,
     pub items: Vec<BlockItem>,
     pub stmt_labels: Vec<String>,
@@ -235,7 +235,7 @@ pub enum ExprType {
     ArrayIndexing(Box<Expr>, Box<Expr>),
     RequestStructMember(Box<Expr>, String),
     CommaExpression(Box<Expr>, Box<Expr>),
-    FunCall(Box<Expr>, Vec<Expr>),
+    FuncCall(Box<Expr>, Vec<Expr>),
     Sizeof_Expr(Box<Expr>),
     Sizeof_Type_Name(Type_Name),
     Alignof_Expr(Box<Expr>),
@@ -525,7 +525,7 @@ impl Parser {
                             }
                             continue;
                         },
-                        Ok(fun) => translation_units.push(FunctionDef(fun)),
+                        Ok(fun) => translation_units.push(FuncDef(fun)),
                     }
                 }
                 Ok(decl) => {
@@ -1019,7 +1019,7 @@ impl Parser {
                 }
 
                 self.expect(&RParen)?;
-                Ok(FunParam{params, is_variadic})
+                Ok(FuncParam{params, is_variadic})
             },
             _ => {
                 Err(error_token(self.cur_token(), "Can't parse declarator suffix here!"))
@@ -1648,7 +1648,7 @@ impl Parser {
         let args_list = self.parse_args()?;
         let end_index = self.previous_token().span.end_index;
         let span = Span {start_index, end_index};
-        let content = FunCall(Box::new(lhs), args_list);
+        let content = FuncCall(Box::new(lhs), args_list);
         Ok(Expr::new(content, span))
     }
 
@@ -1692,14 +1692,14 @@ impl Parser {
 
     fn parse_fun_def(&mut self) -> Result<Function, String> {
         self.stmt_labels.clear();
-        let return_type_specifier = self.parse_decl_specs()?;
+        let specs = self.parse_decl_specs()?;
         let dector = self.parse_declarator()?;
-        if let Some(FunParam{..}) = &dector.suffix {
+        if let Some(FuncParam{..}) = &dector.suffix {
             if !self.at(&LBrace) {
                 return Err(error_token(self.cur_token(), "expected function body"));
             }
             let items = self.parse_block();
-            Ok(Function{return_type_specifier, dector, items, stmt_labels: self.stmt_labels.clone()})
+            Ok(Function{specs, dector, items, stmt_labels: self.stmt_labels.clone()})
         } else {
             Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
