@@ -12,4 +12,3 @@
 gcc_tester.c
 *.exe
 *.i
-test/mytest.c

@@ -561,7 +561,7 @@ impl ProgramAnalyzer {
 
             if let Type::Func{..} = final_type {
                 if !self.defined_functions.contains(&name) {
-                    // All functions, if not defined, are implicitly extern by default.
+                    // All functions decls, if not defined, are implicitly extern by default.
                     object.is_extern = true;
                     self.register_global_object(object.clone(), cur_dector.span);
                 }

@@ -205,20 +205,20 @@ impl Generator {
         let mut fp_reg_index = 0;
         let mut gp_reg_index = 0;
         for param in fun.params {
-            let concrete_param_offset = self.get_absolute_offset(&param);
+            let absolute_offset = self.get_absolute_offset(&param);
             if param.ty.is_fp() {
                 if param.ty == Float {
-                    emit!("  movss %xmm{}, {}(%rbp)\n", fp_reg_index,  concrete_param_offset);
+                    emit!("  movss %xmm{}, {}(%rbp)\n", fp_reg_index,  absolute_offset);
                 } else if param.ty == Double {
-                    emit!("  movsd %xmm{}, {}(%rbp)\n", fp_reg_index,  concrete_param_offset);
+                    emit!("  movsd %xmm{}, {}(%rbp)\n", fp_reg_index,  absolute_offset);
                 }
                 fp_reg_index += 1;
             } else {
                 match sizeof(&param.ty) {
-                    1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[gp_reg_index], concrete_param_offset),
-                    2 => emit!("  mov {}, {}(%rbp)\n", self.argregs16[gp_reg_index], concrete_param_offset),
-                    4 => emit!("  mov {}, {}(%rbp)\n", self.argregs32[gp_reg_index], concrete_param_offset),
-                    _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[gp_reg_index], concrete_param_offset),
+                    1 => emit!("  mov {}, {}(%rbp)\n", self.argregs8[gp_reg_index], absolute_offset),
+                    2 => emit!("  mov {}, {}(%rbp)\n", self.argregs16[gp_reg_index], absolute_offset),
+                    4 => emit!("  mov {}, {}(%rbp)\n", self.argregs32[gp_reg_index], absolute_offset),
+                    _ => emit!("  mov {}, {}(%rbp)\n", self.argregs64[gp_reg_index], absolute_offset),
                 }
                 gp_reg_index += 1;
             }
@@ -663,9 +663,10 @@ impl Generator {
     fn gen_addr(&mut self, expr: &Expr) {
         match &expr.content {
             Object(obj) => {
-                if !obj.is_global && !obj.is_extern { // local variable
-                    let concrete_offset = self.get_absolute_offset(&obj);
-                    emit!("  lea {}(%rbp), %rax", concrete_offset);
+                let is_local = !obj.is_global && !obj.is_extern;
+                if is_local {
+                    let absolute_offset = self.get_absolute_offset(&obj);
+                    emit!("  lea {}(%rbp), %rax", absolute_offset);
                     return;
                 }
                 if matches!(obj.ty, Func{..}) {
