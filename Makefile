@@ -1,7 +1,7 @@
 # ============================================================================
 # rust-cc test harness — mirrors chibicc's .c-file test suite.
 #
-# For each test:  test/<name>.c --(preprocess)--> rust-cc --(asm)--> gcc link
+# For each test:  test/<name>.c --(preprocess)--> rust-cc --(object)--> gcc link
 #                 --> test/<name>.exe --> run it; a non-zero exit = failure.
 # ============================================================================
 
@@ -11,7 +11,7 @@ RUST_CC=RUST_BACKTRACE=1 ./target/debug/rust-cc
 # chibicc checkout used by the stage2 bootstrap test.
 CHIBICC_DIR?=../chibicc
 CHIBICC_SRCS=$(notdir $(wildcard $(CHIBICC_DIR)/*.c))
-STAGE2_ASMS=$(CHIBICC_SRCS:%.c=stage2/%.s)
+STAGE2_OBJS=$(CHIBICC_SRCS:%.c=stage2/%.o)
 CHIBICC_TEST_NAMES=$(basename $(notdir $(wildcard $(CHIBICC_DIR)/test/*.c)))
 STAGE2_TESTS=$(addprefix stage2/test/,$(addsuffix .exe,$(CHIBICC_TEST_NAMES)))
 
@@ -36,42 +36,40 @@ rebuild:
 # Depends on `build` (so the compiler is always fresh) and the matching .c.
 #
 # Step 1 (line below): preprocess the .c with the system compiler ($(CC)) and
-#   pipe the result into rust-cc to produce assembly.
+#   pipe the result into rust-cc to produce an object file.
 #     -E preprocess only    -P no "# line" markers
 #     -C keep comments      -o- write to stdout
 #   This expands #include "test.h" and ASSERT(x,y) into assert(x, y, "y").
-#   rust-cc reads source from stdin ("-") and writes asm to test/<name>.s.
-# Step 2: assemble the .s and link it with test/common (which defines
+#   rust-cc reads source from stdin ("-") and writes an object to test/<name>.o.
+# Step 2: link the object with test/common (which defines
 #   assert()). -xc forces gcc to treat the extension-less `common` file as C.
 test/%.exe: build test/%.c
-	$(CC) -o- -E -P -C test/$*.c | $(RUST_CC) -o test/$*.s -
-	$(CC) -o $@ test/$*.s -xc test/common
+	$(CC) -o- -E -P -C test/$*.c | $(RUST_CC) -c -o test/$*.o -
+	$(CC) -o $@ test/$*.o -xc test/common
 
 # For testing a single file:
 # test/struct.exe: build test/struct.c
-# 	$(CC) -o- -E -P -C test/struct.c | $(RUST_CC) -o test/struct.s -
-# 	$(CC) -o test/struct.exe test/struct.s -xc test/common
+# 	$(CC) -o- -E -P -C test/struct.c | $(RUST_CC) -c -o test/struct.o -
+# 	$(CC) -o test/struct.exe test/struct.o -xc test/common
 
 single_test:
 	cargo build
-	$(CC) -E -P -C test/initializer.c -o test/initializer.i
-	$(RUST_CC) -o test/initializer.s test/initializer.i
-	$(CC) -o initializer.exe test/initializer.s -xc test/common
+	$(CC) -o- -E -P -C test/initializer.c | $(RUST_CC) -c -o test/initializer.o -
+	$(CC) -o initializer.exe test/initializer.o -xc test/common
 	echo initializer.exe; ./initializer.exe || exit 1; echo;
 
 mytest:
 	cargo build
-	$(CC) -E -P -C test/mytest.c -o test/mytest.i
-	$(RUST_CC) -o test/mytest.s test/mytest.i
-	$(CC) -o mytest.exe test/mytest.s -xc test/common
+	$(CC) -o- -E -P -C test/mytest.c | $(RUST_CC) -c -o test/mytest.o -
+	$(CC) -o mytest.exe test/mytest.o -xc test/common
 	echo mytest.exe; ./mytest.exe || exit 1; echo;
 
 local_test:
-	rm -f test.s
+	rm -f test.o
 	rm -f test.exe
 	cargo build
-	$(RUST_CC) -o test.s test.c
-	gcc -o test.exe test.s
+	$(RUST_CC) -c -o test.o test.c
+	gcc -o test.exe test.o
 	./test.exe
 
 # `make test`: build every .exe (via the $(TESTS) prerequisites), run each,
@@ -82,14 +80,14 @@ old_test: $(TESTS)
 	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
 	test/driver.sh
 
-# `make clean`: remove cargo artifacts, generated .s/.exe, temp + backup files.
+# `make clean`: remove generated objects/assembly/executables and stage2 files.
 clean:
 	# cargo clean
-	rm -rf tmp* $(TESTS) test/*.s test/*.exe stage2
+	rm -rf tmp* $(TESTS) test/*.s test/*.o test/*.exe stage2
 	# find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
 
 clean_test:
-	rm -rf tmp* $(TESTS) test/*.s test/*.exe
+	rm -rf tmp* $(TESTS) test/*.s test/*.o test/*.exe
 	test
 
 test: clean old_test
@@ -97,18 +95,18 @@ test: clean old_test
 test-all: test test-stage2
 
 # Stage 2: rust-cc compiles chibicc, then that chibicc compiles its own tests.
-stage2/chibicc: $(STAGE2_ASMS)
+stage2/chibicc: $(STAGE2_OBJS)
 	$(CC) -o $@ $^
 
-stage2/%.s: build self.py $(CHIBICC_DIR)/chibicc.h $(CHIBICC_DIR)/%.c
+stage2/%.o: build self.py $(CHIBICC_DIR)/chibicc.h $(CHIBICC_DIR)/%.c
 	mkdir -p stage2
 	python3 self.py $(CHIBICC_DIR)/chibicc.h $(CHIBICC_DIR)/$*.c > stage2/$*.c
-	$(RUST_CC) -o $@ stage2/$*.c
+	$(RUST_CC) -c -o $@ stage2/$*.c
 
 stage2/test/%.exe: stage2/chibicc $(CHIBICC_DIR)/test/%.c
 	mkdir -p stage2/test
-	$(CC) -o- -E -P -C $(CHIBICC_DIR)/test/$*.c | ./stage2/chibicc -o stage2/test/$*.s -
-	$(CC) -o $@ stage2/test/$*.s -xc $(CHIBICC_DIR)/test/common
+	$(CC) -o- -E -P -C $(CHIBICC_DIR)/test/$*.c | ./stage2/chibicc -c -o stage2/test/$*.o -
+	$(CC) -o $@ stage2/test/$*.o -xc $(CHIBICC_DIR)/test/common
 
 test-stage2: $(STAGE2_TESTS)
 	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
@@ -118,6 +116,6 @@ test-stage2-compile: stage2/chibicc
 
 # These are command names, not files to produce, so always run them even if a
 # file of the same name happens to exist in the directory.
-.PHONY: build rebuild test test-all test-stage2 clean
+.PHONY: build rebuild test test-all test-stage2 test-stage2-compile clean
 
 #   gcc -E -P -C test/mytest.c -o test/mytest.i

@@ -1,74 +1,29 @@
- #![allow(warnings)]
-pub mod parse;
-pub mod lex;
+#![allow(warnings)]
 pub mod analyze;
 pub mod codegen;
 pub mod ir;
+pub mod lex;
+pub mod parse;
 // pub mod pretty;
 pub mod common;
-use std::{io::{self, Read, Write}, process::exit, env, fs};
-use colored::*;
+pub mod driver;
+use crate::analyze::*;
+use crate::codegen::*;
 use crate::lex::*;
 use crate::parse::*;
-use crate::analyze::*;
-use crate::TokenKind::*;
 use crate::ExprType::*;
-use crate::codegen::*;
+use crate::TokenKind::*;
+use colored::*;
 use std::sync::Mutex;
+use std::{
+    env, fs,
+    io::{self, Read},
+    process::exit,
+};
 
 static SRC: Mutex<String> = Mutex::new(String::new());
 static INPUT_PATH: Mutex<String> = Mutex::new(String::new());
 static LINE_STARTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-
-fn usage(status: i32) -> ! {
-    eprintln!("rust-cc [ -o <path> ] <file>");
-    exit(status);
-}
-
-fn parse_args(args: &[String]) -> (Option<String>, String) {
-    let mut opt_o: Option<String> = None;
-    let mut input_path: Option<String> = None;
-
-    let mut i = 1;
-    while i < args.len() {
-        let arg = &args[i];
-
-        if arg == "--help" {
-            usage(0);
-        }
-
-        if arg == "-o" {
-            i += 1;
-            if i >= args.len() {
-                usage(1);
-            }
-            opt_o = Some(args[i].clone());
-            i += 1;
-            continue;
-        }
-
-        if let Some(rest) = arg.strip_prefix("-o") {
-            opt_o = Some(rest.to_string());
-            i += 1;
-            continue;
-        }
-
-        if arg.starts_with('-') && arg.len() > 1 {
-            eprintln!("unknown argument: {}", arg);
-            exit(1);
-        }
-        input_path = Some(arg.clone());
-        i += 1;
-    }
-
-    match input_path {
-        Some(path) => (opt_o, path),
-        None => {
-            eprintln!("no input files");
-            exit(1);
-        }
-    }
-}
 
 fn build_line_starts(src: &str) -> Vec<usize> {
     let mut starts = vec![0];
@@ -80,14 +35,14 @@ fn build_line_starts(src: &str) -> Vec<usize> {
     starts
 }
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let (opt_o, path) = parse_args(&args);
-    *INPUT_PATH.lock().unwrap() = path.clone();
+fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
+    *INPUT_PATH.lock().unwrap() = path.to_string();
 
     let input = if path == "-" {
         let mut buf = String::new();
-        io::stdin().read_to_string(&mut buf).expect("failed to read from stdin");
+        io::stdin()
+            .read_to_string(&mut buf)
+            .expect("failed to read from stdin");
         buf
     } else {
         fs::read_to_string(&path).unwrap_or_else(|err| {
@@ -121,12 +76,38 @@ fn main() {
         let mut analyzer = ProgramAnalyzer::new();
         let analyzed_program = analyzer.analyze(program);
         // codegen
-        set_output(&opt_o);
+        set_output(&output);
         let mut gen = Generator::new();
         gen.gen_code(analyzed_program);
+        Ok(())
     } else {
         for e in syntax_errors {
-            println!("{}", e);
+            eprintln!("{}", e);
         }
+        Err(())
+    }
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    let options = driver::parse_args(&args).unwrap_or_else(|err| {
+        eprintln!("{err}");
+        driver::usage(&args[0]);
+        exit(1);
+    });
+
+    if options.cc1 {
+        let path = options
+            .cc1_input
+            .as_deref()
+            .or_else(|| options.inputs.first().map(String::as_str))
+            .unwrap();
+        let output = options.cc1_output.clone().or(options.output.clone());
+        if compile(path, output).is_err() {
+            exit(1);
+        }
+    } else if let Err(err) = driver::run(&options, &args) {
+        eprintln!("{err}");
+        exit(1);
     }
 }
