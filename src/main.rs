@@ -97,11 +97,12 @@ fn main() {
     });
 
     if options.cc1 {
-        let path = options
-            .cc1_input
-            .as_deref()
-            .or_else(|| options.inputs.first().map(String::as_str))
-            .unwrap();
+        let path: &str;
+        if let Some(input) = options.cc1_input.as_deref() {
+            path = input;
+        } else {
+            path = options.inputs.first().unwrap().as_str();
+        }
         let output = options.cc1_output.clone().or(options.output.clone());
         if compile(path, output).is_err() {
             exit(1);
