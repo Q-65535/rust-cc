@@ -12,12 +12,7 @@ use Struct_Or_Union::*;
 use DeclaratorSuffix::*;
 use Direct_Declarator::*;
 use StmtType::*;
-use TokenKind::{Plus, Minus, Mul, Div, Modulus, PlusAssignment, ModulusAssignment,
-    MinusAssignment, MulAssignment, DivAssignment, Eq, Neq, LT, LE,
-    GT, GE, Ampersand, BitXOR, BitOR, SHL, SHR, BitAndAssignment, BitXORAssignment, BitORAssignment,
-    LOGAND, LOGOR,
-    SHLAssignment, SHRAssignment,
-};
+use TokenKind::Punct;
 use BlockItem::*;
 use crate::SRC;
 use crate::common::{self, *};
@@ -1629,16 +1624,16 @@ impl ProgramAnalyzer {
                 let lhs = self.analyze_expr(lhs);
                 let rhs = self.analyze_expr(rhs);
                 match tokenKind {
-                    PlusAssignment    => self.to_assign(lhs, rhs, OP::Plus),
-                    MinusAssignment   => self.to_assign(lhs, rhs, OP::Minus),
-                    MulAssignment     => self.to_assign(lhs, rhs, OP::Mul),
-                    DivAssignment     => self.to_assign(lhs, rhs, OP::Div),
-                    ModulusAssignment => self.to_assign(lhs, rhs, OP::Modulus),
-                    BitAndAssignment  => self.to_assign(lhs, rhs, OP::BitAnd),
-                    BitXORAssignment  => self.to_assign(lhs, rhs, OP::BitXOR),
-                    BitORAssignment   => self.to_assign(lhs, rhs, OP::BitOR),
-                    SHLAssignment     => self.to_assign(lhs, rhs, OP::SHL),
-                    SHRAssignment     => self.to_assign(lhs, rhs, OP::SHR),
+                    Punct("+=")  => self.to_assign(lhs, rhs, OP::Plus),
+                    Punct("-=")  => self.to_assign(lhs, rhs, OP::Minus),
+                    Punct("*=")  => self.to_assign(lhs, rhs, OP::Mul),
+                    Punct("/=")  => self.to_assign(lhs, rhs, OP::Div),
+                    Punct("%=")  => self.to_assign(lhs, rhs, OP::Modulus),
+                    Punct("&=")  => self.to_assign(lhs, rhs, OP::BitAnd),
+                    Punct("^=")  => self.to_assign(lhs, rhs, OP::BitXOR),
+                    Punct("|=")  => self.to_assign(lhs, rhs, OP::BitOR),
+                    Punct("<<=") => self.to_assign(lhs, rhs, OP::SHL),
+                    Punct(">>=") => self.to_assign(lhs, rhs, OP::SHR),
                     _ => {
                         let op = tokenkind_to_op(tokenKind);
                         gen_binary_expr(lhs, rhs, op)
@@ -2395,24 +2390,24 @@ fn gen_addr_of_expr(expr: ir::Expr) -> ir::Expr {
 
 fn tokenkind_to_op(tokenkind: &TokenKind) -> ir::OP {
     match tokenkind {
-        Plus => OP::Plus,
-        Minus => OP::Minus,
-        Mul => OP::Mul,
-        Div => OP::Div,
-        Modulus => OP::Modulus,
-        Eq =>  OP::Eq,
-        Neq => OP::Neq,
-        LT =>  OP::LT,
-        LE =>  OP::LE,
-        GT =>  OP::GT,
-        GE =>  OP::GE,
-        Ampersand => OP::BitAnd,
-        BitXOR => OP::BitXOR,
-        BitOR => OP::BitOR,
-        LOGAND => OP::LOGAND,
-        LOGOR => OP::LOGOR,
-        SHL => OP::SHL,
-        SHR => OP::SHR,
+        Punct("+") => OP::Plus,
+        Punct("-") => OP::Minus,
+        Punct("*") => OP::Mul,
+        Punct("/") => OP::Div,
+        Punct("%") => OP::Modulus,
+        Punct("==") => OP::Eq,
+        Punct("!=") => OP::Neq,
+        Punct("<") => OP::LT,
+        Punct("<=") => OP::LE,
+        Punct(">") => OP::GT,
+        Punct(">=") => OP::GE,
+        Punct("&") => OP::BitAnd,
+        Punct("^") => OP::BitXOR,
+        Punct("|") => OP::BitOR,
+        Punct("&&") => OP::LOGAND,
+        Punct("||") => OP::LOGOR,
+        Punct("<<") => OP::SHL,
+        Punct(">>") => OP::SHR,
         _ => {
             println!("compiler bug: binary operator should not be other kinds other than the above ones.
             but we got {:?} as binary operator, this must be incorrectly handled in parse phase.", tokenkind);
@@ -3138,4 +3133,3 @@ pub fn retrive_fun_params(dector: &Declarator) -> (Vec<Func_Parameter>, bool) {
         }
     }
 }
-

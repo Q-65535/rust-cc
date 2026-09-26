@@ -291,23 +291,23 @@ fn get_associativity(p: Precedence) -> Associativity {
 fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
     use Precedence::*;
     return match token_kind {
-        LexComma => Comma,
-        LexAssignment | PlusAssignment | MinusAssignment |
-        MulAssignment | DivAssignment | ModulusAssignment |
-        BitAndAssignment | BitXORAssignment | BitORAssignment |
-        SHLAssignment | SHRAssignment => Assignment,
-        Ampersand => Bitwise_AND,
-        QuestionMark => Conditional,
-        BitXOR => Bitwise_XOR,
-        BitOR => Bitwise_OR,
-        LOGAND => Logical_AND,
-        LOGOR => Logical_OR,
-        SHL | SHR => Shift,
-        Eq | Neq => Equality,
-        LT | LE | GT | GE => Relational,
-        Plus | Minus => Additive,
-        Mul | Div | Modulus => Multiplicative,
-        Period | Arrow | LParen | LSquareBracket | PlusPlus | MinusMinus => Postfix,
+        Punct(",") => Comma,
+        Punct("=") | Punct("+=") | Punct("-=") |
+        Punct("*=") | Punct("/=") | Punct("%=") |
+        Punct("&=") | Punct("^=") | Punct("|=") |
+        Punct("<<=") | Punct(">>=") => Assignment,
+        Punct("&") => Bitwise_AND,
+        Punct("?") => Conditional,
+        Punct("^") => Bitwise_XOR,
+        Punct("|") => Bitwise_OR,
+        Punct("&&") => Logical_AND,
+        Punct("||") => Logical_OR,
+        Punct("<<") | Punct(">>") => Shift,
+        Punct("==") | Punct("!=") => Equality,
+        Punct("<") | Punct("<=") | Punct(">") | Punct(">=") => Relational,
+        Punct("+") | Punct("-") => Additive,
+        Punct("*") | Punct("/") | Punct("%") => Multiplicative,
+        Punct(".") | Punct("->") | Punct("(") | Punct("[") | Punct("++") | Punct("--") => Postfix,
 
         // Any other token that cannot be infix operator gets Lowest precedence.
         _ => Lowest,
@@ -489,11 +489,11 @@ impl Parser {
         }
         exit(1);
 
-        // while !matches!(self.cur_token().kind, Semicolon | RBrace | Eof) {
+        // while !matches!(self.cur_token().kind, Punct(";") | Punct("}") | Eof) {
         //     self.bump();
         // }
 
-        // if self.at(&Semicolon) {
+        // if self.at(&Punct(";")) {
         //     self.bump();
         // }
     }
@@ -520,7 +520,7 @@ impl Parser {
                         Err(error_message) => {
                             self.syntax_errors.push(error_message);
                             self.sync_parse_point();
-                            if self.at(&RBrace) || self.cur_index == start_index {
+                            if self.at(&Punct("}")) || self.cur_index == start_index {
                                 self.bump();
                             }
                             continue;
@@ -542,7 +542,7 @@ impl Parser {
         let decl_specs = self.parse_decl_specs()?;
         let is_typedef_declaration = decl_specs.iter().any(|spec| spec.content == Decl_Spec_Kind::Typedef);
 
-        if !self.at(&Semicolon) {
+        if !self.at(&Punct(";")) {
             loop {
                 let init_dector = self.parse_init_declarator()?;
                 if is_typedef_declaration {
@@ -558,12 +558,12 @@ impl Parser {
                 }
                 init_dectors.push(init_dector);
 
-                if !self.eat(&LexComma) {
+                if !self.eat(&Punct(",")) {
                     break;
                 }
             }
         }
-        self.expect(&Semicolon)?;
+        self.expect(&Punct(";"))?;
         Ok(Declaration{decl_specs, init_dectors})
     }
 
@@ -572,8 +572,10 @@ impl Parser {
             return true;
         }
         match &token.kind {
-            Static | Typedef | Extern | _Alignas | Const |
-            Volatile | Auto | Register | Restrict | _Noreturn => true,
+            Keyword(k) => {
+                return matches!(*k, "static" | "typedef" | "extern" | "_Alignas" |
+                "const" | "volatile" | "auto" | "register" | "restrict" | "_Noreturn");
+            }
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -581,8 +583,14 @@ impl Parser {
 
     fn is_type_spec(&self, token: &Token) -> bool {
         match &token.kind {
-            (Struct | Union | LexEnum | Int | Long | Short | Char | _Bool | Void |
-             Signed | Unsigned | Float | Double) => true,
+            Keyword(k) => {
+                match *k {
+                    "struct" | "union" | "enum" | "int" | "long" |
+                    "short" | "char" | "_Bool" | "void" | "signed" |
+                    "unsigned" | "float" | "double" => true,
+                    _ => false,
+                }
+            }
             LexIdent(name) => self.scope_manager.is_typedef_name(name),
             _ => false,
         }
@@ -594,28 +602,28 @@ impl Parser {
         while self.is_decl_spec(self.cur_token()) {
             let start_index = self.cur_token().span.start_index;
             let cur_decl_spec_kind = match self.cur_token().kind.clone() {
-                TokenKind::Typedef => {
+                Keyword("typedef") => {
                     self.bump();
                     Decl_Spec_Kind::Typedef
                 }
-                TokenKind::Extern => {
+                Keyword("extern") => {
                     self.bump();
                     Decl_Spec_Kind::Extern
                 }
-                TokenKind::_Alignas => {
+                Keyword("_Alignas") => {
                     self.bump();
                     // @Simplify: Simplify if eval process.
-                    if self.at(&LParen) && self.is_type_spec(self.peek_token()) {
-                        self.expect(&LParen)?;
+                    if self.at(&Punct("(")) && self.is_type_spec(self.peek_token()) {
+                        self.expect(&Punct("("))?;
                         let type_name = self.parse_type_name()?;
-                        self.expect(&RParen)?;
+                        self.expect(&Punct(")"))?;
                         Decl_Spec_Kind::Alignas_Type_Name(type_name)
                     } else {
                         let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                         Decl_Spec_Kind::Alignas_Expr(operand)
                     }
                 }
-                TokenKind::Static => {
+                Keyword("static") => {
                     self.bump();
                     Decl_Spec_Kind::Static
                 }
@@ -623,79 +631,79 @@ impl Parser {
                     self.bump();
                     Decl_Spec_Kind::Typedef_Name(name)
                 }
-                TokenKind::Int => {
+                Keyword("int") => {
                     self.bump();
                     Decl_Spec_Kind::Int
                 }
-                TokenKind::Long => {
+                Keyword("long") => {
                     self.bump();
                     Decl_Spec_Kind::Long
                 }
-                TokenKind::Short => {
+                Keyword("short") => {
                     self.bump();
                     Decl_Spec_Kind::Short
                 }
-                TokenKind::Char => {
+                Keyword("char") => {
                     self.bump();
                     Decl_Spec_Kind::Char
                 }
-                TokenKind::_Bool => {
+                Keyword("_Bool") => {
                     self.bump();
                     Decl_Spec_Kind::Bool
                 }
-                TokenKind::Void => {
+                Keyword("void") => {
                     self.bump();
                     Decl_Spec_Kind::Void
                 }
-                TokenKind::Signed => {
+                Keyword("signed") => {
                     self.bump();
                     Decl_Spec_Kind::Signed
                 }
-                TokenKind::Unsigned => {
+                Keyword("unsigned") => {
                     self.bump();
                     Decl_Spec_Kind::Unsigned
                 }
-                TokenKind::Float => {
+                Keyword("float") => {
                     self.bump();
                     Decl_Spec_Kind::Float
                 }
-                TokenKind::Double => {
+                Keyword("double") => {
                     self.bump();
                     Decl_Spec_Kind::Double
                 }
-                TokenKind::Const => {
+                Keyword("const") => {
                     self.bump();
                     Decl_Spec_Kind::Const
                 }
-                TokenKind::Restrict => {
+                Keyword("restrict") => {
                     self.bump();
                     Decl_Spec_Kind::Restrict
                 }
-                TokenKind::Volatile => {
+                Keyword("volatile") => {
                     self.bump();
                     Decl_Spec_Kind::Volatile
                 }
-                TokenKind::_Atomic => {
+                Keyword("_Atomic") => {
                     self.bump();
                     Decl_Spec_Kind::_Atomic
                 }
-                TokenKind::Auto => {
+                Keyword("auto") => {
                     self.bump();
                     Decl_Spec_Kind::Auto
                 }
-                TokenKind::Register => {
+                Keyword("register") => {
                     self.bump();
                     Decl_Spec_Kind::Register
                 }
-                TokenKind::_Noreturn => {
+                Keyword("_Noreturn") => {
                     self.bump();
                     Decl_Spec_Kind::_Noreturn
                 }
-                TokenKind::Struct | TokenKind::Union => {
+                Keyword("struct") | Keyword("union") => {
                     let struct_spec = self.parse_struct_union_specifier()?;
                     Decl_Spec_Kind::Struct_Union(struct_spec)
                 }
-                TokenKind::LexEnum => {
+                Keyword("enum") => {
                     let enum_specifier = self.parse_enum_specifier()?;
                     Decl_Spec_Kind::Enum(enum_specifier)
                 }
@@ -715,8 +723,8 @@ impl Parser {
     fn parse_struct_union_specifier(&mut self) -> Result<Struct_Union_Specifier, String> {
         let keyword = self.bump();
         let kind = match keyword.kind {
-            Union => Is_Union,
-            Struct => Is_Struct,
+            Keyword("union") => Is_Union,
+            Keyword("struct") => Is_Struct,
             // @Fix: This should be a compiler bug, not a compiler error.
             _ => return Err(error_token(&keyword, "expected 'struct' or 'union'")),
         };
@@ -729,7 +737,7 @@ impl Parser {
             struct_specifier.ident = Some(ident);
         }
 
-        if self.at(&LBrace) {
+        if self.at(&Punct("{")) {
             struct_specifier.members = Some(self.parse_struct_decl_list()?);
         } else if struct_specifier.ident.is_none() {
             return Err(error_token(
@@ -742,7 +750,7 @@ impl Parser {
     }
 
     fn parse_enum_specifier(&mut self) -> Result<Enum_Specifier, String> {
-        debug_assert!(matches!(self.cur_token().kind, LexEnum));
+        debug_assert!(matches!(self.cur_token().kind, Keyword("enum")));
         self.bump();
         let mut enum_specifier = Enum_Specifier{ident: None, enumerators: None};
         if let LexIdent(name) = &self.cur_token().kind {
@@ -750,7 +758,7 @@ impl Parser {
             enum_specifier.ident = Some(ident);
             self.bump();
         }
-        if self.at(&LBrace) {
+        if self.at(&Punct("{")) {
             let enumerators = self.parse_enumerator_list()?;
             if enumerators.len() == 0 {
                 let error_message = error_token(self.cur_token(), "empty enum is invalid");
@@ -765,32 +773,32 @@ impl Parser {
     }
 
     fn parse_struct_decl_list(&mut self) -> Result<Vec<Member>, String> {
-        self.expect(&LBrace)?;
+        self.expect(&Punct("{"))?;
         let mut members = Vec::new();
-        while !matches!(self.cur_token().kind, RBrace | Eof) {
+        while !matches!(self.cur_token().kind, Punct("}") | Eof) {
             let decl_specs = self.parse_decl_specs()?;
             // parse declarators separated by ','
             loop {
                 let dector = self.parse_declarator()?;
                 let m = Member{decl_specs: decl_specs.clone(), dector};
                 members.push(m);
-                if !self.eat(&LexComma) {
+                if !self.eat(&Punct(",")) {
                     break;
                 }
             }
-            self.expect(&Semicolon)?;
+            self.expect(&Punct(";"))?;
         }
 
-        self.expect(&RBrace)?;
+        self.expect(&Punct("}"))?;
         Ok(members)
     }
 
     fn parse_enumerator_list(&mut self) -> Result<Vec<Enumerator>, String> {
-        debug_assert!(matches!(self.cur_token().kind, LBrace));
+        debug_assert!(matches!(self.cur_token().kind, Punct("{")));
         self.bump();
 
         let mut enumerators = Vec::new();
-        while !matches!(self.cur_token().kind, RBrace | Eof) {
+        while !matches!(self.cur_token().kind, Punct("}") | Eof) {
             let ident = if let LexIdent(name) = &self.cur_token().kind {
                 gen_identifier_from_token(self.cur_token())
             } else {
@@ -800,7 +808,7 @@ impl Parser {
             };
             self.bump();
 
-            let constant_expr = if self.cur_token().kind == LexAssignment {
+            let constant_expr = if self.cur_token().kind == Punct("=") {
                 self.bump();
                 // Comma here serves as a seperator between enumerators, instead of infix operator.
                 // We don't want to treat the comma as infix operator,
@@ -813,13 +821,13 @@ impl Parser {
             let new_enumerator = Enumerator{ident, constant_expr};
             enumerators.push(new_enumerator);
 
-            if self.at(&RBrace) {
+            if self.at(&Punct("}")) {
                 break;
             } else {
-                self.expect(&LexComma);
+                self.expect(&Punct(","));
             }
         }
-        self.expect(&RBrace)?;
+        self.expect(&Punct("}"))?;
         Ok(enumerators)
     }
 
@@ -827,16 +835,8 @@ impl Parser {
         let start_index = self.cur_token().span.start_index;
 
         let mut qualifiers_and_pointers = Vec::new();
-        while is_pointer_or_type_qualifier(self.cur_token()) {
-            match self.cur_token().kind {
-                // For the sake of convenience, we just consider pointer mark as qualifier.
-                Mul => qualifiers_and_pointers.push(Decl_Spec_Kind::Pointer_Mark),
-                Const => qualifiers_and_pointers.push(Decl_Spec_Kind::Const),
-                Restrict => qualifiers_and_pointers.push(Decl_Spec_Kind::Restrict),
-                Volatile => qualifiers_and_pointers.push(Decl_Spec_Kind::Volatile),
-                _Atomic => qualifiers_and_pointers.push(Decl_Spec_Kind::_Atomic),
-                _ => break,
-            }
+        while let Some(spec) = get_pointer_or_type_qualifier(self.cur_token()) {
+            qualifiers_and_pointers.push(spec);
             self.bump();
         }
 
@@ -848,21 +848,21 @@ impl Parser {
                 self.bump();
                 Box::new(Direct_Declarator::Identifier(ident))
             },
-            LParen => {
-                self.expect(&LParen)?;
+            Punct("(") => {
+                self.expect(&Punct("("))?;
                 let paren_enclosed_dector = self.parse_declarator()?;
-                self.expect(&RParen)?;
+                self.expect(&Punct(")"))?;
                 Box::new(Direct_Declarator::Paren_Enclosed_Declarator(paren_enclosed_dector))
             },
             _ => {
                 return Err(error_token(
                     self.cur_token(),
-                    "unable to parse declarator here: not an identifier or a LParen.",
+                    "unable to parse declarator here: not an identifier or an opening parenthesis.",
                 ));
             },
         };
 
-        let suffix = if matches!(self.cur_token().kind, LSquareBracket | LParen) {
+        let suffix = if matches!(self.cur_token().kind, Punct("[") | Punct("(")) {
             Some(self.parse_declarator_suffix()?)
         } else {
             None
@@ -881,9 +881,9 @@ impl Parser {
 
     fn parse_init_declarator(&mut self) -> Result<Init_Declarator, String> {
         let mut dector = self.parse_declarator()?;
-        if self.eat(&LexAssignment) {
+        if self.eat(&Punct("=")) {
             let start_index = self.cur_token().span.start_index;
-            let content = if self.cur_token().kind == LBrace {
+            let content = if self.cur_token().kind == Punct("{") {
                 let init_list = self.parse_init_list()?;
                 Initializer_Type::Init_List(init_list)
             } else {
@@ -901,11 +901,11 @@ impl Parser {
     }
 
     fn parse_init_list(&mut self) -> Result<Vec<Initializer>, String> {
-        self.expect(&LBrace);
+        self.expect(&Punct("{"));
         let mut init_list = Vec::new();
-        while self.cur_token().kind != RBrace {
+        while self.cur_token().kind != Punct("}") {
             let start_index = self.cur_token().span.start_index;
-            let content = if self.cur_token().kind == LBrace {
+            let content = if self.cur_token().kind == Punct("{") {
                 let init_list = self.parse_init_list()?;
                 Initializer_Type::Init_List(init_list)
             } else {
@@ -917,33 +917,33 @@ impl Parser {
             let span = Span{start_index, end_index};
             let init = Initializer{content, span};
             init_list.push(init);
-            if !self.eat(&LexComma) {
+            if !self.eat(&Punct(",")) {
                 break;
             }
         }
-        self.expect(&RBrace);
+        self.expect(&Punct("}"));
         return Ok(init_list);
     }
 
     fn parse_declarator_suffix(&mut self) -> Result<DeclaratorSuffix, String> {
-        debug_assert!(matches!(self.cur_token().kind, LSquareBracket | LParen));
+        debug_assert!(matches!(self.cur_token().kind, Punct("[") | Punct("(")));
 
         match self.cur_token().kind {
             // array sizes
-            LSquareBracket => {
+            Punct("[") => {
                 self.bump();
-                let cur_array_len = if matches!(&self.cur_token().kind, RSquareBracket) {
+                let cur_array_len = if matches!(&self.cur_token().kind, Punct("]")) {
                     None
                 } else {
                     // Ignore "static" and "const" in array-dimensions.
-                    while matches!(self.cur_token().kind, Static | Restrict) {
+                    while matches!(self.cur_token().kind, Keyword("static") | Keyword("restrict")) {
                         self.bump();
                     }
                     let expr = self.parse_expr(Lowest, Left_To_Right)?;
                     Some(Box::new(expr))
                 };
-                self.expect(&RSquareBracket)?;
-                if matches!(self.cur_token().kind, LSquareBracket | LParen) {
+                self.expect(&Punct("]"))?;
+                if matches!(self.cur_token().kind, Punct("[") | Punct("(")) {
                     let inner_suffix = self.parse_declarator_suffix()?;
                     Ok(ArrayLen(cur_array_len, Some(Box::new(inner_suffix))))
                 } else {
@@ -951,13 +951,13 @@ impl Parser {
                 }
             },
             // function parameters
-            LParen => {
-                self.expect(&LParen)?;
+            Punct("(") => {
+                self.expect(&Punct("("))?;
                 let mut params: Vec<Func_Parameter> = Vec::new();
                 let mut is_variadic = false;
 
-                'parse_params_loop: while !matches!(self.cur_token().kind, RParen | Eof) {
-                    if self.cur_token().kind == Variadic_Mark {
+                'parse_params_loop: while !matches!(self.cur_token().kind, Punct(")") | Eof) {
+                    if self.cur_token().kind == Punct("...") {
                         is_variadic = true;
                         self.bump();
                         break 'parse_params_loop;
@@ -970,7 +970,7 @@ impl Parser {
                     // parsed like any other parameter.
                     if decl_specs.len() == 1
                         && decl_specs[0].content == Decl_Spec_Kind::Void
-                        && self.at(&RParen)
+                        && self.at(&Punct(")"))
                     {
                         if !params.is_empty() {
                             let error_info = "'void' must be the only parameter";
@@ -1013,12 +1013,12 @@ impl Parser {
                             params.push(func_param);
                         }
                     }
-                    if !self.eat(&LexComma) {
+                    if !self.eat(&Punct(",")) {
                         break;
                     }
                 }
 
-                self.expect(&RParen)?;
+                self.expect(&Punct(")"))?;
                 Ok(FuncParam{params, is_variadic})
             },
             _ => {
@@ -1029,92 +1029,92 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<StmtType, String> {
         match &self.cur_token().kind {
-            TokenKind::Ret => {
+            Keyword("return") => {
                 self.bump();
-                let return_value = if self.cur_token().kind == Semicolon {
+                let return_value = if self.cur_token().kind == Punct(";") {
                     None
                 } else {
                     Some(self.parse_expr(Lowest, Left_To_Right)?)
                 };
-                self.expect(&Semicolon)?;
+                self.expect(&Punct(";"))?;
                 return Ok(StmtType::Return(return_value));
             }
-            TokenKind::If => Ok(StmtType::If(self.parse_if_stmt()?)),
-            TokenKind::For => Ok(StmtType::For(self.parse_for_stmt()?)),
-            TokenKind::While => Ok(StmtType::For(self.parse_while_stmt()?)),
-            TokenKind::Do => {
+            Keyword("if") => Ok(StmtType::If(self.parse_if_stmt()?)),
+            Keyword("for") => Ok(StmtType::For(self.parse_for_stmt()?)),
+            Keyword("while") => Ok(StmtType::For(self.parse_while_stmt()?)),
+            Keyword("do") => {
                 self.bump();
                 let then = self.parse_stmt()?;
-                self.expect(&While)?;
+                self.expect(&Keyword("while"))?;
                 let cond = self.parse_expr(Lowest, Left_To_Right)?;
-                self.expect(&Semicolon)?;
+                self.expect(&Punct(";"))?;
                 return Ok(StmtType::Do_While{then: Box::new(then), cond});
             }
-            TokenKind::Switch => {
+            Keyword("switch") => {
                 self.bump();
                 let expr = self.parse_paren()?;
                 let stmt = self.parse_stmt()?;
                 Ok(SwitchStmt(expr, Box::new(stmt)))
             }
-            TokenKind::Case => {
+            Keyword("case") => {
                 self.bump();
                 let expr = self.parse_expr(Lowest, Left_To_Right)?;
-                self.expect(&Colon);
+                self.expect(&Punct(":"));
                 let stmt = self.parse_stmt()?;
                 Ok(CaseStmt(expr, Box::new(stmt)))
             }
-            TokenKind::Default => {
+            Keyword("default") => {
                 self.bump();
-                self.expect(&Colon);
+                self.expect(&Punct(":"));
                 let stmt = self.parse_stmt()?;
                 Ok(DefaultStmt(Box::new(stmt)))
             }
-            TokenKind::Continue => {
+            Keyword("continue") => {
                 self.bump();
-                self.expect(&Semicolon);
+                self.expect(&Punct(";"));
                 Ok(StmtType::ContinueStmt)
             }
-            TokenKind::Break => {
+            Keyword("break") => {
                 self.bump();
-                self.expect(&Semicolon);
+                self.expect(&Punct(";"));
                 Ok(StmtType::BreakStmt)
             }
-            TokenKind::Goto => {
+            Keyword("goto") => {
                 self.bump();
                 let goto_label_name = self.parse_raw_ident_name()?;
-                self.expect(&Semicolon);
+                self.expect(&Punct(";"));
                 Ok(StmtType::GotoStmt(goto_label_name))
             }
-            TokenKind::LexIdent(name) if self.peek_token().kind == Colon => {
+            TokenKind::LexIdent(name) if self.peek_token().kind == Punct(":") => {
                 let label_name = self.parse_raw_ident_name()?;
                 if self.stmt_labels.contains(&label_name) {
                     let error_message = format!("duplicate statement label {}", label_name);
                     return Err(error_token(self.cur_token(), &error_message));
                 }
                 self.stmt_labels.push(label_name.clone());
-                self.expect(&Colon);
+                self.expect(&Punct(":"));
                 let stmt = self.parse_stmt()?;
                 Ok(StmtType::LabeledStmt(label_name, Box::new(stmt)))
             }
-            Semicolon => {
-                self.expect(&Semicolon)?;
+            Punct(";") => {
+                self.expect(&Punct(";"))?;
                 Ok(Block(Vec::new()))
             },
-            LBrace => Ok(Block(self.parse_block())),
+            Punct("{") => Ok(Block(self.parse_block())),
             // Any others are treated as expression statement to parse.
             _ => Ok(Ex(self.parse_expr_stmt()?)),
         }
     }
 
     fn parse_if_stmt(&mut self) -> Result<IfStmt, String> {
-        debug_assert!(self.at(&TokenKind::If));
-        self.expect(&TokenKind::If)?;
-        self.expect(&LParen)?;
+        debug_assert!(self.at(&Keyword("if")));
+        self.expect(&Keyword("if"))?;
+        self.expect(&Punct("("))?;
         let cond = self.parse_expr(Lowest, Left_To_Right)?;
-        self.expect(&RParen)?;
+        self.expect(&Punct(")"))?;
         let then = Box::new(self.parse_stmt()?);
 
-        let otherwise = if self.eat(&Else) {
+        let otherwise = if self.eat(&Keyword("else")) {
             Some(Box::new(self.parse_stmt()?))
         } else {
             None
@@ -1126,22 +1126,22 @@ impl Parser {
     fn parse_block(&mut self) -> Vec<BlockItem> {
         self.scope_manager.enter_new_scope();
         let mut items: Vec<BlockItem> = Vec::new();
-        debug_assert!(self.at(&LBrace));
+        debug_assert!(self.at(&Punct("{")));
         self.bump();
 
-        while !matches!(self.cur_token().kind, RBrace | Eof) {
+        while !matches!(self.cur_token().kind, Punct("}") | Eof) {
             let start_index = self.cur_index;
             //                         This avoids conflicts between statement labels and typedef names.
             //                         If peeked token is a colon, then this is a labeled statement, not a decl.                             
             //                                                      |
             //                                                      V
-            if self.is_decl_spec(self.cur_token()) && self.peek_token().kind != Colon {
+            if self.is_decl_spec(self.cur_token()) && self.peek_token().kind != Punct(":") {
                 match self.parse_decl() {
                     Err(error_message) => {
                         self.syntax_errors.push(error_message);
                         self.sync_parse_point();
                         if self.cur_index == start_index
-                            && !matches!(self.cur_token().kind, RBrace | Eof) {
+                            && !matches!(self.cur_token().kind, Punct("}") | Eof) {
                             self.bump();
                         }
                         continue;
@@ -1154,7 +1154,7 @@ impl Parser {
                         self.syntax_errors.push(error_message);
                         self.sync_parse_point();
                         if self.cur_index == start_index
-                            && !matches!(self.cur_token().kind, RBrace | Eof) {
+                            && !matches!(self.cur_token().kind, Punct("}") | Eof) {
                             self.bump();
                         }
                         continue;
@@ -1166,7 +1166,7 @@ impl Parser {
             debug_assert!(self.cur_index > start_index);
         }
 
-        if self.at(&RBrace) {
+        if self.at(&Punct("}")) {
             self.bump();
         } else {
             self.syntax_errors.push(error_token(
@@ -1180,10 +1180,10 @@ impl Parser {
     }
 
     fn parse_for_stmt(&mut self) -> Result<ForStmt, String> {
-        self.expect(&TokenKind::For)?;
-        self.expect(&LParen)?;
+        self.expect(&Keyword("for"))?;
+        self.expect(&Punct("("))?;
 
-        let init = if self.eat(&Semicolon) {
+        let init = if self.eat(&Punct(";")) {
             None
         } else {
             let init_clause = if self.is_type_spec(self.cur_token())  {
@@ -1196,19 +1196,19 @@ impl Parser {
             Some(init_clause)
         };
 
-        let cond = if self.eat(&Semicolon) {
+        let cond = if self.eat(&Punct(";")) {
             None
         } else {
             let expr = self.parse_expr(Lowest, Left_To_Right)?;
-            self.expect(&Semicolon)?;
+            self.expect(&Punct(";"))?;
             Some(expr)
         };
 
-        let inc = if self.eat(&RParen) {
+        let inc = if self.eat(&Punct(")")) {
             None
         } else {
             let expr = self.parse_expr(Lowest, Left_To_Right)?;
-            self.expect(&RParen)?;
+            self.expect(&Punct(")"))?;
             Some(expr)
         };
 
@@ -1217,14 +1217,14 @@ impl Parser {
     }
 
     fn parse_while_stmt(&mut self) -> Result<ForStmt, String> {
-        self.expect(&While)?;
-        self.expect(&LParen)?;
+        self.expect(&Keyword("while"))?;
+        self.expect(&Punct("("))?;
 
-        let cond = if self.eat(&RParen) {
+        let cond = if self.eat(&Punct(")")) {
             None
         } else {
             let expr = self.parse_expr(Lowest, Left_To_Right)?;
-            self.expect(&RParen)?;
+            self.expect(&Punct(")"))?;
             Some(expr)
         };
 
@@ -1234,7 +1234,7 @@ impl Parser {
 
     fn parse_expr_stmt(&mut self) -> Result<Expr, String> {
         let expr = self.parse_expr(Lowest, Left_To_Right)?;
-        self.expect(&Semicolon)?;
+        self.expect(&Punct(";"))?;
         Ok(expr)
     }
 
@@ -1251,22 +1251,22 @@ impl Parser {
             if cur_precedence_is_weaker {break;}
 
             expr = match self.cur_token().kind {
-                Plus | Minus | Mul | Div | PlusAssignment | MinusAssignment |
-                MulAssignment | DivAssignment | Eq | Neq | LT | LE | GT | GE |
-                Modulus | ModulusAssignment | Ampersand | BitXOR | BitOR |
-                BitAndAssignment | BitXORAssignment | BitORAssignment |
-                SHL | SHLAssignment | SHR | SHRAssignment | LOGAND | LOGOR
+                Punct("+") | Punct("-") | Punct("*") | Punct("/") | Punct("+=") | Punct("-=") |
+                Punct("*=") | Punct("/=") | Punct("==") | Punct("!=") | Punct("<") | Punct("<=") | Punct(">") | Punct(">=") |
+                Punct("%") | Punct("%=") | Punct("&") | Punct("^") | Punct("|") |
+                Punct("&=") | Punct("^=") | Punct("|=") |
+                Punct("<<") | Punct("<<=") | Punct(">>") | Punct(">>=") | Punct("&&") | Punct("||")
                 =>                self.parse_infix(expr)?,
 
-                PlusPlus =>       self.parse_post_increment(expr)?,
-                MinusMinus =>     self.parse_post_decrement(expr)?,
-                LexComma =>       self.parse_comma_expression(expr)?,
-                LParen =>         self.parse_funcall(expr)?,
-                LSquareBracket =>  self.parse_array_indexing(expr)?,
+                Punct("++") =>       self.parse_post_increment(expr)?,
+                Punct("--") =>     self.parse_post_decrement(expr)?,
+                Punct(",") =>       self.parse_comma_expression(expr)?,
+                Punct("(") =>         self.parse_funcall(expr)?,
+                Punct("[") =>  self.parse_array_indexing(expr)?,
                 // @Smell: Should have parse_infix() to handle assignment.
-                LexAssignment =>  self.parse_assign(expr)?,
-                QuestionMark =>   self.parse_conditional(expr)?,
-                Period | Arrow => self.parse_request_struct_member(expr)?,
+                Punct("=") =>  self.parse_assign(expr)?,
+                Punct("?") =>   self.parse_conditional(expr)?,
+                Punct(".") | Punct("->") => self.parse_request_struct_member(expr)?,
 
                 _ => {
                     return Err(error_token(
@@ -1280,9 +1280,9 @@ impl Parser {
     }
 
     fn parse_conditional(&mut self, condition_expr: Expr) -> Result<Expr, String> {
-        self.expect(&QuestionMark)?;
+        self.expect(&Punct("?"))?;
         let then_expr = self.parse_expr(Precedence::Conditional, Right_To_Left)?;
-        self.expect(&Colon)?;
+        self.expect(&Punct(":"))?;
         let else_expr = self.parse_expr(Precedence::Conditional, Right_To_Left)?;
         let span = Span {
             start_index: condition_expr.span.start_index,
@@ -1293,9 +1293,9 @@ impl Parser {
     }
 
     fn parse_paren(&mut self) -> Result<Expr, String> {
-        let open_paren = self.expect(&LParen)?;
+        let open_paren = self.expect(&Punct("("))?;
         let inner = self.parse_expr(Lowest, Left_To_Right)?;
-        let close_paren = self.expect(&RParen)?;
+        let close_paren = self.expect(&Punct(")"))?;
         // Wrap, don't mutate: the inner expression keeps its own span; the Paren
         // node carries the wider span that includes the parentheses.
         let span = Span{
@@ -1309,16 +1309,16 @@ impl Parser {
         let prefix_starting_token = self.cur_token().clone();
         let start_index = prefix_starting_token.span.start_index;
         match prefix_starting_token.kind {
-            LParen => {
+            Punct("(") => {
                 let peek_token = self.peek_token();
-                if peek_token.kind == LBrace {
+                if peek_token.kind == Punct("{") {
                     return self.parse_stmt_expr();
                 }else if self.is_type_spec(peek_token) || is_type_qualifier(peek_token) {
                     self.bump();
                     let type_name = self.parse_type_name()?;
-                    self.expect(&RParen)?;
+                    self.expect(&Punct(")"))?;
                     // compound literal
-                    if self.cur_token().kind == LBrace {
+                    if self.cur_token().kind == Punct("{") {
                         let init_list = self.parse_init_list()?;
                         let end_index = self.previous_token().span.end_index;
                         let span = Span{start_index, end_index};
@@ -1350,39 +1350,39 @@ impl Parser {
                 let expr = Expr::new(Double_Const(value), token.span);
                 return Ok(expr);
             }
-            Exclamation => {
+            Punct("!") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                 let span = Span::merge(prefix_starting_token.span, operand.span);
                 let expr = Expr::new(Not(Box::new(operand)), span);
                 Ok(expr)
             }
-            Tilde => {
+            Punct("~") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                 let span = Span::merge(prefix_starting_token.span, operand.span);
                 let expr = Expr::new(BitNot(Box::new(operand)), span);
                 Ok(expr)
             }
-            Plus => {
+            Punct("+") => {
                 self.bump();
                 self.parse_expr(Prefix_Or_Cast, Right_To_Left)
             },
-            PlusPlus => {
+            Punct("++") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                 let span = Span::merge(prefix_starting_token.span, operand.span);
                 let expr = Expr::new(PreIncrement(Box::new(operand)), span);
                 Ok(expr)
             },
-            MinusMinus => {
+            Punct("--") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                 let span = Span::merge(prefix_starting_token.span, operand.span);
                 let expr = Expr::new(PreDecrement(Box::new(operand)), span);
                 Ok(expr)
             },
-            Minus => {
+            Punct("-") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                 let span = Span{
@@ -1392,7 +1392,7 @@ impl Parser {
                 let expr = Expr::new(Neg(Box::new(operand)), span);
                 Ok(expr)
             },
-            Mul => {
+            Punct("*") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                 let span = Span{
@@ -1402,7 +1402,7 @@ impl Parser {
                 let expr = Expr::new(Deref(Box::new(operand)), span);
                 Ok(expr)
             },
-            Ampersand => {
+            Punct("&") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                 let span = Span{
@@ -1412,13 +1412,13 @@ impl Parser {
                 let expr = Expr::new(AddrOf(Box::new(operand)), span);
                 Ok(expr)
             },
-            Sizeof | _Alignof => {
+            Keyword("sizeof") | Keyword("_Alignof") => {
                 self.bump();
-                let (expr_content, end_index) = if self.at(&LParen) && self.is_type_spec(self.peek_token()) {
-                    self.expect(&LParen)?;
+                let (expr_content, end_index) = if self.at(&Punct("(")) && self.is_type_spec(self.peek_token()) {
+                    self.expect(&Punct("("))?;
                     let type_name = self.parse_type_name()?;
-                    let close_paren = self.expect(&RParen)?;
-                    if prefix_starting_token.kind == Sizeof {
+                    let close_paren = self.expect(&Punct(")"))?;
+                    if prefix_starting_token.kind == Keyword("sizeof") {
                         (Sizeof_Type_Name(type_name), close_paren.span.end_index)
                     } else {
                         (Alignof_Type_Name(type_name), close_paren.span.end_index)
@@ -1426,7 +1426,7 @@ impl Parser {
                 } else {
                     let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
                     let end_index = operand.span.end_index;
-                    if prefix_starting_token.kind == Sizeof {
+                    if prefix_starting_token.kind == Keyword("sizeof") {
                         (Sizeof_Expr(Box::new(operand)), end_index)
                     } else {
                         (Alignof_Expr(Box::new(operand)), end_index)
@@ -1446,10 +1446,10 @@ impl Parser {
     }
 
     fn parse_cast_expr(&mut self) -> Result<Expr, String> {
-        debug_assert!(matches!(self.cur_token().kind, LParen));
+        debug_assert!(matches!(self.cur_token().kind, Punct("(")));
         let starting_token = self.bump();
         let type_name = self.parse_type_name()?;
-        self.expect(&RParen)?;
+        self.expect(&Punct(")"))?;
         let expr = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
         let span = Span{
             start_index: starting_token.span.start_index,
@@ -1473,7 +1473,7 @@ impl Parser {
     }
 
     fn starts_grouped_abstract_declarator(&self) -> bool {
-        self.at(&LParen) && starts_abstract_declarator(&self.peek_token().kind)
+        self.at(&Punct("(")) && starts_abstract_declarator(&self.peek_token().kind)
     }
 
     // Enters on the first token of the abstract declarator and returns on the
@@ -1483,30 +1483,23 @@ impl Parser {
         let mut abs_dector_is_empty = true;
 
         let mut qualifiers_and_pointers = Vec::new();
-        while is_pointer_or_type_qualifier(self.cur_token()) {
+        while let Some(spec) = get_pointer_or_type_qualifier(self.cur_token()) {
             abs_dector_is_empty = false;
-            match self.cur_token().kind {
-                Mul => qualifiers_and_pointers.push(Decl_Spec_Kind::Pointer_Mark),
-                Const => qualifiers_and_pointers.push(Decl_Spec_Kind::Const),
-                Restrict => qualifiers_and_pointers.push(Decl_Spec_Kind::Restrict),
-                Volatile => qualifiers_and_pointers.push(Decl_Spec_Kind::Volatile),
-                _Atomic => qualifiers_and_pointers.push(Decl_Spec_Kind::_Atomic),
-                _ => break,
-            }
+            qualifiers_and_pointers.push(spec);
             self.bump();
         }
 
         let direct_abstract_declarator = if self.starts_grouped_abstract_declarator() {
             abs_dector_is_empty = false;
-            self.expect(&LParen)?;
+            self.expect(&Punct("("))?;
             let inner_dector = self.parse_abstract_declarator()?;
-            self.expect(&RParen)?;
+            self.expect(&Punct(")"))?;
             Some(Box::new(inner_dector))
         } else {
             None
         };
 
-        let suffix = if matches!(self.cur_token().kind, LSquareBracket | LParen) {
+        let suffix = if matches!(self.cur_token().kind, Punct("[") | Punct("(")) {
             abs_dector_is_empty = false;
             Some(self.parse_declarator_suffix()?)
         } else {
@@ -1523,9 +1516,9 @@ impl Parser {
     }
 
     fn parse_stmt_expr(&mut self) -> Result<Expr, String> {
-        let open_paren = self.expect(&LParen)?;
+        let open_paren = self.expect(&Punct("("))?;
         let items = self.parse_block();
-        let close_paren = self.expect(&RParen)?;
+        let close_paren = self.expect(&Punct(")"))?;
         let expr_span = Span{
             start_index: open_paren.span.start_index,
             end_index: close_paren.span.end_index,
@@ -1586,7 +1579,7 @@ impl Parser {
             return Err(syntax_error(lhs.span, "definitely not a lvalue name"));
         }
 
-        let assignment = self.expect(&LexAssignment)?;
+        let assignment = self.expect(&Punct("="))?;
         let val = self.parse_expr(Assignment, Right_To_Left)?;
         let span = Span {
             start_index: lhs.span.start_index,
@@ -1635,7 +1628,7 @@ impl Parser {
 
     fn parse_comma_expression(&mut self, lhs:Expr) -> Result<Expr, String> {
         let start_index = lhs.span.start_index;
-        self.expect(&LexComma)?;
+        self.expect(&Punct(","))?;
         let rhs = self.parse_expr(Lowest, Left_To_Right)?;
         let end_index = rhs.span.end_index;
         let span = Span {start_index, end_index};
@@ -1653,9 +1646,9 @@ impl Parser {
     }
 
     fn parse_array_indexing(&mut self, lhs: Expr) -> Result<Expr, String> {
-        self.expect(&LSquareBracket)?;
+        self.expect(&Punct("["))?;
         let the_index = self.parse_expr(Lowest, Left_To_Right)?;
-        let close_bracket = self.expect(&RSquareBracket)?;
+        let close_bracket = self.expect(&Punct("]"))?;
 
         let span = Span {
             start_index: lhs.span.start_index,
@@ -1667,9 +1660,9 @@ impl Parser {
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, String> {
         let mut args: Vec<Expr> = Vec::new();
-        self.expect(&LParen)?;
+        self.expect(&Punct("("))?;
 
-        if self.eat(&RParen) {
+        if self.eat(&Punct(")")) {
             return Ok(args);
         }
 
@@ -1679,11 +1672,11 @@ impl Parser {
             let expr = self.parse_expr(Comma, Left_To_Right)?;
             args.push(expr);
 
-            if self.eat(&LexComma) {
+            if self.eat(&Punct(",")) {
                 continue;
             }
 
-            self.expect(&RParen)?;
+            self.expect(&Punct(")"))?;
             break;
         }
 
@@ -1695,7 +1688,7 @@ impl Parser {
         let specs = self.parse_decl_specs()?;
         let dector = self.parse_declarator()?;
         if let Some(FuncParam{..}) = &dector.suffix {
-            if !self.at(&LBrace) {
+            if !self.at(&Punct("{")) {
                 return Err(error_token(self.cur_token(), "expected function body"));
             }
             let items = self.parse_block();
@@ -1715,17 +1708,25 @@ fn get_declarator_name(dector: &Declarator) -> &str {
     }
 }
 
+fn get_pointer_or_type_qualifier(token: &Token) -> Option<Decl_Spec_Kind> {
+    match &token.kind {
+        // For the sake of convenience, we just consider pointer mark as qualifier.
+        Punct("*") => Some(Decl_Spec_Kind::Pointer_Mark),
+        Keyword("const") => Some(Decl_Spec_Kind::Const),
+        Keyword("restrict") => Some(Decl_Spec_Kind::Restrict),
+        Keyword("volatile") => Some(Decl_Spec_Kind::Volatile),
+        Keyword("_Atomic") => Some(Decl_Spec_Kind::_Atomic),
+        _ => None,
+    }
+}
 
 fn is_pointer_or_type_qualifier(token: &Token) -> bool {
-    match &token.kind {
-        Mul | Const | Restrict | Volatile | _Atomic => true,
-        _ => false,
-    }
+    return get_pointer_or_type_qualifier(token).is_some();
 }
 
 fn is_type_qualifier(token: &Token) -> bool {
     match &token.kind {
-        Const | Restrict | Volatile | _Atomic => true,
+        Keyword(k) if matches!(*k, "const" | "restrict" | "volatile" | "_Atomic") => true,
         _ => false,
     }
 }
@@ -1742,7 +1743,7 @@ fn gen_identifier_from_token(token: &Token) -> Identifier {
 }
 
 fn starts_abstract_declarator(kind: &TokenKind) -> bool {
-    matches!(kind, Mul | LSquareBracket | LParen)
+    matches!(kind, Punct("*") | Punct("[") | Punct("("))
 }
 
 

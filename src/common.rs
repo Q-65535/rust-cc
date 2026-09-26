@@ -64,7 +64,7 @@ pub fn get_src_content_at_line(line_no: usize) -> String {
 
     let src = crate::SRC.lock().unwrap();
     match end {
-        Some(end) => src.chars().skip(start).take(end - start).collect(),
-        None      => src.chars().skip(start).collect(),   // last line: to EOF
+        Some(end) => src[start..end].to_string(),
+        None      => src[start..].to_string(),   // last line: to EOF
     }
 }

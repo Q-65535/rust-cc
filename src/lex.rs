@@ -1,57 +1,19 @@
-use std::process::exit;
-use std::collections::HashMap;
-use colored::*;
-use crate::SRC;
 use crate::common::*;
+use crate::SRC;
+use colored::*;
+use std::process::exit;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
-    Period,
-    Plus,
-    Minus,
-    Mul,
-    Div,
-    Modulus,
-    PlusAssignment, MinusAssignment, MulAssignment,
-    DivAssignment, ModulusAssignment, BitAndAssignment,
-    BitXORAssignment, BitORAssignment, SHLAssignment,
-    SHRAssignment,
-    PlusPlus, MinusMinus,
-    Ampersand, BitXOR, BitOR, 
-    LOGAND, LOGOR,
-    SHL, SHR,
-    LParen,
-    RParen,
-    LBrace,
-    RBrace,
-    LSquareBracket,
-    RSquareBracket,
-    LexAssignment,
-    // Compares
-    Eq, Neq, LT, LE, GT, GE,
-    Exclamation,
-    Tilde,
-    Arrow,
-    QuestionMark,
-    Variadic_Mark,
-    
-    Semicolon,
-    Colon,
-    LexComma,
+    Punct(&'static str),
+    Keyword(&'static str),
     // @Refactor?: Should we just use u64 for integer constant all the way during compilation?
-    Lex_Integer{value: i64, ty: Integer_Const_Type},
+    Lex_Integer { value: i64, ty: Integer_Const_Type },
     Lex_Float(f32),
     Lex_Double(f64),
     Lex_Unsigned(u64),
     LexIdent(String),
     StringLiteral(Vec<u8>),
-
-    // Keywords:
-    Ret, If, Else, For, While,
-    Sizeof, Typedef, Struct, LexEnum, Int, Char, _Bool, Union,
-    Long, Short, Void, Float, Double, Static, Extern, Goto, Break, Continue,
-    Switch, Case, Default, _Alignas, _Alignof, Do, Signed, Unsigned,
-    Auto, Register, _Noreturn, Const, Restrict, Volatile, _Atomic,
 
     Eof,
 }
@@ -59,10 +21,12 @@ use TokenKind::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Integer_Const_Type {
-    tInt, tLong, tUInt, tULong,
+    tInt,
+    tLong,
+    tUInt,
+    tULong,
 }
 use Integer_Const_Type::*;
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
@@ -70,78 +34,62 @@ pub struct Token {
     pub span: Span,
 }
 
-pub struct Lexer {
-    src: Vec<char>,
+const qweqr: &str = "swewreqw";
+
+// const seqwq: [&str] = ["ss", "qwe"];
+
+// Longest spellings come first so lexing follows C's maximal-munch rule.
+const PUNCTUATORS: &[&str] = &[
+    "<<=", ">>=", "...", "->", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=", "&&",
+    "||", "<<", ">>", "==", "!=", "<=", ">=", ".", "+", "-", "*", "/", "%", "&", "^", "|", "(",
+    ")", "{", "}", "[", "]", "=", "<", ">", "!", "~", "?", ";", ":", ",",
+];
+
+const KEYWORDS: &[&str] = &[
+    "return", "if", "else", "for", "while", "int", "sizeof", "_Alignof", "_Alignas",
+    "typedef", "struct", "union", "enum", "char", "long", "short", "void", "float",
+    "double", "_Atomic", "_Bool", "static", "extern", "goto", "break", "continue",
+    "switch", "case", "default", "do", "signed", "unsigned", "const", "volatile", "auto",
+    "register", "restrict", "_Noreturn",
+];
+
+pub struct Lexer<'a> {
+    src_ref: &'a str,
     index: usize,
-    keywords: HashMap<String, TokenKind>,
 }
 
-impl Lexer {
-    pub fn new(s: &str) -> Lexer {
-        let keywords: HashMap<String, TokenKind> = vec![
-            // Add more keywords here.
-            ("return".to_string(), Ret),
-            ("if".to_string(), If),
-            ("else".to_string(), Else),
-            ("for".to_string(), For),
-            ("while".to_string(), While),
-            ("int".to_string(), Int),
-            ("sizeof".to_string(), Sizeof),
-            ("_Alignof".to_string(), _Alignof),
-            ("_Alignas".to_string(), _Alignas),
-            ("typedef".to_string(), Typedef),
-            ("struct".to_string(), Struct),
-            ("union".to_string(), Union),
-            ("enum".to_string(), LexEnum),
-            ("char".to_string(), Char),
-            ("long".to_string(), Long),
-            ("short".to_string(), Short),
-            ("void".to_string(), Void),
-            ("float".to_string(), Float),
-            ("double".to_string(), Double),
-            ("_Atomic".to_string(), _Atomic),
-            ("_Bool".to_string(), _Bool),
-            ("static".to_string(), Static),
-            ("extern".to_string(), Extern),
-            ("goto".to_string(), Goto),
-            ("break".to_string(), Break),
-            ("continue".to_string(), Continue),
-            ("switch".to_string(), Switch),
-            ("case".to_string(), Case),
-            ("default".to_string(), Default),
-            ("do".to_string(), Do),
-            ("signed".to_string(), Signed),
-            ("unsigned".to_string(), Unsigned),
-            ("const".to_string(), Const),
-            ("volatile".to_string(), Volatile),
-            ("auto".to_string(), Auto),
-            ("register".to_string(), Register),
-            ("restrict".to_string(), Restrict),
-            ("__restrict".to_string(), Restrict),
-            ("__restrict__".to_string(), Restrict),
-            ("_Noreturn".to_string(), _Noreturn),
-        ].into_iter().collect();
-        Lexer{
-            src: s.chars().collect(),
+impl<'a> Lexer<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Lexer {
+            src_ref: source,
             index: 0,
-            keywords,
         }
     }
 
-    fn is_keyword(&self, name: &str) -> bool {
-        self.keywords.contains_key(name)
-    }
-
-    fn get_keyword_kind(&self, name: &str) -> TokenKind {
-        self.keywords.get(name).unwrap().clone()
+    fn keyword_kind(name: &str) -> Option<TokenKind> {
+        match name {
+            "__restrict" | "__restrict__" => return Some(Keyword("restrict")),
+            _ => {
+                for k in KEYWORDS {
+                    if name == *k {
+                        return Some(Keyword(k));
+                    }
+                }
+                return None;
+            }
+        }
     }
 
     fn cur_char(&self) -> char {
-        self.src[self.index]
+        self.char_at(self.index)
+    }
+
+    fn char_at(&self, index: usize) -> char {
+        self.src_ref.as_bytes()[index] as char
     }
 
     fn has_next(&self) -> bool {
-        let len = self.src.len();
+        let len = self.src_ref.len();
         self.index + 1 < len
     }
 
@@ -156,30 +104,25 @@ impl Lexer {
     }
 
     fn peek_char(&self) -> Option<char> {
-        if self.index < self.src.len() - 1 {
-            Some(self.src[self.index + 1])
+        if self.index < self.src_ref.len() - 1 {
+            Some(self.char_at(self.index + 1))
         } else {
             None
-        }
-    }
-
-    fn peek_next_nth_char(&self, n: usize) -> Option<char> {
-        if self.index + n >= self.src.len() {
-            None
-        } else {
-            Some(self.src[self.index + n])
         }
     }
 
     pub fn gen_token(kind: TokenKind, start_index: usize, len: usize) -> Token {
-        let span = Span{start_index, end_index: start_index+len-1};
-        Token {kind, span}
+        let span = Span {
+            start_index,
+            end_index: start_index + len - 1,
+        };
+        Token { kind, span }
     }
 
     pub fn lex(&mut self) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
-        if self.src.is_empty() {
-            tokens.push(Self::gen_token(Eof, self.src.len(), 1));
+        if self.src_ref.is_empty() {
+            tokens.push(Self::gen_token(Eof, self.src_ref.len(), 1));
             return tokens;
         }
         loop {
@@ -187,200 +130,34 @@ impl Lexer {
             let start_index = self.index;
             match c {
                 ' ' | '\t' | '\n' | '\r' => (),
-                '~' => tokens.push(Self::gen_token(Tilde, start_index, 1)),
-                '.' => {
-                    if matches!(self.peek_char(), Some('.')) && matches!(self.peek_next_nth_char(2), Some('.')) {
-                        tokens.push(Self::gen_token(Variadic_Mark, start_index, 3));
-                        self.next_char();
-                        self.next_char();
-                    } else {
-                        if matches!(self.peek_char(), Some('0'..='9')) {
-                            let num_kind = self.read_num();
-                            let len = self.index - start_index + 1;
-                            tokens.push(Self::gen_token(num_kind, start_index, len));
-                        } else {
-                            tokens.push(Self::gen_token(Period, start_index, 1));
-                        }
-                    }
+                '.' if matches!(self.peek_char(), Some('0'..='9')) => {
+                    let kind = self.read_num();
+                    tokens.push(Self::gen_token(
+                        kind,
+                        start_index,
+                        self.index - start_index + 1,
+                    ));
                 }
-                ':' => tokens.push(Self::gen_token(Colon, start_index, 1)),
-                ';' => tokens.push(Self::gen_token(Semicolon, start_index, 1)),
-                ',' => tokens.push(Self::gen_token(LexComma, start_index, 1)),
-                '+' => {
-                    match self.peek_char() {
-                        Some('+') => {
-                            tokens.push(Self::gen_token(PlusPlus,  start_index, 2));
-                            self.next_char();
-                        }
-                        Some('=') => {
-                            tokens.push(Self::gen_token(PlusAssignment,  start_index, 2));
-                            self.next_char();
-                        },
-                        _ => tokens.push(Self::gen_token(Plus, start_index, 1)),
-                    }
-                    
-                }
-                '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),
-                ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
-                '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
-                '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
-                '[' => tokens.push(Self::gen_token(LSquareBracket, start_index, 1)),
-                ']' => tokens.push(Self::gen_token(RSquareBracket, start_index, 1)),
-                '&' => {
-                    match self.peek_char() {
-                        Some('&') => {
-                            tokens.push(Self::gen_token(LOGAND, start_index, 2));
-                            self.next_char();
-                        }
-                        Some('=') => {
-                            tokens.push(Self::gen_token(BitAndAssignment, start_index, 2));
-                            self.next_char();
-                        }
-                        _ => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
-                    }
-                }
-                '^' => {
-                    match self.peek_char() {
-                        Some('=') => {
-                            tokens.push(Self::gen_token(BitXORAssignment, start_index, 2));
-                            self.next_char();
-                        }
-                        _ => tokens.push(Self::gen_token(BitXOR, start_index, 1)),
-                    }
-                }
-                '|' => {
-                    match self.peek_char() {
-                        Some('|') => {
-                            tokens.push(Self::gen_token(LOGOR, start_index, 2));
-                            self.next_char();
-                        }
-                        Some('=') => {
-                            tokens.push(Self::gen_token(BitORAssignment, start_index, 2));
-                            self.next_char();
-                        }
-                        _ => tokens.push(Self::gen_token(BitOR, start_index, 1)),
-                    }
-                }
-                '*' => {
-                    match self.peek_char() {
-                        Some('=') => {
-                            tokens.push(Self::gen_token(MulAssignment,  start_index, 2));
-                            self.next_char();
-                        }
-                        _ => tokens.push(Self::gen_token(Mul, start_index, 1)),
-                    }
-                }
-                '%' => {
-                    match self.peek_char() {
-                        Some('=') => {
-                            tokens.push(Self::gen_token(ModulusAssignment,  start_index, 2));
-                            self.next_char();
-                        }
-                        _ => tokens.push(Self::gen_token(Modulus, start_index, 1)),
-                    }
-                }
-                '(' => tokens.push(Self::gen_token(LParen, start_index, 1)),
-                ')' => tokens.push(Self::gen_token(RParen, start_index, 1)),
-                '{' => tokens.push(Self::gen_token(LBrace, start_index, 1)),
-                '}' => tokens.push(Self::gen_token(RBrace, start_index, 1)),
-                '[' => tokens.push(Self::gen_token(LSquareBracket, start_index, 1)),
-                ']' => tokens.push(Self::gen_token(RSquareBracket, start_index, 1)),
-                '&' => tokens.push(Self::gen_token(Ampersand, start_index, 1)),
-                '-' => {
-                    match self.peek_char() {
-                        Some('>') => {
-                            tokens.push(Self::gen_token(Arrow,  start_index, 2));
-                            self.next_char();
-                        },
-                        Some('-') => {
-                            tokens.push(Self::gen_token(MinusMinus,  start_index, 2));
-                            self.next_char();
-                        },
-                        Some('=') => {
-                            tokens.push(Self::gen_token(MinusAssignment,  start_index, 2));
-                            self.next_char();
-                        }
-                        _ => tokens.push(Self::gen_token(Minus, start_index, 1)),
-                    }
-                },
                 'A'..='Z' | 'a'..='z' | '_' => {
                     let name = self.read_ident();
-                    let tok_kind = if self.is_keyword(&name) {
-                        self.get_keyword_kind(&name)
-                    } else {
-                        LexIdent(name.clone())
-                    };
-                    let tok = Self::gen_token(tok_kind, start_index, name.len());
-                    tokens.push(tok);
-                },
-                '=' => {
-                    match self.peek_char() {
-                        Some('=') => {
-                            tokens.push(Self::gen_token(Eq, start_index, 2));
-                            self.next_char();
-                        },
-                        _ => tokens.push(Self::gen_token(LexAssignment, start_index, 1)),
-                    }
-                },
-                '?' => tokens.push(Self::gen_token(QuestionMark, start_index, 1)),
-                '!' => {
-                    match self.peek_char() {
-                        Some('=') => {
-                            tokens.push(Self::gen_token(Neq, start_index, 2));
-                            self.next_char();
-                        },
-                        _ => tokens.push(Self::gen_token(Exclamation, start_index, 1)),
-                    }
-                },
-                '<' => {
-                    match self.peek_char() {
-                        Some('<') => {
-                            self.next_char();
-                            match self.peek_char() {
-                                Some('=') => {
-                                    tokens.push(Self::gen_token(SHLAssignment, start_index, 3));
-                                    self.next_char();
-                                },
-                                _ => tokens.push(Self::gen_token(SHL, start_index, 2)),
-                            }
-                        },
-                        Some('=') => {
-                            tokens.push(Self::gen_token(LE, start_index, 2));
-                            self.next_char();
-                        },
-                        _ => tokens.push(Self::gen_token(LT, start_index, 1)),
-                    }
-                },
-                '>' => {
-                    match self.peek_char() {
-                        Some('>') => {
-                            self.next_char();
-                            match self.peek_char() {
-                                Some('=') => {
-                                    tokens.push(Self::gen_token(SHRAssignment, start_index, 3));
-                                    self.next_char();
-                                },
-                                _ => tokens.push(Self::gen_token(SHR, start_index, 2)),
-                            }
-                        },
-                        Some('=') => {
-                            tokens.push(Self::gen_token(GE, start_index, 2));
-                            self.next_char();
-                        },
-                        _ => tokens.push(Self::gen_token(GT, start_index, 1)),
-                    }
-                },
+                    let len = name.len();
+                    let kind = Self::keyword_kind(&name).unwrap_or(LexIdent(name));
+                    tokens.push(Self::gen_token(kind, start_index, len));
+                }
                 '0'..='9' => {
-                    let integer_kind = self.read_num();
-                    let len = self.index - start_index + 1;
-                    tokens.push(Self::gen_token(integer_kind, start_index, len));
-                },
+                    let kind = self.read_num();
+                    tokens.push(Self::gen_token(
+                        kind,
+                        start_index,
+                        self.index - start_index + 1,
+                    ));
+                }
                 '\'' => {
                     let character = self.read_char_literal();
                     match character {
                         Ok(byte) => {
                             let end_index = self.index;
-                            let len = end_index-start_index+1;
+                            let len = end_index - start_index + 1;
                             // @Note: Both GCC and this compiler treat char literal as 32-bit signed integer.
                             // However, the difference is that GCC sign extended the char from 8-bit to 32-bit,
                             // while this compiler just 0 extend the char from 8-bit to 32-bit: we first 0 extend
@@ -391,39 +168,41 @@ impl Lexer {
                             // number whose data type is 32-bit singed integer.
                             // So, in GCC, (-128=='\x80') evaluates to 1, in this compiler, (128=='\x80') evaluates to 1.
                             // I don't known whether this difference will cause any problem, we'll see.
-                            tokens.push(Self::gen_token(Lex_Integer{value: byte as i64, ty: tInt}, start_index, len));
+                            tokens.push(Self::gen_token(
+                                Lex_Integer {
+                                    value: byte as i64,
+                                    ty: tInt,
+                                },
+                                start_index,
+                                len,
+                            ));
                         }
                         Err(s) => {
                             lexical_error_at(start_index, &s);
                         }
                     }
                 }
-                '"' => {
-                    match self.read_string() {
-                        Ok(bytes) => {
-                            let display = String::from_utf8_lossy(&bytes).into_owned();
-                            let consumed = self.index - start_index + 1;
-                            tokens.push(Self::gen_token(StringLiteral(bytes), start_index, consumed));
-                        },
-                        Err(s) => {
-                            lexical_error_at(start_index, &s);
-                        },
+                '"' => match self.read_string() {
+                    Ok(bytes) => {
+                        let consumed = self.index - start_index + 1;
+                        tokens.push(Self::gen_token(StringLiteral(bytes), start_index, consumed));
                     }
-                },
+                    Err(s) => {
+                        lexical_error_at(start_index, &s);
+                    }
+                }
                 '/' => {
                     match self.peek_char() {
-                        Some('=') => {
-                            tokens.push(Self::gen_token(DivAssignment,  start_index, 2));
-                            self.next_char();
-                        }
                         Some('/') => {
                             // Line comment: skip until end of line.
                             self.next_char();
                             while let Some(nc) = self.peek_char() {
-                                if nc == '\n' { break; }
+                                if nc == '\n' {
+                                    break;
+                                }
                                 self.next_char();
                             }
-                        },
+                        }
                         Some('*') => {
                             // Block comment: skip until closing "*/".
                             self.next_char();
@@ -435,21 +214,35 @@ impl Lexer {
                                             self.next_char();
                                             break;
                                         }
-                                    },
+                                    }
                                     Some(_) => self.next_char(),
                                     None => {
                                         lexical_error_at(start_index, "unclosed block comment");
-                                    },
+                                    }
                                 }
                             }
-                        },
-                        _ => tokens.push(Self::gen_token(Div, start_index, 1)),
+                        }
+                        _ => {
+                            let punctuator = self.read_punctuator().unwrap();
+                            tokens.push(Self::gen_token(
+                                Punct(punctuator),
+                                start_index,
+                                punctuator.len(),
+                            ));
+                        }
                     }
-                },
+                }
                 _ => {
-                    let err_msg = format!("Unknown character: '{}'.", c);
-                    lexical_error_at(start_index, &err_msg);
-                },
+                    if let Some(punctuator) = self.read_punctuator() {
+                        tokens.push(Self::gen_token(
+                            Punct(punctuator),
+                            start_index,
+                            punctuator.len(),
+                        ));
+                    } else {
+                        lexical_error_at(start_index, &format!("Unknown character: '{}'.", c));
+                    }
+                }
             }
             if self.has_next() {
                 self.next_char();
@@ -460,13 +253,25 @@ impl Lexer {
         // Rust interprets slicing indices as pointing to the spaces between elements,
         // not the elements themselves.
         // Since we set Eof token's start_index to src.len(), length to 0,
-        // both start_index and end_index are src.len(), i.e., both 
+        // both start_index and end_index are src.len(), i.e., both
         // points to the space at the very end after the last element.
         // So We get an empty string from src[start_index.. end_index].
-        // In fact, for any string and index: 
+        // In fact, for any string and index:
         // as long as 0 ≤ index ≤ string.len() satisfied, string[index.. index] is a empty string.
-        tokens.push(Self::gen_token(Eof, self.src.len(), 0));
+        tokens.push(Self::gen_token(Eof, self.src_ref.len(), 0));
         tokens
+    }
+
+    fn read_punctuator(&mut self) -> Option<&'static str> {
+
+        let rest = &self.src_ref[self.index..];
+        for punct in PUNCTUATORS {
+            if rest.starts_with(punct) {
+                self.index += punct.len() - 1;
+                return Some(punct);
+            }
+        }
+        return None;
     }
 
     // This function can read integer and floating point constant number in C.
@@ -476,25 +281,25 @@ impl Lexer {
         debug_assert!(matches!(self.cur_char(), '0'..='9' | '.'));
 
         let start = self.index;
-        let len = self.src.len();
+        let len = self.src_ref.len();
         let mut end = start;
 
         if self.cur_char() == '0' && matches!(self.peek_char(), Some('x' | 'X')) {
             end += 2;
 
             let digits_start = end;
-            while end < len && self.src[end].is_ascii_hexdigit() {
+            while end < len && self.char_at(end).is_ascii_hexdigit() {
                 end += 1;
             }
             let has_integer_digits = end > digits_start;
 
             let mut has_fraction_digits = false;
             let mut is_float = false;
-            if end < len && self.src[end] == '.' {
+            if end < len && self.char_at(end) == '.' {
                 is_float = true;
                 end += 1;
                 let fraction_start = end;
-                while end < len && self.src[end].is_ascii_hexdigit() {
+                while end < len && self.char_at(end).is_ascii_hexdigit() {
                     end += 1;
                 }
                 has_fraction_digits = end > fraction_start;
@@ -504,15 +309,15 @@ impl Lexer {
                 lexical_error_at(start, "invalid hex number format");
             }
 
-            if end < len && matches!(self.src[end], 'p' | 'P') {
+            if end < len && matches!(self.char_at(end), 'p' | 'P') {
                 is_float = true;
                 end += 1;
-                if end < len && matches!(self.src[end], '+' | '-') {
+                if end < len && matches!(self.char_at(end), '+' | '-') {
                     end += 1;
                 }
 
                 let exponent_start = end;
-                while end < len && self.src[end].is_ascii_digit() {
+                while end < len && self.char_at(end).is_ascii_digit() {
                     end += 1;
                 }
                 if end == exponent_start {
@@ -529,28 +334,28 @@ impl Lexer {
             return self.read_int();
         }
 
-        while end < len && self.src[end].is_ascii_digit() {
+        while end < len && self.char_at(end).is_ascii_digit() {
             end += 1;
         }
         let mut is_float = self.cur_char() == '.';
 
-        if end < len && self.src[end] == '.' {
+        if end < len && self.char_at(end) == '.' {
             is_float = true;
             end += 1;
-            while end < len && self.src[end].is_ascii_digit() {
+            while end < len && self.char_at(end).is_ascii_digit() {
                 end += 1;
             }
         }
 
-        if end < len && matches!(self.src[end], 'e' | 'E') {
+        if end < len && matches!(self.char_at(end), 'e' | 'E') {
             is_float = true;
             end += 1;
-            if end < len && matches!(self.src[end], '+' | '-') {
+            if end < len && matches!(self.char_at(end), '+' | '-') {
                 end += 1;
             }
 
             let exponent_start = end;
-            while end < len && self.src[end].is_ascii_digit() {
+            while end < len && self.char_at(end).is_ascii_digit() {
                 end += 1;
             }
             if end == exponent_start {
@@ -567,32 +372,32 @@ impl Lexer {
 
     fn finish_float(&mut self, start: usize, mut end: usize, is_hex: bool) -> TokenKind {
         let mut is_float_type = false;
-        if end < self.src.len() {
-            match self.src[end] {
+        if end < self.src_ref.len() {
+            match self.char_at(end) {
                 'f' | 'F' => {
                     is_float_type = true;
                     end += 1;
-                },
+                }
                 'l' | 'L' => {
                     end += 1;
-                },
+                }
                 c if Self::is_ident_continue(c) => {
                     lexical_error_at(end, "invalid suffix on floating constant");
-                },
+                }
                 _ => (),
             }
         }
 
-        if end < self.src.len() && Self::is_ident_continue(self.src[end]) {
+        if end < self.src_ref.len() && Self::is_ident_continue(self.char_at(end)) {
             lexical_error_at(end, "invalid suffix on floating constant");
         }
 
-        let number_end = if matches!(self.src[end - 1], 'f' | 'F' | 'l' | 'L') {
+        let number_end = if matches!(self.char_at(end - 1), 'f' | 'F' | 'l' | 'L') {
             end - 1
         } else {
             end
         };
-        let literal: String = self.src[start..number_end].iter().collect();
+        let literal = self.src_ref[start..number_end].to_string();
         self.index = end - 1;
 
         let value = if is_hex {
@@ -693,7 +498,9 @@ impl Lexer {
                 let cur_digit = self.cur_char() as u64 - '0' as u64;
                 result *= base;
                 result += cur_digit;
-                if !matches!(self.peek_char(), Some('0'..='9')) {break;}
+                if !matches!(self.peek_char(), Some('0'..='9')) {
+                    break;
+                }
                 self.next_char();
             }
         }
@@ -702,7 +509,9 @@ impl Lexer {
                 let cur_digit = self.cur_char() as u64 - '0' as u64;
                 result *= base;
                 result += cur_digit;
-                if !matches!(self.peek_char(), Some('0'..='7')) {break;}
+                if !matches!(self.peek_char(), Some('0'..='7')) {
+                    break;
+                }
                 self.next_char();
             }
         }
@@ -711,7 +520,9 @@ impl Lexer {
                 let cur_digit = self.cur_char() as u64 - '0' as u64;
                 result *= base;
                 result += cur_digit;
-                if !matches!(self.peek_char(), Some('0'..='1')) {break;}
+                if !matches!(self.peek_char(), Some('0'..='1')) {
+                    break;
+                }
                 self.next_char();
             }
         }
@@ -728,7 +539,9 @@ impl Lexer {
                 result *= base;
                 result += cur_digit;
 
-                if !matches!(self.peek_char(),  Some('0'..='9' | 'a'..='f' | 'A'..='F')) {break;}
+                if !matches!(self.peek_char(), Some('0'..='9' | 'a'..='f' | 'A'..='F')) {
+                    break;
+                }
                 self.next_char();
             }
         }
@@ -747,7 +560,10 @@ impl Lexer {
         let mut u = false;
         if l_count > 0 {
             if l_count > 2 {
-                let err_msg = format!("At most 2 L (or l) suffix is allowed, but you give {} of it.", l_count);
+                let err_msg = format!(
+                    "At most 2 L (or l) suffix is allowed, but you give {} of it.",
+                    l_count
+                );
                 lexical_error_at(self.index, &err_msg);
             } else {
                 l = true;
@@ -755,7 +571,10 @@ impl Lexer {
         }
         if u_count > 0 {
             if u_count > 1 {
-                let err_msg = format!("At most 1 U (or u) suffix is allowed, but you give {} of it.", u_count);
+                let err_msg = format!(
+                    "At most 1 U (or u) suffix is allowed, but you give {} of it.",
+                    u_count
+                );
                 lexical_error_at(self.index, &err_msg);
             } else {
                 u = true;
@@ -778,17 +597,17 @@ impl Lexer {
             } else if l {
                 ty = tLong;
             } else if u {
-                ty = if (result >> 32) != 0 {tULong} else {tUInt};
+                ty = if (result >> 32) != 0 { tULong } else { tUInt };
             } else {
-                ty = if (result >> 31) != 0 {tLong} else {tInt};
+                ty = if (result >> 31) != 0 { tLong } else { tInt };
             }
         } else {
             if l && u {
                 ty = tULong;
             } else if l {
-                ty = if (result >> 63) != 0 {tULong} else {tLong};
+                ty = if (result >> 63) != 0 { tULong } else { tLong };
             } else if u {
-                ty = if (result >> 32) != 0 {tULong} else {tInt};
+                ty = if (result >> 32) != 0 { tULong } else { tInt };
             // According to C spec:
             // For unsuffixed non-decimal integer constants, choose the first
             // type whose range contains the value, in this order:
@@ -804,7 +623,10 @@ impl Lexer {
             }
         }
 
-        return Lex_Integer{value: result as i64, ty};
+        return Lex_Integer {
+            value: result as i64,
+            ty,
+        };
     }
 
     // @Question: Should we return a u8 or i8?
@@ -816,7 +638,7 @@ impl Lexer {
             return Err(error_info);
         }
         let the_char_literal = if self.cur_char() == '\\' {
-             self.read_escaped_char()
+            self.read_escaped_char()
         } else {
             self.cur_char() as u8
         };
@@ -835,7 +657,9 @@ impl Lexer {
             if self.has_next() {
                 self.next_char();
             } else {
-                let error_info = "reaching end of file without seeing closing \" while parsing string literal".to_string();
+                let error_info =
+                    "reaching end of file without seeing closing \" while parsing string literal"
+                        .to_string();
                 return Err(error_info);
             }
             if self.cur_char() == '"' {
@@ -844,9 +668,7 @@ impl Lexer {
             if self.cur_char() == '\\' {
                 bytes.push(self.read_escaped_char());
             } else {
-                let mut buf = [0u8; 4];
-                let encoded = self.cur_char().encode_utf8(&mut buf);
-                bytes.extend_from_slice(encoded.as_bytes());
+                bytes.push(self.src_ref.as_bytes()[self.index]);
             }
         }
     }
@@ -907,7 +729,11 @@ impl Lexer {
             // Per the C standard, \x consumes an unbounded run of hex digits;
             // overflow past one byte is allowed and the low 8 bits are kept.
             num = num.wrapping_shl(4).wrapping_add(digit_number);
-            if self.peek_char().expect("no char left to be peeked").is_ascii_hexdigit() {
+            if self
+                .peek_char()
+                .expect("no char left to be peeked")
+                .is_ascii_hexdigit()
+            {
                 self.next_char();
                 c = self.cur_char();
             } else {
@@ -924,26 +750,34 @@ impl Lexer {
         loop {
             match self.peek_char() {
                 Some(c) => {
-                    if (c <= '9' && c >= '0') | (c >= 'a' && c <= 'z') | (c >= 'A' && c <= 'Z') | (c == '_') {
+                    if (c <= '9' && c >= '0')
+                        | (c >= 'a' && c <= 'z')
+                        | (c >= 'A' && c <= 'Z')
+                        | (c == '_')
+                    {
                         len += 1;
                         self.next_char();
                     } else {
                         break;
                     }
-                },
+                }
                 None => break,
             }
         }
-        self.src[i..i+len].iter().collect()
+        self.src_ref[i..i + len].to_string()
     }
 }
 
 fn lexical_error_at(index: usize, err_msg: &str) -> ! {
     use crate::error_span;
-    let span = Span{start_index: index, end_index: index};
+    let span = Span {
+        start_index: index,
+        end_index: index,
+    };
     let error_stage_info = "Lexical error: ".to_string();
-    let error_result = error_span(span, &(error_stage_info+err_msg));
+    let error_result = error_span(span, &(error_stage_info + err_msg));
     println!("{}", error_result);
     // Lex error is strict, once encountered, we force the compilation to stop.
     exit(1);
 }
+

@@ -4,6 +4,7 @@ pub mod codegen;
 pub mod ir;
 pub mod lex;
 pub mod parse;
+pub mod preprocess;
 // pub mod pretty;
 pub mod common;
 pub mod driver;
@@ -11,6 +12,7 @@ use crate::analyze::*;
 use crate::codegen::*;
 use crate::lex::*;
 use crate::parse::*;
+use crate::preprocess::*;
 use crate::ExprType::*;
 use crate::TokenKind::*;
 use colored::*;
@@ -27,7 +29,7 @@ static LINE_STARTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 fn build_line_starts(src: &str) -> Vec<usize> {
     let mut starts = vec![0];
-    for (i, c) in src.chars().enumerate() {
+    for (i, c) in src.char_indices() {
         if c == '\n' {
             starts.push(i + 1);
         }
@@ -60,18 +62,19 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
     }
 
     // lex
-    let mut lexer: Lexer;
-    {
+    let mut tokens = {
+        let mut lexer: Lexer;
         let src_str: &str = &SRC.lock().unwrap();
         lexer = Lexer::new(src_str);
-    }
-    let mut tokens = lexer.lex();
-    // pretty::print_tokens(&tokens);
+        lexer.lex()
+    };
+
+    // preprocess
+    let mut preprocessed_tokens = preprocess(tokens);
     // parse
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::new(preprocessed_tokens);
     let (program, syntax_errors) = parser.parse();
     if syntax_errors.is_empty() {
-        // pretty::print_program(&program);
         // analyze
         let mut analyzer = ProgramAnalyzer::new();
         let analyzed_program = analyzer.analyze(program);
