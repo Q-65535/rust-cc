@@ -31,18 +31,16 @@ use Integer_Const_Type::*;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
+    // bol: begining of line
+    pub at_bol: bool,
     pub span: Span,
 }
-
-const qweqr: &str = "swewreqw";
-
-// const seqwq: [&str] = ["ss", "qwe"];
 
 // Longest spellings come first so lexing follows C's maximal-munch rule.
 const PUNCTUATORS: &[&str] = &[
     "<<=", ">>=", "...", "->", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=", "&&",
     "||", "<<", ">>", "==", "!=", "<=", ">=", ".", "+", "-", "*", "/", "%", "&", "^", "|", "(",
-    ")", "{", "}", "[", "]", "=", "<", ">", "!", "~", "?", ";", ":", ",",
+    ")", "{", "}", "[", "]", "=", "<", ">", "!", "~", "?", ";", ":", ",", "#",
 ];
 
 const KEYWORDS: &[&str] = &[
@@ -56,6 +54,7 @@ const KEYWORDS: &[&str] = &[
 pub struct Lexer<'a> {
     src_ref: &'a str,
     index: usize,
+    at_bol: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -63,6 +62,7 @@ impl<'a> Lexer<'a> {
         Lexer {
             src_ref: source,
             index: 0,
+            at_bol: true,
         }
     }
 
@@ -111,28 +111,31 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn gen_token(kind: TokenKind, start_index: usize, len: usize) -> Token {
+    pub fn gen_token(&mut self, kind: TokenKind, start_index: usize, len: usize) -> Token {
         let span = Span {
             start_index,
             end_index: start_index + len - 1,
         };
-        Token { kind, span }
+        let at_bol = self.at_bol;
+        self.at_bol = false;
+        return Token{kind, at_bol, span};
     }
 
     pub fn lex(&mut self) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
         if self.src_ref.is_empty() {
-            tokens.push(Self::gen_token(Eof, self.src_ref.len(), 1));
+            tokens.push(self.gen_token(Eof, self.src_ref.len(), 1));
             return tokens;
         }
         loop {
             let c = self.cur_char();
             let start_index = self.index;
             match c {
-                ' ' | '\t' | '\n' | '\r' => (),
+                '\n' => self.at_bol = true,
+                ' ' | '\t' | '\r' => (),
                 '.' if matches!(self.peek_char(), Some('0'..='9')) => {
                     let kind = self.read_num();
-                    tokens.push(Self::gen_token(
+                    tokens.push(self.gen_token(
                         kind,
                         start_index,
                         self.index - start_index + 1,
@@ -142,11 +145,11 @@ impl<'a> Lexer<'a> {
                     let name = self.read_ident();
                     let len = name.len();
                     let kind = Self::keyword_kind(&name).unwrap_or(LexIdent(name));
-                    tokens.push(Self::gen_token(kind, start_index, len));
+                    tokens.push(self.gen_token(kind, start_index, len));
                 }
                 '0'..='9' => {
                     let kind = self.read_num();
-                    tokens.push(Self::gen_token(
+                    tokens.push(self.gen_token(
                         kind,
                         start_index,
                         self.index - start_index + 1,
@@ -168,7 +171,7 @@ impl<'a> Lexer<'a> {
                             // number whose data type is 32-bit singed integer.
                             // So, in GCC, (-128=='\x80') evaluates to 1, in this compiler, (128=='\x80') evaluates to 1.
                             // I don't known whether this difference will cause any problem, we'll see.
-                            tokens.push(Self::gen_token(
+                            tokens.push(self.gen_token(
                                 Lex_Integer {
                                     value: byte as i64,
                                     ty: tInt,
@@ -185,7 +188,7 @@ impl<'a> Lexer<'a> {
                 '"' => match self.read_string() {
                     Ok(bytes) => {
                         let consumed = self.index - start_index + 1;
-                        tokens.push(Self::gen_token(StringLiteral(bytes), start_index, consumed));
+                        tokens.push(self.gen_token(StringLiteral(bytes), start_index, consumed));
                     }
                     Err(s) => {
                         lexical_error_at(start_index, &s);
@@ -224,7 +227,7 @@ impl<'a> Lexer<'a> {
                         }
                         _ => {
                             let punctuator = self.read_punctuator().unwrap();
-                            tokens.push(Self::gen_token(
+                            tokens.push(self.gen_token(
                                 Punct(punctuator),
                                 start_index,
                                 punctuator.len(),
@@ -234,7 +237,7 @@ impl<'a> Lexer<'a> {
                 }
                 _ => {
                     if let Some(punctuator) = self.read_punctuator() {
-                        tokens.push(Self::gen_token(
+                        tokens.push(self.gen_token(
                             Punct(punctuator),
                             start_index,
                             punctuator.len(),
@@ -258,7 +261,7 @@ impl<'a> Lexer<'a> {
         // So We get an empty string from src[start_index.. end_index].
         // In fact, for any string and index:
         // as long as 0 ≤ index ≤ string.len() satisfied, string[index.. index] is a empty string.
-        tokens.push(Self::gen_token(Eof, self.src_ref.len(), 0));
+        tokens.push(self.gen_token(Eof, self.src_ref.len(), 0));
         tokens
     }
 

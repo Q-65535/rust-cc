@@ -43,6 +43,11 @@ rebuild:
 #   rust-cc reads source from stdin ("-") and writes an object to test/<name>.o.
 # Step 2: link the object with test/common (which defines
 #   assert()). -xc forces gcc to treat the extension-less `common` file as C.
+
+test/macro.exe: build test/macro.c
+	$(RUST_CC) -c -o test/macro.o test/macro.c
+	$(CC) -o $@ test/macro.o -xc test/common
+
 test/%.exe: build test/%.c
 	$(CC) -o- -E -P -C test/$*.c | $(RUST_CC) -c -o test/$*.o -
 	$(CC) -o $@ test/$*.o -xc test/common
@@ -102,6 +107,11 @@ stage2/%.o: build self.py $(CHIBICC_DIR)/chibicc.h $(CHIBICC_DIR)/%.c
 	mkdir -p stage2
 	python3 self.py $(CHIBICC_DIR)/chibicc.h $(CHIBICC_DIR)/$*.c > stage2/$*.c
 	$(RUST_CC) -c -o $@ stage2/$*.c
+
+stage2/test/macro.exe: stage2/chibicc $(CHIBICC_DIR)/test/macro.c
+	mkdir -p stage2/test
+	./stage2/chibicc -c -o stage2/test/macro.o $(CHIBICC_DIR)/test/macro.c
+	$(CC) -o $@ stage2/test/macro.o -xc $(CHIBICC_DIR)/test/common
 
 stage2/test/%.exe: stage2/chibicc $(CHIBICC_DIR)/test/%.c
 	mkdir -p stage2/test
