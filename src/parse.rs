@@ -4,7 +4,7 @@ use crate::lex::*;
 use crate::lex::TokenKind::{self, *};
 use crate::lex::Integer_Const_Type::{self, *};
 use ExprType::*;
-use crate::SRC;
+use crate::FILE_RECORDS;
 use crate::common::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -405,8 +405,7 @@ impl ScopeManager {
 }
 
 
-pub struct Parser<'a> {
-    file_records: &'a Vec<Source_File>,
+pub struct Parser {
     tokens: Vec<Token>,
     cur_index: usize,
     scope_manager: ScopeManager,
@@ -415,21 +414,18 @@ pub struct Parser<'a> {
     stmt_labels: Vec<String>,
     // This is just for the convenience for debugging.
     // It just shows where we are parsing now.
-    cur_parsing_context: String,
+    // cur_parsing_context: String,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(file_records: &'a Vec<Source_File>, tokens: Vec<Token>) -> Self {
-        let first_token = &tokens[0];
-        let starting_context = token_to_context(&file_records[first_token.span.file_index], &tokens[0]);
+impl Parser {
+    pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
-            file_records,
             tokens,
             cur_index: 0,
             scope_manager: ScopeManager::new(),
             syntax_errors: Vec::new(),
             stmt_labels: Vec::new(),
-            cur_parsing_context: starting_context,
+            // cur_parsing_context: starting_context,
         }
     }
 
@@ -481,7 +477,7 @@ impl<'a> Parser<'a> {
                 expect_kind,
                 self.cur_token().kind,
             );
-            Err(self.error_token(self.cur_token(), &err_msg))
+            Err(error_token(self.cur_token(), &err_msg))
         }
     }
 
@@ -548,7 +544,7 @@ impl<'a> Parser<'a> {
                     let name = get_declarator_name(&init_dector.dector);
                     if self.scope_manager.is_typedef_name_in_current_scope(name) {
                         let error_description = "typedef name is already being used!";
-                        let error_message = self.syntax_error(init_dector.dector.span, error_description);
+                        let error_message = syntax_error(init_dector.dector.span, error_description);
                         return Err(error_message);
                     }
                     self.scope_manager.add_typedef_name(name);
@@ -594,7 +590,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_decl_specs(&mut self) -> Result<Vec<Decl_Spec>, String> {
-        debug_assert!(self.is_decl_spec(self.cur_token()));
+        // debug_assert!(self.is_decl_spec(self.cur_token()));
         let mut decl_specs = Vec::new();
         while self.is_decl_spec(self.cur_token()) {
             let start = self.cur_token().span;
@@ -706,7 +702,7 @@ impl<'a> Parser<'a> {
                     Decl_Spec_Kind::Enum(enum_specifier)
                 }
                 _ => {
-                    let err_msg = self.error_token(self.cur_token(), "unknown declaration specifer!");
+                    let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
                     return Err(err_msg);
                 }
             };
@@ -730,7 +726,7 @@ impl<'a> Parser<'a> {
             Keyword("union") => Is_Union,
             Keyword("struct") => Is_Struct,
             // @Fix: This should be a compiler bug, not a compiler error.
-            _ => return Err(self.error_token(&keyword, "expected 'struct' or 'union'")),
+            _ => return Err(error_token(&keyword, "expected 'struct' or 'union'")),
         };
 
         let mut struct_specifier = Struct_Union_Specifier{kind, ident: None, members: None};
@@ -744,7 +740,7 @@ impl<'a> Parser<'a> {
         if self.at(&Punct("{")) {
             struct_specifier.members = Some(self.parse_struct_decl_list()?);
         } else if struct_specifier.ident.is_none() {
-            return Err(self.error_token(
+            return Err(error_token(
                 self.cur_token(),
                 "parsing struct specifier error: expected a tag or member list",
             ));
@@ -765,12 +761,12 @@ impl<'a> Parser<'a> {
         if self.at(&Punct("{")) {
             let enumerators = self.parse_enumerator_list()?;
             if enumerators.len() == 0 {
-                let error_message = self.error_token(self.cur_token(), "empty enum is invalid");
+                let error_message = error_token(self.cur_token(), "empty enum is invalid");
                 return Err(error_message);
             }
             enum_specifier.enumerators = Some(enumerators);
         } else if enum_specifier.ident.is_none() {
-            let error_message = self.error_token(self.cur_token(), "parsing struct specifier error: expected a tag or member list");
+            let error_message = error_token(self.cur_token(), "parsing struct specifier error: expected a tag or member list");
             return Err(error_message);
         }
         Ok(enum_specifier)
@@ -806,7 +802,7 @@ impl<'a> Parser<'a> {
             let ident = if let LexIdent(name) = &self.cur_token().kind {
                 gen_identifier_from_token(self.cur_token())
             } else {
-                let error_message = self.error_token(self.cur_token(),
+                let error_message = error_token(self.cur_token(),
                 "trying to parse enumerator constant, but this is not a identifier!");
                 return Err(error_message);
             };
@@ -860,7 +856,7 @@ impl<'a> Parser<'a> {
                 Box::new(Direct_Declarator::Paren_Enclosed_Declarator(paren_enclosed_dector))
             },
             _ => {
-                return Err(self.error_token(
+                return Err(error_token(
                     self.cur_token(),
                     "unable to parse declarator here: not an identifier or an opening parenthesis.",
                 ));
@@ -981,7 +977,7 @@ impl<'a> Parser<'a> {
                     {
                         if !params.is_empty() {
                             let error_info = "'void' must be the only parameter";
-                            return Err(self.syntax_error(decl_specs[0].span, error_info));
+                            return Err(syntax_error(decl_specs[0].span, error_info));
                         }
                         break 'parse_params_loop;
                     }
@@ -1029,7 +1025,7 @@ impl<'a> Parser<'a> {
                 Ok(FuncParam{params, is_variadic})
             },
             _ => {
-                Err(self.error_token(self.cur_token(), "Can't parse declarator suffix here!"))
+                Err(error_token(self.cur_token(), "Can't parse declarator suffix here!"))
             },
         }
     }
@@ -1096,7 +1092,7 @@ impl<'a> Parser<'a> {
                 let label_name = self.parse_raw_ident_name()?;
                 if self.stmt_labels.contains(&label_name) {
                     let error_message = format!("duplicate statement label {}", label_name);
-                    return Err(self.error_token(self.cur_token(), &error_message));
+                    return Err(error_token(self.cur_token(), &error_message));
                 }
                 self.stmt_labels.push(label_name.clone());
                 self.expect(&Punct(":"));
@@ -1166,7 +1162,7 @@ impl<'a> Parser<'a> {
         if self.at(&Punct("}")) {
             self.bump();
         } else {
-            self.syntax_errors.push(self.error_token(
+            self.syntax_errors.push(error_token(
                 self.cur_token(),
                 "expected '}' to close block",
             ));
@@ -1266,7 +1262,7 @@ impl<'a> Parser<'a> {
                 Punct(".") | Punct("->") => self.parse_request_struct_member(expr)?,
 
                 _ => {
-                    return Err(self.error_token(
+                    return Err(error_token(
                         self.cur_token(),
                         "not support parsing this token",
                     ));
@@ -1418,7 +1414,7 @@ impl<'a> Parser<'a> {
             },
             LexIdent(_) => self.parse_ident(),
             StringLiteral(s) => self.parse_string(),
-            _ => Err(self.error_token(&prefix_starting_token, "can't parse prefix expression here"))
+            _ => Err(error_token(&prefix_starting_token, "can't parse prefix expression here"))
         }
     }
 
@@ -1507,7 +1503,7 @@ impl<'a> Parser<'a> {
             let expr = Expr::new(content, tok.span);
             Ok(expr)
         } else {
-            Err(self.error_token(&tok, "expect a string literal"))
+            Err(error_token(&tok, "expect a string literal"))
         }
     }
 
@@ -1516,7 +1512,7 @@ impl<'a> Parser<'a> {
         if let LexIdent(name) = &tok.kind {
             Ok(name.clone())
         } else {
-            Err(self.error_token(&tok, "expect an identifier"))
+            Err(error_token(&tok, "expect an identifier"))
         }
     }
 
@@ -1526,7 +1522,7 @@ impl<'a> Parser<'a> {
             let expr = Expr::new(Ident(name.clone()), tok.span);
             Ok(expr)
         } else {
-            Err(self.error_token(&tok, "expect an identifier"))
+            Err(error_token(&tok, "expect an identifier"))
         }
     }
 
@@ -1545,7 +1541,7 @@ impl<'a> Parser<'a> {
             Ident(_) | Deref(_) | ArrayIndexing(..) | Paren(_) |
             RequestStructMember(..) | CompLit(..)
         ) {
-            return Err(self.syntax_error(lhs.span, "definitely not a lvalue name"));
+            return Err(syntax_error(lhs.span, "definitely not a lvalue name"));
         }
 
         let assignment = self.expect(&Punct("="))?;
@@ -1571,7 +1567,7 @@ impl<'a> Parser<'a> {
                     "parsing error: parse_request_struct_member: expect a struct field name, but got {:?} token\n",
                     member_token.kind,
                 );
-                Err(self.error_token(&member_token, &err_msg))
+                Err(error_token(&member_token, &err_msg))
             },
         }
     }
@@ -1646,25 +1642,48 @@ impl<'a> Parser<'a> {
         let dector = self.parse_declarator()?;
         if let Some(FuncParam{..}) = &dector.suffix {
             if !self.at(&Punct("{")) {
-                return Err(self.error_token(self.cur_token(), "expected function body"));
+                return Err(error_token(self.cur_token(), "expected function body"));
             }
             let items = self.parse_block();
             Ok(Function{specs, dector, items, stmt_labels: self.stmt_labels.clone()})
         } else {
-            Err(self.error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
+            Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
     }
+}
 
-    fn syntax_error(&self, span: Span, diagno_info: &str) -> String {
-        let error_stage_info = "syntax error: ".to_string();
-        let file_index = span.file_index;
-        error_span_at_file(&self.file_records[file_index], span, &(error_stage_info+diagno_info))
-    }
+fn error_token(tok: &Token, info: &str) -> String {
+    syntax_error(tok.span, info)
+}
 
+fn syntax_error(span: Span, diagno_info: &str) -> String {
+    let error_stage_info = "syntax error: ".to_string();
+    error_span(span, &(error_stage_info+diagno_info))
+}
 
-    fn error_token(&self, tok: &Token, info: &str) -> String {
-        self.syntax_error(tok.span, info)
-    }
+// @Smell: Create a new error_reporter.rs file?
+pub fn error_span(span: Span, info: &str) -> String {
+    let (start_line, start_column, end_line, end_column) = {
+        span.locate()
+    };
+    let source_file = &FILE_RECORDS.lock().unwrap()[span.file_index];
+    let source_file_path = source_file.path.clone();
+    let line_content = get_content_at_line(source_file, start_line);
+
+    let mut the_error = String::new();
+                                                            // @Question: what is display()?
+    let error_with_location = format!("{}:{}:{}: {}\n", source_file_path.display(), start_line, start_column, info.red());
+    the_error.push_str(&error_with_location);
+    the_error.push_str(&line_content);
+    the_error.push_str("\n");
+    let spaces = " ".repeat(start_column - 1);
+    let arrows = if start_line == end_line {
+        "^".repeat(span.end_index - span.start_index + 1)
+    } else {
+        "^".to_string()
+    };
+    the_error.push_str(&format!("{}{}", spaces, arrows.red()));
+    return the_error;
 }
 
 fn get_declarator_name(dector: &Declarator) -> &str {
@@ -1714,26 +1733,6 @@ fn starts_abstract_declarator(kind: &TokenKind) -> bool {
     matches!(kind, Punct("*") | Punct("[") | Punct("("))
 }
 
-// @Smell: Create a new error_reporter.rs file?
-pub fn error_span_at_file(source_file: &Source_File, span: Span, info: &str) -> String {
-    let mut the_error = String::new();
-    let (start_line, start_column, end_line, end_column) = span.locate();
-                                                            // @Question: what is display()?
-    let error_with_location = format!("{}:{}:{}: {}\n", source_file.path.display(), start_line, start_column, info.red());
-    the_error.push_str(&error_with_location);
-    let line_content = get_content_at_line(source_file, start_line);
-    the_error.push_str(&line_content);
-    the_error.push_str("\n");
-    let spaces = " ".repeat(start_column - 1);
-    let arrows = if start_line == end_line {
-        "^".repeat(span.end_index - span.start_index + 1)
-    } else {
-        "^".to_string()
-    };
-    the_error.push_str(&format!("{}{}", spaces, arrows.red()));
-    return the_error;
-}
-
 // This is just a utility function used to visually show where the given token is in
 // the source code.
 fn token_to_context(source_file: &Source_File, tok: &Token) -> String {
@@ -1754,3 +1753,4 @@ fn token_to_context(source_file: &Source_File, tok: &Token) -> String {
     context_info.push_str(&format!("{}{}", spaces, arrows));
     context_info
 }
+

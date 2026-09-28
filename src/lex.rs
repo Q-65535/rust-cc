@@ -1,5 +1,5 @@
 use crate::common::*;
-use crate::SRC;
+use crate::FILE_RECORDS;
 use colored::*;
 use std::process::exit;
 use crate::build_line_starts;
@@ -82,20 +82,20 @@ const KEYWORDS: &[&str] = &[
     "register", "restrict", "_Noreturn",
 ];
 
-pub struct Lexer<'a> {
-    file_records: &'a Vec::<Source_File>,
+pub struct Lexer {
     file_index: usize,
-    src_ref: &'a str,
-    index: usize,
+    file_len: usize,
+    index: usize, // @Rename: char_index
     at_bol: bool,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(file_records: &'a Vec::<Source_File>, file_index: usize) -> Self {
+impl Lexer {
+    pub fn new(file_index: usize) -> Self {
+        let mut files = FILE_RECORDS.lock().unwrap();
+        let file_len = files[file_index].content.len();
         Lexer {
-            file_records,
             file_index,
-            src_ref: &file_records[file_index].content,
+            file_len,
             index: 0,
             at_bol: true,
         }
@@ -120,12 +120,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn char_at(&self, index: usize) -> char {
-        self.src_ref.as_bytes()[index] as char
+        let mut files = FILE_RECORDS.lock().unwrap();
+        files[self.file_index].content.as_bytes()[index] as char
     }
 
     fn has_next(&self) -> bool {
-        let len = self.src_ref.len();
-        self.index + 1 < len
+        self.index + 1 < self.file_len
     }
 
     fn next_char(&mut self) {
@@ -139,7 +139,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn peek_char(&self) -> Option<char> {
-        if self.index < self.src_ref.len() - 1 {
+        if self.index < self.file_len - 1 {
             Some(self.char_at(self.index + 1))
         } else {
             None
@@ -159,8 +159,13 @@ impl<'a> Lexer<'a> {
 
     pub fn lex(&mut self) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
-        if self.src_ref.is_empty() {
-            tokens.push(self.gen_token(Eof, self.src_ref.len(), 1));
+        let file_is_empty = {
+            let mut files = FILE_RECORDS.lock().unwrap();
+            files[self.file_index].content.is_empty()
+        };
+
+        if file_is_empty {
+            tokens.push(self.gen_token(Eof, 0, 1));
             return tokens;
         }
         loop {
@@ -297,13 +302,14 @@ impl<'a> Lexer<'a> {
         // So We get an empty string from src[start_index.. end_index].
         // In fact, for any string and index:
         // as long as 0 ≤ index ≤ string.len() satisfied, string[index.. index] is a empty string.
-        tokens.push(self.gen_token(Eof, self.src_ref.len(), 0));
+        tokens.push(self.gen_token(Eof, self.file_len, 0));
         tokens
     }
 
     fn read_punctuator(&mut self) -> Option<&'static str> {
+        let mut files = FILE_RECORDS.lock().unwrap();
+        let rest = &files[self.file_index].content[self.index..];
 
-        let rest = &self.src_ref[self.index..];
         for punct in PUNCTUATORS {
             if rest.starts_with(punct) {
                 self.index += punct.len() - 1;
@@ -320,7 +326,7 @@ impl<'a> Lexer<'a> {
         debug_assert!(matches!(self.cur_char(), '0'..='9' | '.'));
 
         let start = self.index;
-        let len = self.src_ref.len();
+        let len = self.file_len;
         let mut end = start;
 
         if self.cur_char() == '0' && matches!(self.peek_char(), Some('x' | 'X')) {
@@ -411,7 +417,7 @@ impl<'a> Lexer<'a> {
 
     fn finish_float(&mut self, start: usize, mut end: usize, is_hex: bool) -> TokenKind {
         let mut is_float_type = false;
-        if end < self.src_ref.len() {
+        if end < self.file_len {
             match self.char_at(end) {
                 'f' | 'F' => {
                     is_float_type = true;
@@ -427,7 +433,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        if end < self.src_ref.len() && Self::is_ident_continue(self.char_at(end)) {
+        if end < self.file_len && Self::is_ident_continue(self.char_at(end)) {
             self.lexical_error_at(end, "invalid suffix on floating constant");
         }
 
@@ -436,7 +442,12 @@ impl<'a> Lexer<'a> {
         } else {
             end
         };
-        let literal = self.src_ref[start..number_end].to_string();
+
+        let literal = {
+            let mut files = FILE_RECORDS.lock().unwrap();
+            let content_ref = &files[self.file_index].content;
+            content_ref[start..number_end].to_string()
+        };
         self.index = end - 1;
 
         let value = if is_hex {
@@ -707,7 +718,9 @@ impl<'a> Lexer<'a> {
             if self.cur_char() == '\\' {
                 bytes.push(self.read_escaped_char());
             } else {
-                bytes.push(self.src_ref.as_bytes()[self.index]);
+                let mut files = FILE_RECORDS.lock().unwrap();
+                let content_ref = &files[self.file_index].content;
+                bytes.push(content_ref.as_bytes()[self.index]);
             }
         }
     }
@@ -803,18 +816,20 @@ impl<'a> Lexer<'a> {
                 None => break,
             }
         }
-        self.src_ref[i..i + len].to_string()
+        let mut files = FILE_RECORDS.lock().unwrap();
+        let content_ref = &files[self.file_index].content;
+        content_ref[i..i + len].to_string()
     }
 
     fn lexical_error_at(&self, index: usize, error_description: &str) -> ! {
-        use crate::error_span_at_file;
+        use crate::error_span;
         let span = Span {
             file_index: self.file_index,
             start_index: index,
             end_index: index,
         };
         let error_stage_info = "Lexical error: ".to_string();
-        let error_result = error_span_at_file(&self.file_records[self.file_index], span, &(error_stage_info + error_description));
+        let error_result = error_span(span, &(error_stage_info + error_description));
         println!("{}", error_result);
         // Lex error is strict, once encountered, we force the compilation to stop.
         exit(1);

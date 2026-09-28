@@ -9,7 +9,6 @@ use crate::Declaration;
 use crate::Function;
 use crate::Obj;
 use crate::Type::{self, *};
-use crate::SRC;
 use crate::ir::{self, *};
 use crate::analyze::{self, *};
 use crate::common::{self, *};

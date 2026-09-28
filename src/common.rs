@@ -1,5 +1,6 @@
 use std::cmp::{max, min};
 use crate::Source_File;
+use crate::FILE_RECORDS;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
     pub file_index: usize,
@@ -20,35 +21,38 @@ impl Span {
     }
 
     pub fn get_start_line(&self) -> usize {
-        let starts = crate::LINE_STARTS.lock().unwrap();
+        let mut files = FILE_RECORDS.lock().unwrap();
+        let starts = &files[self.file_index].line_starts;
         let line = starts.partition_point(|&s| s <= self.start_index) - 1;
         (line + 1)
     }
 
     pub fn get_start_column(&self) -> usize {
         let line_index = self.get_start_line() - 1;
-        let starts = crate::LINE_STARTS.lock().unwrap();
+        let mut files = FILE_RECORDS.lock().unwrap();
+        let starts = &files[self.file_index].line_starts;
         let first_char_index = starts[line_index];
         let column_index = self.start_index - first_char_index;
         (column_index + 1)
     }
 
     pub fn get_end_line(&self) -> usize {
-        let starts = crate::LINE_STARTS.lock().unwrap();
+        let mut files = FILE_RECORDS.lock().unwrap();
+        let starts = &files[self.file_index].line_starts;
         let line = starts.partition_point(|&s| s <= self.end_index) - 1;
         (line + 1)
     }
 
     pub fn get_end_column(&self) -> usize {
         let line_index = self.get_end_line() - 1;
-        let starts = crate::LINE_STARTS.lock().unwrap();
+        let mut files = FILE_RECORDS.lock().unwrap();
+        let starts = &files[self.file_index].line_starts;
         let first_char_index = starts[line_index];
         let column_index = self.end_index - first_char_index;
         (column_index + 1)
     }
 
     pub fn locate(&self) -> (usize, usize, usize, usize) {
-
         let start_line = self.get_start_line();
         let start_column = self.get_start_column();
         let end_line = self.get_end_line();

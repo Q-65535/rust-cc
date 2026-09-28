@@ -14,7 +14,7 @@ use Direct_Declarator::*;
 use StmtType::*;
 use TokenKind::Punct;
 use BlockItem::*;
-use crate::SRC;
+use crate::FILE_RECORDS;
 use crate::common::{self, *};
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -355,8 +355,7 @@ impl ScopeManager {
     }
 }
 
-pub struct ProgramAnalyzer<'a> {
-    file_records: &'a Vec::<Source_File>,
+pub struct ProgramAnalyzer {
     pub global_data_decls: Vec<Global_Data_Decl>,
     pub scope_manager: ScopeManager,
     pub current_local_var_offset: usize,
@@ -378,11 +377,10 @@ pub struct ProgramAnalyzer<'a> {
     pub defined_global_objects: HashSet<String>,
 }
 
-impl<'a> ProgramAnalyzer<'a> {
-    pub fn new(file_records: &'a Vec<Source_File>) -> Self {
+impl ProgramAnalyzer {
+    pub fn new() -> Self {
         let scope = Scope::new();
         ProgramAnalyzer{
-            file_records,
             global_data_decls: Vec::new(),
             scope_manager: ScopeManager::new(),
             current_local_var_offset: 0,
@@ -415,7 +413,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &func.dector);
                     if !self.defined_functions.insert(name.clone()) {
                         let err_info = format!("semantic error: function {} redefined", name);
-                        self.report_semantic_error(func.dector.span, &err_info);
+                        report_semantic_error(func.dector.span, &err_info);
                     }
                     let object = create_global_obj_with_attribute(&name, &function_type, &symbol_attribute);
                     self.register_global_object(object, func.dector.span);
@@ -457,7 +455,7 @@ impl<'a> ProgramAnalyzer<'a> {
         } else {
             let err_info = format!("compiler bug: we are analyzing a function definition,
             but the data type resolved is not function!.");
-            self.report_semantic_error(fun.dector.span, &err_info);
+            report_semantic_error(fun.dector.span, &err_info);
         }
         // We must enter scope before analyzing function
         // parameters since function parameters are also in
@@ -498,12 +496,12 @@ impl<'a> ProgramAnalyzer<'a> {
         if let Some(previous) = self.scope_manager.resolve_object_at_current_scope(&object.name) {
             if previous.ty != object.ty || previous.is_static != object.is_static {
                 let err_info = format!("semantic error: incompatible redeclaration of {}", object.name);
-                self.report_semantic_error(span, &err_info);
+                report_semantic_error(span, &err_info);
             }
             self.scope_manager.replace_object(object);
         } else if self.scope_manager.contains_symbol_at_current_scope(&object.name) {
             let err_info = format!("semantic error: {} redeclared as a different kind of symbol", object.name);
-            self.report_semantic_error(span, &err_info);
+            report_semantic_error(span, &err_info);
         } else {
             self.scope_manager.add_object(object);
         }
@@ -537,7 +535,7 @@ impl<'a> ProgramAnalyzer<'a> {
                 if symbol_attribute.align < final_type.align() {
                     let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
                     the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
-                    self.report_semantic_error(cur_dector.span, &err_info);
+                    report_semantic_error(cur_dector.span, &err_info);
                 }
             }
             let mut object = create_global_obj_with_attribute(&name, &final_type, &symbol_attribute);
@@ -562,7 +560,7 @@ impl<'a> ProgramAnalyzer<'a> {
             }
             if !self.defined_global_objects.insert(name.clone()) {
                 let err_info = format!("semantic error: global object {} redefined", name);
-                self.report_semantic_error(cur_dector.span, &err_info);
+                report_semantic_error(cur_dector.span, &err_info);
             }
             let analyzed_decl = Global_Data_Decl{obj: object, init_data};
             decls.push(analyzed_decl);
@@ -587,7 +585,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     return init_data;
                 } else {
                     let err_info = format!("semantic error: trying to init an array variable with scalar data.");
-                    self.report_semantic_error(span, &err_info);
+                    report_semantic_error(span, &err_info);
                     exit(1);
                 }
             }
@@ -612,7 +610,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     return init_data;
                 } else {
                     let err_info = format!("semantic error: trying to init a struct variable with scalar data.");
-                    self.report_semantic_error(span, &err_info);
+                    report_semantic_error(span, &err_info);
                     exit(1);
                 }
             }
@@ -630,7 +628,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     }
                     Initializer_Type::Expr(init_expr) => {
                         let err_info = format!("You can only use init_list to initiaize a global union variable, but this is not a init_list.");
-                        self.report_semantic_error(span, &err_info);
+                        report_semantic_error(span, &err_info);
                         exit(1);
                     }
                 }
@@ -641,7 +639,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     if !can_assign_expr(ty, &analyzed_init_expr) {
                         let err_info = format!("mismatch types: wanted type: {:?}, but expression type is {:?}",
                             ty, &analyzed_init_expr.ty);
-                        self.report_semantic_error(init.span, &err_info);
+                        report_semantic_error(init.span, &err_info);
                         exit(1);
                     }
 
@@ -676,7 +674,7 @@ impl<'a> ProgramAnalyzer<'a> {
                                 _ => {
                                     let err_info = format!("you want to assign {:?} to {:?}? Sorry this is not allowed.",
                                     &analyzed_init_expr.ty, ty);
-                                    self.report_semantic_error(init.span, &err_info);
+                                    report_semantic_error(init.span, &err_info);
                                     exit(1);
                                 }
                             };
@@ -687,7 +685,7 @@ impl<'a> ProgramAnalyzer<'a> {
 
                 } else {
                     let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
-                    self.report_semantic_error(span, &err_info);
+                    report_semantic_error(span, &err_info);
                     exit(1);
                 }
             }
@@ -707,7 +705,7 @@ impl<'a> ProgramAnalyzer<'a> {
                         (num as i32) as usize
                     } else {
                         let err_info = format!("semantic error: array size is negative number: {}", num);
-                        self.report_semantic_error(len_expr.span, &err_info);
+                        report_semantic_error(len_expr.span, &err_info);
                         exit(1);
                     };
                 } else {
@@ -765,7 +763,7 @@ impl<'a> ProgramAnalyzer<'a> {
                 Pointer_Mark => cur_type = pointer_to(&cur_type),
                 _ => {
                     let err_info = format!("Compiler bug: not a qualifier or pointer! {:?}", q);
-                    self.report_semantic_error(dector.span, &err_info);
+                    report_semantic_error(dector.span, &err_info);
                 }
             }
         }
@@ -788,7 +786,7 @@ impl<'a> ProgramAnalyzer<'a> {
                 Pointer_Mark => cur_type = pointer_to(&cur_type),
                 _ => {
                     let err_info = format!("Compiler bug, not a qualifier");
-                    self.report_semantic_error(dector.span, &err_info);
+                    report_semantic_error(dector.span, &err_info);
                 }
             }
         }
@@ -818,14 +816,14 @@ impl<'a> ProgramAnalyzer<'a> {
                     Some(the_type) => cur_type = the_type.clone(),
                     None => {
                         let err_info = format!("Storage size of {} is Unkonwn.", &tag_name);
-                        self.report_semantic_error(dector.span, &err_info);
+                        report_semantic_error(dector.span, &err_info);
                     },
                 }
             }
 
             if cur_type == Type::Void {
                 let err_info = format!("variable declared void!");
-                self.report_semantic_error(dector.span, &err_info);
+                report_semantic_error(dector.span, &err_info);
             }
         }
         return (cur_type, name);
@@ -855,7 +853,7 @@ impl<'a> ProgramAnalyzer<'a> {
             self.resolve_declarator(&symbol_attribute, &base_type, dector)
         } else {
             let err_info = format!("Parameter in function definition must have a name.");
-            self.report_semantic_error(param.span, &err_info);
+            report_semantic_error(param.span, &err_info);
             exit(1);
         };
         // Function accepts parameters with array type, but treat it as a pointer.
@@ -869,7 +867,7 @@ impl<'a> ProgramAnalyzer<'a> {
         
         if self.scope_manager.contains_symbol_at_current_scope(&name) {
             let err_info = format!("fatal error: parameter variable {} already defined", &name);
-            self.report_semantic_error(param.span, &err_info);
+            report_semantic_error(param.span, &err_info);
             exit(1);
         } else {
             let obj = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
@@ -899,7 +897,7 @@ impl<'a> ProgramAnalyzer<'a> {
             let (mut final_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, cur_dector);
             if self.scope_manager.contains_symbol_at_current_scope(&name) {
                 let err_info = format!("variable {} already defined", name);
-                self.report_semantic_error(cur_dector.span, &err_info);
+                report_semantic_error(cur_dector.span, &err_info);
             }
             if let Some(init) = &init_dector.init {
                 let normalized_init = normalize_init(init, &final_type);
@@ -913,7 +911,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     if symbol_attribute.align < final_type.align() {
                         let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
                         the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
-                        self.report_semantic_error(cur_dector.span, &err_info);
+                        report_semantic_error(cur_dector.span, &err_info);
                     }
                 }
                 let obj = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
@@ -927,13 +925,13 @@ impl<'a> ProgramAnalyzer<'a> {
                 // and without initializer, this declaration is not allowed.
                 if matches!(&final_type, Type::ArrayOf(..)) && sizeof(&final_type) == 0 {
                     let err_info = format!("variable {} has incomplete type", name);
-                    self.report_semantic_error(cur_dector.span, &err_info);
+                    report_semantic_error(cur_dector.span, &err_info);
                 }
                 if symbol_attribute.align != 0 {
                     if symbol_attribute.align < final_type.align() {
                         let err_info = format!("the specified alignment (which is {}) by _Alignas is less than \
                         the alignment of the type it self (which is {})", symbol_attribute.align, final_type.align());
-                        self.report_semantic_error(cur_dector.span, &err_info);
+                        report_semantic_error(cur_dector.span, &err_info);
                     }
                 }
                 let mut object = self.create_local_obj_with_attribute(&name, &final_type, &symbol_attribute);
@@ -958,7 +956,7 @@ impl<'a> ProgramAnalyzer<'a> {
                 self.resolve_declarator(symbol_attribute, base_type, cur_dector);
             if self.scope_manager.contains_symbol_at_current_scope(&source_name) {
                 let err_info = format!("variable {} already defined", source_name);
-                self.report_semantic_error(cur_dector.span, &err_info);
+                report_semantic_error(cur_dector.span, &err_info);
             }
 
             let mut init_data = None;
@@ -1001,7 +999,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     }
                 } else {
                     let err_info = format!("semantic error: trying to init an array variable with scalar data.");
-                    self.report_semantic_error(span, &err_info);
+                    report_semantic_error(span, &err_info);
                 }
             }
             // @Note: We don't need to consider Tag(tag_name) situation, because
@@ -1060,7 +1058,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     stmts.push(assignment_expr_stmt);
                 } else {
                     let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
-                    self.report_semantic_error(span, &err_info);
+                    report_semantic_error(span, &err_info);
                 }
             }
         }
@@ -1105,7 +1103,7 @@ impl<'a> ProgramAnalyzer<'a> {
                 Pointer_Mark => {
                     let error_info = format!("Compiler bug: Shouldn't encounter pointer mark \
                     in analyzing decl spec phase.");
-                    self.report_semantic_error(spec.span, &error_info);
+                    report_semantic_error(spec.span, &error_info);
                 }
                 Typedef => {
                     var_attribute.is_typedef = true;
@@ -1125,7 +1123,7 @@ impl<'a> ProgramAnalyzer<'a> {
                         cur_type = ty.clone();
                     } else {
                         let error_info = format!("unknown typedef name :{}", name);
-                        self.report_semantic_error(spec.span, &error_info);
+                        report_semantic_error(spec.span, &error_info);
                     }
                     count |= OTHER;
                     continue;
@@ -1186,7 +1184,7 @@ impl<'a> ProgramAnalyzer<'a> {
                 _ if count == LONG + DOUBLE                => Type::Double,
                 _ => {
                     let error_info = format!("Invalid type.");
-                    self.report_semantic_error(whole_span, &error_info);
+                    report_semantic_error(whole_span, &error_info);
                     exit(1);
                 }
             };
@@ -1194,7 +1192,7 @@ impl<'a> ProgramAnalyzer<'a> {
         if var_attribute.is_typedef {
             if var_attribute.is_static || var_attribute.is_extern {
                 let error_info = format!("typedef may not be used together with static or extern.");
-                self.report_semantic_error(whole_span, &error_info);
+                report_semantic_error(whole_span, &error_info);
             }
         }
         return (cur_type, var_attribute);
@@ -1256,7 +1254,7 @@ impl<'a> ProgramAnalyzer<'a> {
             if let Some(members) = &st.members {
                 if self.scope_manager.resolve_tag_at_current_scope(&ident.name).is_some() {
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", ident.name);
-                    self.report_semantic_error(ident.span, &err_info);
+                    report_semantic_error(ident.span, &err_info);
                 } else {
                     self.scope_manager.add_tag(&ident.name, &the_type);
                 }
@@ -1272,7 +1270,7 @@ impl<'a> ProgramAnalyzer<'a> {
                 // current scope, enumerator list shall not appear, otherwise it is an semantic error.
                 if enum_spec.enumerators.is_some() {
                     let err_info = format!("semantic error: redefinition of tag name: '{}'", ident.name);
-                    self.report_semantic_error(ident.span, &err_info);
+                    report_semantic_error(ident.span, &err_info);
                     exit(1);
                 } else {
                     return the_type.clone();
@@ -1293,7 +1291,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     return the_type;
                 } else {
                     let err_info = format!("semantic error: undefined tag name: '{}'", ident.name);
-                    self.report_semantic_error(ident.span, &err_info);
+                    report_semantic_error(ident.span, &err_info);
                     exit(1);
                 }
             }
@@ -1482,7 +1480,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     ir::StmtType::CaseStmt{unique_label, stmt: Box::new(stmt)}
                 } else {
                     let error_info = format!("this is not inside switch statement, you cannot handle case statement");
-                    self.report_semantic_error(cond_expr.span, &error_info);
+                    report_semantic_error(cond_expr.span, &error_info);
                     exit(1);
                 }
             }
@@ -1753,7 +1751,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     return gen_num_expr(number, span);
                 } else {
                     let err_info = format!("semantic error: symbol '{}' doesn't exist or is nither a variable nor enum constant.", s);
-                    self.report_semantic_error(expr.span, &err_info);
+                    report_semantic_error(expr.span, &err_info);
                     exit(1);
                 };
             }
@@ -1771,7 +1769,7 @@ impl<'a> ProgramAnalyzer<'a> {
                         cur_ty = the_type.clone();
                     } else {
                         let err_info = format!("it has incomplete struct or union type definition.");
-                        self.report_semantic_error(struct_expr.span, &err_info);
+                        report_semantic_error(struct_expr.span, &err_info);
                         exit(1);
                     }
                 }
@@ -1785,13 +1783,13 @@ impl<'a> ProgramAnalyzer<'a> {
 
                         },
                         Err(err) => {
-                            self.report_semantic_error(expr.span, &err);
+                            report_semantic_error(expr.span, &err);
                             exit(1);
                         }
                     }
                 } else {
                     let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
-                    self.report_semantic_error(struct_expr.span, &err_info);
+                    report_semantic_error(struct_expr.span, &err_info);
                     exit(1);
                 }
             }
@@ -1803,10 +1801,10 @@ impl<'a> ProgramAnalyzer<'a> {
                 }
                 // type checking
                 if !base_position.is_pointer_or_array() {
-                    self.report_semantic_error(base_position.span, "subscripted value is neither array nor pointer nor vector");
+                    report_semantic_error(base_position.span, "subscripted value is neither array nor pointer nor vector");
                 }
                 if !index.is_integer() {
-                    self.report_semantic_error(index.span, "array subscript is not an integer");
+                    report_semantic_error(index.span, "array subscript is not an integer");
                 }
                 let pointer_arithmatic_expr = gen_binary_expr(base_position, index, OP::Plus);
                 return gen_deref_expr(pointer_arithmatic_expr);
@@ -1825,7 +1823,7 @@ impl<'a> ProgramAnalyzer<'a> {
                         if matches!(base_type.as_ref(), Func{..}) {
                             base_type.as_ref().clone()
                         } else {
-                            self.report_semantic_error(expr.span, "This is not function pointer.");
+                            report_semantic_error(expr.span, "This is not function pointer.");
                             exit(1);
                         }
                     }
@@ -1842,10 +1840,10 @@ impl<'a> ProgramAnalyzer<'a> {
                     // recorded here.
                     let has_unspecified_params = param_types.is_empty();
                     if args.len() > param_types.len() && !is_variadic && !has_unspecified_params {
-                        self.report_semantic_error(span, "Too many arguments to call this function.");
+                        report_semantic_error(span, "Too many arguments to call this function.");
                     }
                     if args.len() < param_types.len() {
-                        self.report_semantic_error(span, "Too few arguments to call this function.");
+                        report_semantic_error(span, "Too few arguments to call this function.");
                     }
                     for arg_index in 0..args.len() {
                         let arg = &args[arg_index];
@@ -1853,7 +1851,7 @@ impl<'a> ProgramAnalyzer<'a> {
                         if arg_index < param_types.len() {
                             let param_type = &param_types[arg_index];
                             if matches!(param_type, Type::Struct(..) | Type::Union(..) | Type::Tag(..)) {
-                                self.report_semantic_error(span, "passing struct or union is not supported yet");
+                                report_semantic_error(span, "passing struct or union is not supported yet");
                             }
                             analyzed_arg = cast(analyzed_arg, param_type);
                             casted_analyzed_args.push(analyzed_arg);
@@ -1863,7 +1861,7 @@ impl<'a> ProgramAnalyzer<'a> {
                             }
                             casted_analyzed_args.push(analyzed_arg);
                         } else {
-                            self.report_semantic_error(span, "Compiler bug: Too many arguments error should be reported earlier.");
+                            report_semantic_error(span, "Compiler bug: Too many arguments error should be reported earlier.");
                         }
 
                     }
@@ -1871,7 +1869,7 @@ impl<'a> ProgramAnalyzer<'a> {
                     ir::Expr {content, ty, span}
                 } else {
                     let error_message = format!("You are trying to call it as a function, but its data type is {:?}", &target_func_ty);
-                    self.report_semantic_error(func_ref.span, &error_message);
+                    report_semantic_error(func_ref.span, &error_message);
                     exit(1);
                 }
             }
@@ -1974,7 +1972,7 @@ impl<'a> ProgramAnalyzer<'a> {
                 let ty = match stmts.last() {
                     Some(ir::StmtType::Ex(e)) => e.ty.clone(),
                     _ => {
-                        self.report_semantic_error(span, "a statement expression must end with an expression statement");
+                        report_semantic_error(span, "a statement expression must end with an expression statement");
                         ty_none
                     }
                 };
@@ -2017,22 +2015,23 @@ impl<'a> ProgramAnalyzer<'a> {
                 None => {
                     let err_info = format!("Unable to resolve to a concrete struct from \
                     tag name {}, which is not allowed in a type name.", &tag_name);
-                    self.report_semantic_error(type_name.span, &err_info);
+                    report_semantic_error(type_name.span, &err_info);
                 }
             }
         }
         return final_type;
     }
 
-
-    fn report_semantic_error(&self, span: Span, error_info: &str) {
-        let error_stage_info = "Semantic error: ".to_string();
-        let error_info = error_span_at_file(&self.file_records[span.file_index], span, &(error_stage_info+error_info));
-        println!("{}", error_info);
-        exit(1);
-    }
-
 }
+
+fn report_semantic_error(span: Span, error_info: &str) {
+    let error_stage_info = "Semantic error: ".to_string();
+
+    let error_info = error_span(span, &(error_stage_info+error_info));
+    println!("{}", error_info);
+    exit(1);
+}
+
 
 fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
     let from_type = expr.ty.clone();
@@ -2051,7 +2050,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
     }
     if matches!(to_type, ArrayOf(..)) {
         exit(1);
-        // report_semantic_error(span, "the cast-to type must not be array type!");
+        report_semantic_error(span, "the cast-to type must not be array type!");
     }
     if !from_type.is_scalar() || !to_type.is_scalar() {
         let error_info = format!("Oops! If cast-to type is not void, both cast-from and \
@@ -2063,7 +2062,7 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
         {:#?}", from_type, to_type);
         
         exit(1);
-        // report_semantic_error(span, &error_info);
+        report_semantic_error(span, &error_info);
     } else {
         return expr;
     }
@@ -2142,13 +2141,13 @@ fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
         if !can_be_lvalue(&lhs) {
             let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
             exit(1);
-            // report_semantic_error(lhs.span, &err_info);
+            report_semantic_error(lhs.span, &err_info);
         }
         if !can_assign_expr(&lhs.ty, &rhs) {
             let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
             &rhs.ty, &lhs.ty);
             exit(1);
-            // report_semantic_error(lhs.span, &err_info);
+            report_semantic_error(lhs.span, &err_info);
         }
         // Cast rhs to match lhs when they are not struct type.
         if !matches!(lhs.ty, Struct(..) | Union(..) | Tag(..) ) {
@@ -2212,8 +2211,8 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
         OP::Plus => {
             if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
                 exit(1);
-                // report_semantic_error(lhs.span, "error: both lhs and rhs are of ptr type");
-                // report_semantic_error(rhs.span, "error: both lhs and rhs are of ptr type");
+                report_semantic_error(lhs.span, "error: both lhs and rhs are of ptr type");
+                report_semantic_error(rhs.span, "error: both lhs and rhs are of ptr type");
             }
             if lhs.is_integer() && rhs.is_pointer_or_array() {
                 swap(&mut lhs, &mut rhs);
@@ -2231,7 +2230,7 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
         OP::Minus => {
             if lhs.is_integer() && rhs.is_pointer_or_array() {
                 exit(1);
-                // report_semantic_error(rhs.span, "error: integer - ptr");
+                report_semantic_error(rhs.span, "error: integer - ptr");
             }
             if lhs.is_pointer_or_array() && rhs.is_integer() {
                 let scale = match &lhs.ty {
@@ -2257,7 +2256,7 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                 };
                 if lhs.ty != rhs.ty {
                     exit(1);
-                    // report_semantic_error(rhs.span, "pointer arithmatic error: type doesn't match");
+                    report_semantic_error(rhs.span, "pointer arithmatic error: type doesn't match");
                 }
                 // The result of "pointer - pointer" is the gap between them,
                 // measured in terms of number of elements (the result can be negative). 
@@ -2348,14 +2347,14 @@ fn gen_promoted_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Exp
             let error_info = format!("Bitwise operation '{:?}' cannot be applied to this \
                 floating point type expression.", op);
             exit(1);
-            // report_semantic_error(lhs.span, &error_info);
+            report_semantic_error(lhs.span, &error_info);
             exit(1);
         }
         if op == OP::Modulus {
             let error_info = format!("Modulus operation cannot be applied to this \
                 floating point type expression.");
             exit(1);
-            // report_semantic_error(lhs.span, &error_info);
+            report_semantic_error(lhs.span, &error_info);
             exit(1);
         }
     }
@@ -2377,7 +2376,7 @@ fn gen_deref_expr(expr: ir::Expr) -> ir::Expr {
         Pointer_To(pointee_type) => {
             if **pointee_type == Void {
                 exit(1);
-                // report_semantic_error(expr.span, "Hey bro no, you are trying to dereference a void pointer!");
+                report_semantic_error(expr.span, "Hey bro no, you are trying to dereference a void pointer!");
                 exit(1);
             }
             *pointee_type.clone()
@@ -2385,8 +2384,8 @@ fn gen_deref_expr(expr: ir::Expr) -> ir::Expr {
         ArrayOf(element_type, _) => *element_type.clone(),
         _ => {
             exit(1);
-            // report_semantic_error(expr.span, "unable to generate deference of this expression, because it is
-            // nither a pointer nor array.");
+            report_semantic_error(expr.span, "unable to generate deference of this expression, because it is
+            nither a pointer nor array.");
             exit(1);
         },
     };
@@ -2626,7 +2625,7 @@ fn eval_integer_label_const(expr: &ir::Expr) -> (Option<String>, i64) {
             if !obj.is_global {
                 let error_info = format!("not a compile-time constant");
                 exit(1);
-                // report_semantic_error(expr.span, &error_info);
+                report_semantic_error(expr.span, &error_info);
                 exit(1);
             }
             return (Some(obj.name.clone()), 0);
@@ -2646,7 +2645,7 @@ fn eval_integer_label_const(expr: &ir::Expr) -> (Option<String>, i64) {
         _ => {
             let error_info = format!("this cannot be evaluated to integer costant: {:?}", expr);
             exit(1);
-            // report_semantic_error(expr.span, &error_info);
+            report_semantic_error(expr.span, &error_info);
             exit(1);
         }
     }
@@ -2677,7 +2676,7 @@ fn eval_fp_const(expr: &ir::Expr) -> f64 {
                     let error_info = format!("Binary operation '{:?}' cannot be applied to this \
                         floating point type expression.", op);
                     exit(1);
-                    // report_semantic_error(lhs.span, &error_info);
+                    report_semantic_error(lhs.span, &error_info);
                     exit(1);
                 }
             }
@@ -2702,7 +2701,7 @@ fn eval_fp_const(expr: &ir::Expr) -> f64 {
         _ => {
             let error_info = format!("this cannot be evaluated to a floting point costant: {:?}", expr);
             exit(1);
-            // report_semantic_error(expr.span, &error_info);
+            report_semantic_error(expr.span, &error_info);
             exit(1);
         }
     }
@@ -2716,7 +2715,7 @@ fn resolve_array_size_from_init(init: &Initializer) -> usize {
         _ => {
             let error_info = format!("Compiler bug: After normalization, this init should be a init list.");
             exit(1);
-            // report_semantic_error(init.span, &error_info);
+            report_semantic_error(init.span, &error_info);
             exit(1);
         }
     }
@@ -2745,7 +2744,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                         if **element_type == Char {
                             if s.len() > array_len && array_len != 0 {
                                 let error_info = format!("initializer-string for array of {:?} is too long", element_type);
-                                // report_semantic_error(span, &error_info);
+                                report_semantic_error(span, &error_info);
                                 exit(1);
                             }
                             for i in 0..s.len() {
@@ -2769,12 +2768,12 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             return normalize_init(&new_init, ty);
                         } else {
                             let error_info = format!("cannot initialize array of {:?} from a string literal with type array of ‘char’", element_type);
-                            // report_semantic_error(span, &error_info);
+                            report_semantic_error(span, &error_info);
                             exit(1);
                         }
                     } else {
                         let error_info = format!("you are trying to use scalar initiaizer to init an array variable whose type is {:#?}.", ty);
-                        // report_semantic_error(span, &error_info);
+                        report_semantic_error(span, &error_info);
                         exit(1);
                     }
                 }
@@ -2808,7 +2807,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     if list_index < old_init_list.len() {
                         let error_info = format!("Excess elements in array initializer: number of init consumed is {}, \
                         but the number of elements in the initializer is {}.", list_index, old_init_list.len());
-                        // report_semantic_error(span, &error_info);
+                        report_semantic_error(span, &error_info);
                         exit(1);
                     }
 
@@ -2845,7 +2844,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     if list_index < old_init_list.len() {
                         let error_info = format!("Excess elements in struct initializer: number of init consumed is {}, \
                         but the number of elements in the initializer is {}.", list_index, old_init_list.len());
-                        // report_semantic_error(span, &error_info);
+                        report_semantic_error(span, &error_info);
                         exit(1);
                     }
                     debug_assert!(new_init_list.len() == member_count);
@@ -2865,7 +2864,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                         let error_info = format!("Excess elements in union initializer: The union initialzer
                         can only have 1 members for initializing the first member of the union, but you provide {} elements in the init_list here.", old_init_list.len());
                         exit(1);
-                        // report_semantic_error(span, &error_info);
+                        report_semantic_error(span, &error_info);
                     }
                     let first_member_type = &st.members[0].ty;
                     let new_init = normalize_init(&old_init_list[0], first_member_type);
@@ -2889,7 +2888,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                         let error_info = format!("Excess elements for initialize a scalar variable: you can provide \
                         at most 1 element in the init_list, but the number of elements in the init_list you given is {}.", init_list.len());
                         exit(1);
-                        // report_semantic_error(span, &error_info);
+                        report_semantic_error(span, &error_info);
                     }
                     if init_list.len() == 0 {
                         return create_zerolized_init(ty, span);
@@ -2971,7 +2970,7 @@ fn normalize_init_list(old_init_list: &Vec<Initializer>, start_index: usize, ty:
                             } else {
                                 let err_info = format!("Array length must be specifyed when handling \
                                 brace elision case");
-                                // report_semantic_error(span, &err_info);
+                                report_semantic_error(span, &err_info);
                                 exit(1);
                             }
 
@@ -3153,7 +3152,7 @@ pub fn retrive_fun_params(dector: &Declarator) -> (Vec<Func_Parameter>, bool) {
         } else {
             let err_info = format!("compiler bug: the suffix of the declarator of
                 function definition is not param-list.");
-            // report_semantic_error(dector.span, &err_info);
+            report_semantic_error(dector.span, &err_info);
             exit(1);
         }
     }

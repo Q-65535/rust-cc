@@ -23,9 +23,6 @@ use std::{
     process::exit,
 };
 
-static SRC: Mutex<String> = Mutex::new(String::new());
-static LINE_STARTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-
 static FILE_RECORDS: Mutex<Vec<Source_File>> = Mutex::new(Vec::new());
 
 pub fn build_line_starts(src: &str) -> Vec<usize> {
@@ -40,38 +37,25 @@ pub fn build_line_starts(src: &str) -> Vec<usize> {
 
 fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
 
-    let mut file_records = Vec::new();
-    // let mut file_records = FILE_RECORDS.lock().unwrap();
     let file = load_file(path);
-    let input = file.content.clone();
-    file_records.push(file);
-    let file_index = file_records.len() - 1;
-
-    {
-        let mut src = SRC.lock().unwrap();
-        *src = input.clone();
-    }
-    {
-        let mut line_starts = LINE_STARTS.lock().unwrap();
-        *line_starts = build_line_starts(&input);
-    }
+    let master_file_index = {
+        let mut file_records = FILE_RECORDS.lock().unwrap();
+        file_records.push(file);
+        file_records.len() - 1
+    };
 
     // lex
-    let mut tokens = {
-        let mut lexer: Lexer;
-        let src_str: &str = &SRC.lock().unwrap();
-        lexer = Lexer::new(&file_records, file_index);
-        lexer.lex()
-    };
+    let mut lexer = Lexer::new(master_file_index);
+    let mut tokens = lexer.lex();
 
     // preprocess
     let mut preprocessed_tokens = preprocess(tokens);
     // parse
-    let mut parser = Parser::new(&file_records, preprocessed_tokens);
+    let mut parser = Parser::new(preprocessed_tokens);
     let (program, syntax_errors) = parser.parse();
     if syntax_errors.is_empty() {
         // analyze
-        let mut analyzer = ProgramAnalyzer::new(&file_records);
+        let mut analyzer = ProgramAnalyzer::new();
         let analyzed_program = analyzer.analyze(program);
         // codegen
         set_output(&output);
