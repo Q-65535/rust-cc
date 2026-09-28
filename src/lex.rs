@@ -2,6 +2,12 @@ use crate::common::*;
 use crate::SRC;
 use colored::*;
 use std::process::exit;
+use crate::build_line_starts;
+use std::path::{Path, PathBuf};
+use std::{
+    env, fs,
+    io::{self, Read},
+};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
@@ -36,6 +42,31 @@ pub struct Token {
     pub span: Span,
 }
 
+#[derive(Debug, Clone)]
+pub struct Source_File {
+    pub path: PathBuf,
+    pub content: String,
+    pub line_starts: Vec<usize>,
+}
+
+pub fn load_file(path: &str) -> Source_File {
+    let content = if path == "-" {
+        let mut buf = String::new();
+        io::stdin()
+            .read_to_string(&mut buf)
+            .expect("failed to read from stdin");
+        buf
+    } else {
+        fs::read_to_string(&path).unwrap_or_else(|err| {
+            eprintln!("cannot open {}: {}", path, err);
+            exit(1);
+        })
+    };
+    let path = PathBuf::from(path);
+    let line_starts = build_line_starts(&content);
+    return Source_File{path, content, line_starts};
+}
+
 // Longest spellings come first so lexing follows C's maximal-munch rule.
 const PUNCTUATORS: &[&str] = &[
     "<<=", ">>=", "...", "->", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=", "&&",
@@ -58,7 +89,7 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(source: &'a str, file_records: &Vec::<Source_File>, file_index: usize) -> Self {
         Lexer {
             src_ref: source,
             index: 0,

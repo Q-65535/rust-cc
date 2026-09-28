@@ -27,7 +27,7 @@ static SRC: Mutex<String> = Mutex::new(String::new());
 static INPUT_PATH: Mutex<String> = Mutex::new(String::new());
 static LINE_STARTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
-fn build_line_starts(src: &str) -> Vec<usize> {
+pub fn build_line_starts(src: &str) -> Vec<usize> {
     let mut starts = vec![0];
     for (i, c) in src.char_indices() {
         if c == '\n' {
@@ -38,20 +38,14 @@ fn build_line_starts(src: &str) -> Vec<usize> {
 }
 
 fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
-    *INPUT_PATH.lock().unwrap() = path.to_string();
+    *INPUT_PATH.lock().unwrap() = path.to_string().clone();
 
-    let input = if path == "-" {
-        let mut buf = String::new();
-        io::stdin()
-            .read_to_string(&mut buf)
-            .expect("failed to read from stdin");
-        buf
-    } else {
-        fs::read_to_string(&path).unwrap_or_else(|err| {
-            eprintln!("cannot open {}: {}", path, err);
-            exit(1);
-        })
-    };
+    let mut file_records = Vec::new();
+    let file = load_file(path);
+    let input = file.content.clone();
+    file_records.push(file);
+    let file_index = file_records.len() - 1;
+
     {
         let mut src = SRC.lock().unwrap();
         *src = input.clone();
@@ -65,7 +59,7 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
     let mut tokens = {
         let mut lexer: Lexer;
         let src_str: &str = &SRC.lock().unwrap();
-        lexer = Lexer::new(src_str);
+        lexer = Lexer::new(src_str, &file_records, file_index);
         lexer.lex()
     };
 
