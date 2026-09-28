@@ -1,6 +1,8 @@
 use std::cmp::{max, min};
+use crate::Source_File;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
+    pub file_index: usize,
     pub start_index: usize,
     pub end_index: usize,
 }
@@ -9,7 +11,8 @@ impl Span {
     pub fn merge(l1: Span, l2: Span) -> Span {
         let start_index = min(l1.start_index, l2.start_index);
         let end_index = max(l1.end_index, l2.end_index);
-        Span{start_index, end_index}
+        assert!(l1.file_index == l2.file_index);
+        Span{file_index: l1.file_index, start_index, end_index}
     }
 
     pub fn len(&self) -> i32 {
@@ -45,6 +48,7 @@ impl Span {
     }
 
     pub fn locate(&self) -> (usize, usize, usize, usize) {
+
         let start_line = self.get_start_line();
         let start_column = self.get_start_column();
         let end_line = self.get_end_line();
@@ -53,18 +57,19 @@ impl Span {
     }
 }
 
-pub fn get_src_content_at_line(line_no: usize) -> String {
+pub fn get_content_at_line(source_file: &Source_File, line_no: usize) -> String {
     let (start, end) = {
-        let starts = crate::LINE_STARTS.lock().unwrap();
+        let starts = &source_file.line_starts;
         let idx = line_no - 1;                       // 1-based -> table index
         let start = starts[idx];
         let end = starts.get(idx + 1).map(|&s| s - 1); // next start minus '\n'
         (start, end)
     }; // lock released here
 
-    let src = crate::SRC.lock().unwrap();
+    let src = &source_file.content;
     match end {
         Some(end) => src[start..end].to_string(),
         None      => src[start..].to_string(),   // last line: to EOF
     }
 }
+

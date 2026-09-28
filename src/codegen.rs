@@ -10,7 +10,6 @@ use crate::Function;
 use crate::Obj;
 use crate::Type::{self, *};
 use crate::SRC;
-use crate::INPUT_PATH;
 use crate::ir::{self, *};
 use crate::analyze::{self, *};
 use crate::common::{self, *};
@@ -94,7 +93,7 @@ impl Generator {
     }
 
     pub fn gen_code(&mut self, program: AnalyzedProgram) {
-        emit!(".file 1 \"{}\"", INPUT_PATH.lock().unwrap());
+        emit!(".file 1 \"fake_path\"");
         for global_decl in &program.global_data_decls {
             if global_decl.obj.is_extern {
                 continue;
@@ -700,7 +699,7 @@ impl Generator {
                 self.gen_addr(expr);
             }
             _ => {
-                let err_msg = error_expr(expr, "codegen error: can't get addr of this expr");
+                let err_msg = format!("codegen error: can't get addr of this expr");
                 eprintln!("{}", err_msg);
                 exit(1);
             },
@@ -1008,21 +1007,3 @@ fn load_according_to_type(ty: &Type) {
     }
 }
 
-fn error_expr(expr: &Expr, info: &str) -> String {
-    let span = expr.span;
-    let mut err_msg = String::new();
-    let (start_line, start_column, end_line, end_column) = span.locate();
-    let extended_error_info = format!(":{}:{}: {}\n", start_line, start_column, info.red());
-    err_msg.push_str(&extended_error_info);
-    let start_line_content = get_src_content_at_line(start_line);
-    err_msg.push_str(&start_line_content);
-    err_msg.push_str("\n");
-    let spaces = " ".repeat(start_column - 1);
-    let arrows = if start_line == end_line {
-        "^".repeat(span.end_index - span.start_index + 1)
-    } else {
-        "^".to_string()
-    };
-    err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
-    err_msg
-}

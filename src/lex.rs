@@ -83,15 +83,19 @@ const KEYWORDS: &[&str] = &[
 ];
 
 pub struct Lexer<'a> {
+    file_records: &'a Vec::<Source_File>,
+    file_index: usize,
     src_ref: &'a str,
     index: usize,
     at_bol: bool,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str, file_records: &Vec::<Source_File>, file_index: usize) -> Self {
+    pub fn new(file_records: &'a Vec::<Source_File>, file_index: usize) -> Self {
         Lexer {
-            src_ref: source,
+            file_records,
+            file_index,
+            src_ref: &file_records[file_index].content,
             index: 0,
             at_bol: true,
         }
@@ -144,6 +148,7 @@ impl<'a> Lexer<'a> {
 
     pub fn gen_token(&mut self, kind: TokenKind, start_index: usize, len: usize) -> Token {
         let span = Span {
+            file_index: self.file_index,
             start_index,
             end_index: start_index + len - 1,
         };
@@ -212,7 +217,7 @@ impl<'a> Lexer<'a> {
                             ));
                         }
                         Err(s) => {
-                            lexical_error_at(start_index, &s);
+                            self.lexical_error_at(start_index, &s);
                         }
                     }
                 }
@@ -222,7 +227,7 @@ impl<'a> Lexer<'a> {
                         tokens.push(self.gen_token(StringLiteral(bytes), start_index, consumed));
                     }
                     Err(s) => {
-                        lexical_error_at(start_index, &s);
+                        self.lexical_error_at(start_index, &s);
                     }
                 }
                 '/' => {
@@ -251,7 +256,7 @@ impl<'a> Lexer<'a> {
                                     }
                                     Some(_) => self.next_char(),
                                     None => {
-                                        lexical_error_at(start_index, "unclosed block comment");
+                                        self.lexical_error_at(start_index, "unclosed block comment");
                                     }
                                 }
                             }
@@ -274,7 +279,7 @@ impl<'a> Lexer<'a> {
                             punctuator.len(),
                         ));
                     } else {
-                        lexical_error_at(start_index, &format!("Unknown character: '{}'.", c));
+                        self.lexical_error_at(start_index, &format!("Unknown character: '{}'.", c));
                     }
                 }
             }
@@ -340,7 +345,7 @@ impl<'a> Lexer<'a> {
             }
 
             if !has_integer_digits && !has_fraction_digits {
-                lexical_error_at(start, "invalid hex number format");
+                self.lexical_error_at(start, "invalid hex number format");
             }
 
             if end < len && matches!(self.char_at(end), 'p' | 'P') {
@@ -355,10 +360,10 @@ impl<'a> Lexer<'a> {
                     end += 1;
                 }
                 if end == exponent_start {
-                    lexical_error_at(start, "invalid hex floating exponent");
+                    self.lexical_error_at(start, "invalid hex floating exponent");
                 }
             } else if is_float {
-                lexical_error_at(start, "hex floating constant requires a binary exponent");
+                self.lexical_error_at(start, "hex floating constant requires a binary exponent");
             }
 
             if is_float {
@@ -393,7 +398,7 @@ impl<'a> Lexer<'a> {
                 end += 1;
             }
             if end == exponent_start {
-                lexical_error_at(start, "invalid floating exponent");
+                self.lexical_error_at(start, "invalid floating exponent");
             }
         }
 
@@ -416,14 +421,14 @@ impl<'a> Lexer<'a> {
                     end += 1;
                 }
                 c if Self::is_ident_continue(c) => {
-                    lexical_error_at(end, "invalid suffix on floating constant");
+                    self.lexical_error_at(end, "invalid suffix on floating constant");
                 }
                 _ => (),
             }
         }
 
         if end < self.src_ref.len() && Self::is_ident_continue(self.char_at(end)) {
-            lexical_error_at(end, "invalid suffix on floating constant");
+            self.lexical_error_at(end, "invalid suffix on floating constant");
         }
 
         let number_end = if matches!(self.char_at(end - 1), 'f' | 'F' | 'l' | 'L') {
@@ -435,12 +440,12 @@ impl<'a> Lexer<'a> {
         self.index = end - 1;
 
         let value = if is_hex {
-            Self::parse_hex_float_literal(&literal, start)
+            self.parse_hex_float_literal(&literal, start)
         } else {
             let normalized = Self::normalize_decimal_float_literal(&literal);
             match normalized.parse::<f64>() {
                 Ok(value) => value,
-                Err(_) => lexical_error_at(start, "invalid floating number format"),
+                Err(_) => self.lexical_error_at(start, "invalid floating number format"),
             }
         };
 
@@ -468,15 +473,15 @@ impl<'a> Lexer<'a> {
         normalized
     }
 
-    fn parse_hex_float_literal(literal: &str, start: usize) -> f64 {
+    fn parse_hex_float_literal(&self, literal: &str, start: usize) -> f64 {
         let exponent_index = match literal.find('p').or_else(|| literal.find('P')) {
             Some(index) => index,
-            None => lexical_error_at(start, "hex floating constant requires a binary exponent"),
+            None => self.lexical_error_at(start, "hex floating constant requires a binary exponent"),
         };
         let mantissa = &literal[2..exponent_index];
         let exponent = match literal[exponent_index + 1..].parse::<i32>() {
             Ok(exponent) => exponent,
-            Err(_) => lexical_error_at(start, "invalid hex floating exponent"),
+            Err(_) => self.lexical_error_at(start, "invalid hex floating exponent"),
         };
 
         let mut value = 0.0;
@@ -490,7 +495,7 @@ impl<'a> Lexer<'a> {
 
             let digit = match c.to_digit(16) {
                 Some(digit) => digit as f64,
-                None => lexical_error_at(start, "invalid hex floating number format"),
+                None => self.lexical_error_at(start, "invalid hex floating number format"),
             };
 
             if past_dot {
@@ -598,7 +603,7 @@ impl<'a> Lexer<'a> {
                     "At most 2 L (or l) suffix is allowed, but you give {} of it.",
                     l_count
                 );
-                lexical_error_at(self.index, &err_msg);
+                self.lexical_error_at(self.index, &err_msg);
             } else {
                 l = true;
             }
@@ -609,7 +614,7 @@ impl<'a> Lexer<'a> {
                     "At most 1 U (or u) suffix is allowed, but you give {} of it.",
                     u_count
                 );
-                lexical_error_at(self.index, &err_msg);
+                self.lexical_error_at(self.index, &err_msg);
             } else {
                 u = true;
             }
@@ -619,7 +624,7 @@ impl<'a> Lexer<'a> {
             if c.is_ascii_alphanumeric() {
                 self.next_char();
                 let err_msg = format!("Invalid suffix for constant integer number.");
-                lexical_error_at(self.index, &err_msg);
+                self.lexical_error_at(self.index, &err_msg);
             }
         }
 
@@ -749,7 +754,7 @@ impl<'a> Lexer<'a> {
         let mut c = self.cur_char();
         if !c.is_ascii_hexdigit() {
             let error_message = format!("lex hexdigit error, wrong character following \\x");
-            lexical_error_at(self.index, &error_message);
+            self.lexical_error_at(self.index, &error_message);
         }
         while c.is_ascii_hexdigit() {
             let digit_number;
@@ -800,18 +805,20 @@ impl<'a> Lexer<'a> {
         }
         self.src_ref[i..i + len].to_string()
     }
+
+    fn lexical_error_at(&self, index: usize, error_description: &str) -> ! {
+        use crate::error_span_at_file;
+        let span = Span {
+            file_index: self.file_index,
+            start_index: index,
+            end_index: index,
+        };
+        let error_stage_info = "Lexical error: ".to_string();
+        let error_result = error_span_at_file(&self.file_records[self.file_index], span, &(error_stage_info + error_description));
+        println!("{}", error_result);
+        // Lex error is strict, once encountered, we force the compilation to stop.
+        exit(1);
+    }
 }
 
-fn lexical_error_at(index: usize, err_msg: &str) -> ! {
-    use crate::error_span;
-    let span = Span {
-        start_index: index,
-        end_index: index,
-    };
-    let error_stage_info = "Lexical error: ".to_string();
-    let error_result = error_span(span, &(error_stage_info + err_msg));
-    println!("{}", error_result);
-    // Lex error is strict, once encountered, we force the compilation to stop.
-    exit(1);
-}
 

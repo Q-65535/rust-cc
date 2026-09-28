@@ -405,7 +405,8 @@ impl ScopeManager {
 }
 
 
-pub struct Parser {
+pub struct Parser<'a> {
+    file_records: &'a Vec<Source_File>,
     tokens: Vec<Token>,
     cur_index: usize,
     scope_manager: ScopeManager,
@@ -417,10 +418,12 @@ pub struct Parser {
     cur_parsing_context: String,
 }
 
-impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
-        let starting_context = token_to_context(&tokens[0]);
+impl<'a> Parser<'a> {
+    pub fn new(file_records: &'a Vec<Source_File>, tokens: Vec<Token>) -> Self {
+        let first_token = &tokens[0];
+        let starting_context = token_to_context(&file_records[first_token.span.file_index], &tokens[0]);
         Parser {
+            file_records,
             tokens,
             cur_index: 0,
             scope_manager: ScopeManager::new(),
@@ -478,7 +481,7 @@ impl Parser {
                 expect_kind,
                 self.cur_token().kind,
             );
-            Err(error_token(self.cur_token(), &err_msg))
+            Err(self.error_token(self.cur_token(), &err_msg))
         }
     }
 
@@ -518,12 +521,8 @@ impl Parser {
                     self.cur_index = start_index;
                     match self.parse_fun_def() {
                         Err(error_message) => {
-                            self.syntax_errors.push(error_message);
-                            self.sync_parse_point();
-                            if self.at(&Punct("}")) || self.cur_index == start_index {
-                                self.bump();
-                            }
-                            continue;
+                            println!("{}", error_message);
+                            exit(1);
                         },
                         Ok(fun) => translation_units.push(FuncDef(fun)),
                     }
@@ -548,11 +547,9 @@ impl Parser {
                 if is_typedef_declaration {
                     let name = get_declarator_name(&init_dector.dector);
                     if self.scope_manager.is_typedef_name_in_current_scope(name) {
-                        let err_msg = error_span(
-                            init_dector.dector.span,
-                            "typedef name is already being used!",
-                        );
-                        return Err(err_msg);
+                        let error_description = "typedef name is already being used!";
+                        let error_message = self.syntax_error(init_dector.dector.span, error_description);
+                        return Err(error_message);
                     }
                     self.scope_manager.add_typedef_name(name);
                 }
@@ -600,7 +597,8 @@ impl Parser {
         debug_assert!(self.is_decl_spec(self.cur_token()));
         let mut decl_specs = Vec::new();
         while self.is_decl_spec(self.cur_token()) {
-            let start_index = self.cur_token().span.start_index;
+            let start = self.cur_token().span;
+            // let start_index = self.cur_token().span.start_index;
             let cur_decl_spec_kind = match self.cur_token().kind.clone() {
                 Keyword("typedef") => {
                     self.bump();
@@ -708,16 +706,22 @@ impl Parser {
                     Decl_Spec_Kind::Enum(enum_specifier)
                 }
                 _ => {
-                    let err_msg = error_token(self.cur_token(), "unknown declaration specifer!");
+                    let err_msg = self.error_token(self.cur_token(), "unknown declaration specifer!");
                     return Err(err_msg);
                 }
             };
-            let end_index = self.previous_token().span.end_index;
-            let span = Span{start_index, end_index};
+            let span = self.span_since(start);
+            // let end_index = self.previous_token().span.end_index;
+            // let span = Span{start_index, end_index};
             let decl_spec = Decl_Spec{content: cur_decl_spec_kind, span};
             decl_specs.push(decl_spec);
         }
         Ok(decl_specs)
+    }
+
+    fn span_since(&self, start: Span) -> Span {
+        let end = self.previous_token().span;
+        return Span::merge(start, end);
     }
 
     fn parse_struct_union_specifier(&mut self) -> Result<Struct_Union_Specifier, String> {
@@ -726,7 +730,7 @@ impl Parser {
             Keyword("union") => Is_Union,
             Keyword("struct") => Is_Struct,
             // @Fix: This should be a compiler bug, not a compiler error.
-            _ => return Err(error_token(&keyword, "expected 'struct' or 'union'")),
+            _ => return Err(self.error_token(&keyword, "expected 'struct' or 'union'")),
         };
 
         let mut struct_specifier = Struct_Union_Specifier{kind, ident: None, members: None};
@@ -740,7 +744,7 @@ impl Parser {
         if self.at(&Punct("{")) {
             struct_specifier.members = Some(self.parse_struct_decl_list()?);
         } else if struct_specifier.ident.is_none() {
-            return Err(error_token(
+            return Err(self.error_token(
                 self.cur_token(),
                 "parsing struct specifier error: expected a tag or member list",
             ));
@@ -761,12 +765,12 @@ impl Parser {
         if self.at(&Punct("{")) {
             let enumerators = self.parse_enumerator_list()?;
             if enumerators.len() == 0 {
-                let error_message = error_token(self.cur_token(), "empty enum is invalid");
+                let error_message = self.error_token(self.cur_token(), "empty enum is invalid");
                 return Err(error_message);
             }
             enum_specifier.enumerators = Some(enumerators);
         } else if enum_specifier.ident.is_none() {
-            let error_message = error_token(self.cur_token(), "parsing struct specifier error: expected a tag or member list");
+            let error_message = self.error_token(self.cur_token(), "parsing struct specifier error: expected a tag or member list");
             return Err(error_message);
         }
         Ok(enum_specifier)
@@ -802,7 +806,7 @@ impl Parser {
             let ident = if let LexIdent(name) = &self.cur_token().kind {
                 gen_identifier_from_token(self.cur_token())
             } else {
-                let error_message = error_token(self.cur_token(),
+                let error_message = self.error_token(self.cur_token(),
                 "trying to parse enumerator constant, but this is not a identifier!");
                 return Err(error_message);
             };
@@ -832,7 +836,8 @@ impl Parser {
     }
 
     fn parse_declarator(&mut self) -> Result<Declarator, String> {
-        let start_index = self.cur_token().span.start_index;
+        let start_span = self.cur_token().span;
+        // let start_index = self.cur_token().span.start_index;
 
         let mut qualifiers_and_pointers = Vec::new();
         while let Some(spec) = get_pointer_or_type_qualifier(self.cur_token()) {
@@ -855,7 +860,7 @@ impl Parser {
                 Box::new(Direct_Declarator::Paren_Enclosed_Declarator(paren_enclosed_dector))
             },
             _ => {
-                return Err(error_token(
+                return Err(self.error_token(
                     self.cur_token(),
                     "unable to parse declarator here: not an identifier or an opening parenthesis.",
                 ));
@@ -868,8 +873,8 @@ impl Parser {
             None
         };
 
-        let end_index = self.previous_token().span.end_index;
-        let span = Span{start_index, end_index};
+        // let end_index = self.previous_token().span.end_index;
+        let span = self.span_since(start_span);
 
         Ok(Declarator{
             qualifiers_and_pointers,
@@ -882,7 +887,8 @@ impl Parser {
     fn parse_init_declarator(&mut self) -> Result<Init_Declarator, String> {
         let mut dector = self.parse_declarator()?;
         if self.eat(&Punct("=")) {
-            let start_index = self.cur_token().span.start_index;
+            let start_span = self.cur_token().span;
+            // let start_index = self.cur_token().span.start_index;
             let content = if self.cur_token().kind == Punct("{") {
                 let init_list = self.parse_init_list()?;
                 Initializer_Type::Init_List(init_list)
@@ -891,8 +897,8 @@ impl Parser {
                 let expr = self.parse_expr(Comma, Left_To_Right)?;
                 Initializer_Type::Expr(expr)
             };
-            let end_index = self.previous_token().span.end_index;
-            let span = Span{start_index, end_index};
+            // let end_index = self.previous_token().span.end_index;
+            let span = self.span_since(start_span);
             let init = Some(Initializer{content, span});
             Ok(Init_Declarator{dector, init})
         } else {
@@ -904,7 +910,8 @@ impl Parser {
         self.expect(&Punct("{"));
         let mut init_list = Vec::new();
         while self.cur_token().kind != Punct("}") {
-            let start_index = self.cur_token().span.start_index;
+            let start_span = self.cur_token().span;
+            // let start_index = self.cur_token().span.start_index;
             let content = if self.cur_token().kind == Punct("{") {
                 let init_list = self.parse_init_list()?;
                 Initializer_Type::Init_List(init_list)
@@ -913,8 +920,8 @@ impl Parser {
                 let expr = self.parse_expr(Comma, Left_To_Right)?;
                 Initializer_Type::Expr(expr)
             };
-            let end_index = self.previous_token().span.end_index;
-            let span = Span{start_index, end_index};
+            // let end_index = self.previous_token().span.end_index;
+            let span = self.span_since(start_span);
             let init = Initializer{content, span};
             init_list.push(init);
             if !self.eat(&Punct(",")) {
@@ -974,7 +981,7 @@ impl Parser {
                     {
                         if !params.is_empty() {
                             let error_info = "'void' must be the only parameter";
-                            return Err(error_span(decl_specs[0].span, error_info));
+                            return Err(self.syntax_error(decl_specs[0].span, error_info));
                         }
                         break 'parse_params_loop;
                     }
@@ -1022,7 +1029,7 @@ impl Parser {
                 Ok(FuncParam{params, is_variadic})
             },
             _ => {
-                Err(error_token(self.cur_token(), "Can't parse declarator suffix here!"))
+                Err(self.error_token(self.cur_token(), "Can't parse declarator suffix here!"))
             },
         }
     }
@@ -1089,7 +1096,7 @@ impl Parser {
                 let label_name = self.parse_raw_ident_name()?;
                 if self.stmt_labels.contains(&label_name) {
                     let error_message = format!("duplicate statement label {}", label_name);
-                    return Err(error_token(self.cur_token(), &error_message));
+                    return Err(self.error_token(self.cur_token(), &error_message));
                 }
                 self.stmt_labels.push(label_name.clone());
                 self.expect(&Punct(":"));
@@ -1138,26 +1145,16 @@ impl Parser {
             if self.is_decl_spec(self.cur_token()) && self.peek_token().kind != Punct(":") {
                 match self.parse_decl() {
                     Err(error_message) => {
-                        self.syntax_errors.push(error_message);
-                        self.sync_parse_point();
-                        if self.cur_index == start_index
-                            && !matches!(self.cur_token().kind, Punct("}") | Eof) {
-                            self.bump();
-                        }
-                        continue;
+                        println!("{}", error_message);
+                        exit(1);
                     },
                     Ok(decl) => items.push(Decl(decl)),
                 }
             } else {
                 match self.parse_stmt() {
                     Err(error_message) => {
-                        self.syntax_errors.push(error_message);
-                        self.sync_parse_point();
-                        if self.cur_index == start_index
-                            && !matches!(self.cur_token().kind, Punct("}") | Eof) {
-                            self.bump();
-                        }
-                        continue;
+                        println!("{}", error_message);
+                        exit(1);
                     },
                     Ok(stmt) => items.push(Stmt(stmt)),
                 }
@@ -1169,7 +1166,7 @@ impl Parser {
         if self.at(&Punct("}")) {
             self.bump();
         } else {
-            self.syntax_errors.push(error_token(
+            self.syntax_errors.push(self.error_token(
                 self.cur_token(),
                 "expected '}' to close block",
             ));
@@ -1269,7 +1266,7 @@ impl Parser {
                 Punct(".") | Punct("->") => self.parse_request_struct_member(expr)?,
 
                 _ => {
-                    return Err(error_token(
+                    return Err(self.error_token(
                         self.cur_token(),
                         "not support parsing this token",
                     ));
@@ -1284,10 +1281,7 @@ impl Parser {
         let then_expr = self.parse_expr(Precedence::Conditional, Right_To_Left)?;
         self.expect(&Punct(":"))?;
         let else_expr = self.parse_expr(Precedence::Conditional, Right_To_Left)?;
-        let span = Span {
-            start_index: condition_expr.span.start_index,
-            end_index: else_expr.span.end_index,
-        };
+        let span = Span::merge(condition_expr.span, else_expr.span);
         let content = ExprType::Conditional(Box::new(condition_expr), Box::new(then_expr), Box::new(else_expr));
         Ok(Expr::new(content, span))
     }
@@ -1298,16 +1292,14 @@ impl Parser {
         let close_paren = self.expect(&Punct(")"))?;
         // Wrap, don't mutate: the inner expression keeps its own span; the Paren
         // node carries the wider span that includes the parentheses.
-        let span = Span{
-            start_index: open_paren.span.start_index,
-            end_index: close_paren.span.end_index,
-        };
+        let span = Span::merge(open_paren.span, close_paren.span);
         Ok(Expr::new(Paren(Box::new(inner)), span))
     }
 
     fn parse_prefix(&mut self) -> Result<Expr, String> {
         let prefix_starting_token = self.cur_token().clone();
-        let start_index = prefix_starting_token.span.start_index;
+        let start_span = prefix_starting_token.span;
+        // let start_index = prefix_starting_token.span.start_index;
         match prefix_starting_token.kind {
             Punct("(") => {
                 let peek_token = self.peek_token();
@@ -1320,14 +1312,12 @@ impl Parser {
                     // compound literal
                     if self.cur_token().kind == Punct("{") {
                         let init_list = self.parse_init_list()?;
-                        let end_index = self.previous_token().span.end_index;
-                        let span = Span{start_index, end_index};
+                        let span = self.span_since(start_span);
                         return Ok(Expr::new(CompLit(init_list, type_name), span));
                     // cast
                     } else {
                         let expr = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
-                        let end_index = self.previous_token().span.end_index;
-                        let span = Span{start_index, end_index};
+                        let span = self.span_since(start_span);
                         return Ok(Expr::new(Cast(Box::new(expr), type_name), span));
                     }
                     return self.parse_cast_expr();
@@ -1385,89 +1375,73 @@ impl Parser {
             Punct("-") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
-                let span = Span{
-                    start_index: prefix_starting_token.span.start_index,
-                    end_index: operand.span.end_index,
-                };
+                let span = Span::merge(start_span, operand.span);
                 let expr = Expr::new(Neg(Box::new(operand)), span);
                 Ok(expr)
             },
             Punct("*") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
-                let span = Span{
-                    start_index: prefix_starting_token.span.start_index,
-                    end_index: operand.span.end_index,
-                };
+                let span = Span::merge(start_span, operand.span);
                 let expr = Expr::new(Deref(Box::new(operand)), span);
                 Ok(expr)
             },
             Punct("&") => {
                 self.bump();
                 let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
-                let span = Span{
-                    start_index: prefix_starting_token.span.start_index,
-                    end_index: operand.span.end_index,
-                };
+                let span = Span::merge(start_span, operand.span);
                 let expr = Expr::new(AddrOf(Box::new(operand)), span);
                 Ok(expr)
             },
             Keyword("sizeof") | Keyword("_Alignof") => {
                 self.bump();
-                let (expr_content, end_index) = if self.at(&Punct("(")) && self.is_type_spec(self.peek_token()) {
+                let expr_content = if self.at(&Punct("(")) && self.is_type_spec(self.peek_token()) {
                     self.expect(&Punct("("))?;
                     let type_name = self.parse_type_name()?;
                     let close_paren = self.expect(&Punct(")"))?;
                     if prefix_starting_token.kind == Keyword("sizeof") {
-                        (Sizeof_Type_Name(type_name), close_paren.span.end_index)
+                        Sizeof_Type_Name(type_name)
                     } else {
-                        (Alignof_Type_Name(type_name), close_paren.span.end_index)
+                        Alignof_Type_Name(type_name)
                     }
                 } else {
                     let operand = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
-                    let end_index = operand.span.end_index;
                     if prefix_starting_token.kind == Keyword("sizeof") {
-                        (Sizeof_Expr(Box::new(operand)), end_index)
+                        Sizeof_Expr(Box::new(operand))
                     } else {
-                        (Alignof_Expr(Box::new(operand)), end_index)
+                        Alignof_Expr(Box::new(operand))
                     }
                 };
-                let span = Span{
-                    start_index: prefix_starting_token.span.start_index,
-                    end_index,
-                };
+                let span = self.span_since(start_span);
                 let expr = Expr::new(expr_content, span);
                 Ok(expr)
             },
             LexIdent(_) => self.parse_ident(),
             StringLiteral(s) => self.parse_string(),
-            _ => Err(error_token(&prefix_starting_token, "can't parse prefix expression here"))
+            _ => Err(self.error_token(&prefix_starting_token, "can't parse prefix expression here"))
         }
     }
 
     fn parse_cast_expr(&mut self) -> Result<Expr, String> {
         debug_assert!(matches!(self.cur_token().kind, Punct("(")));
         let starting_token = self.bump();
+        let start_span = starting_token.span;
         let type_name = self.parse_type_name()?;
         self.expect(&Punct(")"))?;
         let expr = self.parse_expr(Prefix_Or_Cast, Right_To_Left)?;
-        let span = Span{
-            start_index: starting_token.span.start_index,
-            end_index: expr.span.end_index,
-        };
+        let span = self.span_since(start_span);
         Ok(Expr::new(Cast(Box::new(expr), type_name), span))
     }
 
     fn parse_type_name(&mut self) -> Result<Type_Name, String> {
-        let start_index = self.cur_token().span.start_index;
+        let start_span = self.cur_token().span;
         let decl_specs = self.parse_decl_specs()?;
         let abs_dector = if starts_abstract_declarator(&self.cur_token().kind) {
             Some(self.parse_abstract_declarator()?)
         } else {
             None
         };
-        let end_index = self.previous_token().span.end_index;
-        let span = Span{start_index, end_index};
+        let span = self.span_since(start_span);
 
         Ok(Type_Name{decl_specs, abs_dector, span})
     }
@@ -1479,7 +1453,7 @@ impl Parser {
     // Enters on the first token of the abstract declarator and returns on the
     // first token that does not belong to it.
     fn parse_abstract_declarator(&mut self) -> Result<Abs_Declarator, String> {
-        let start_index = self.cur_token().span.start_index;
+        let start_span = self.cur_token().span;
         let mut abs_dector_is_empty = true;
 
         let mut qualifiers_and_pointers = Vec::new();
@@ -1505,26 +1479,24 @@ impl Parser {
         } else {
             None
         };
-        let end_index = if abs_dector_is_empty {
-            self.cur_token().span.end_index
+        let end_span = if abs_dector_is_empty {
+            self.cur_token().span
         } else {
-            self.previous_token().span.end_index
+            self.previous_token().span
         };
-        let span = Span{start_index, end_index};
+        let span = Span::merge(start_span, end_span);
 
         Ok(Abs_Declarator{qualifiers_and_pointers, direct_abs_dector: direct_abstract_declarator, suffix, span})
     }
 
     fn parse_stmt_expr(&mut self) -> Result<Expr, String> {
         let open_paren = self.expect(&Punct("("))?;
+        let start_span = open_paren.span;
         let items = self.parse_block();
         let close_paren = self.expect(&Punct(")"))?;
-        let expr_span = Span{
-            start_index: open_paren.span.start_index,
-            end_index: close_paren.span.end_index,
-        };
+        let span = self.span_since(start_span);
         let content = StmtExpr(items);
-        let expr = Expr::new(content, expr_span);
+        let expr = Expr::new(content, span);
         Ok(expr)
     }
     
@@ -1535,7 +1507,7 @@ impl Parser {
             let expr = Expr::new(content, tok.span);
             Ok(expr)
         } else {
-            Err(error_token(&tok, "expect a string literal"))
+            Err(self.error_token(&tok, "expect a string literal"))
         }
     }
 
@@ -1544,7 +1516,7 @@ impl Parser {
         if let LexIdent(name) = &tok.kind {
             Ok(name.clone())
         } else {
-            Err(error_token(&tok, "expect an identifier"))
+            Err(self.error_token(&tok, "expect an identifier"))
         }
     }
 
@@ -1554,7 +1526,7 @@ impl Parser {
             let expr = Expr::new(Ident(name.clone()), tok.span);
             Ok(expr)
         } else {
-            Err(error_token(&tok, "expect an identifier"))
+            Err(self.error_token(&tok, "expect an identifier"))
         }
     }
 
@@ -1562,10 +1534,7 @@ impl Parser {
         let infix_operator = self.bump().kind;
         let precedence = get_infix_operator_precedence(&infix_operator);
         let rhs = self.parse_expr(precedence, get_associativity(precedence))?;
-        let span = Span {
-            start_index: lhs.span.start_index,
-            end_index: rhs.span.end_index,
-        };
+        let span = Span::merge(lhs.span, rhs.span);
         let content = Binary(Box::new(lhs), Box::new(rhs), infix_operator);
         Ok(Expr::new(content, span))
     }
@@ -1576,15 +1545,13 @@ impl Parser {
             Ident(_) | Deref(_) | ArrayIndexing(..) | Paren(_) |
             RequestStructMember(..) | CompLit(..)
         ) {
-            return Err(syntax_error(lhs.span, "definitely not a lvalue name"));
+            return Err(self.syntax_error(lhs.span, "definitely not a lvalue name"));
         }
 
         let assignment = self.expect(&Punct("="))?;
+        // @Rename val
         let val = self.parse_expr(Assignment, Right_To_Left)?;
-        let span = Span {
-            start_index: lhs.span.start_index,
-            end_index: val.span.end_index,
-        };
+        let span = Span::merge(lhs.span, val.span);
         let content = ExprType::Assign(Box::new(lhs), Box::new(val));
         Ok(Expr::new(content, span))
     }
@@ -1595,11 +1562,8 @@ impl Parser {
         let member_token = self.bump();
         match member_token.kind {
             LexIdent(name) => {
+                let span = Span::merge(lhs.span, member_token.span);
                 let content = ExprType::RequestStructMember(Box::new(lhs), name);
-                let span = Span{
-                    start_index,
-                    end_index: member_token.span.end_index,
-                };
                 Ok(Expr::new(content, span))
             },
             _ => {
@@ -1607,7 +1571,7 @@ impl Parser {
                     "parsing error: parse_request_struct_member: expect a struct field name, but got {:?} token\n",
                     member_token.kind,
                 );
-                Err(error_token(&member_token, &err_msg))
+                Err(self.error_token(&member_token, &err_msg))
             },
         }
     }
@@ -1627,20 +1591,16 @@ impl Parser {
     }
 
     fn parse_comma_expression(&mut self, lhs:Expr) -> Result<Expr, String> {
-        let start_index = lhs.span.start_index;
         self.expect(&Punct(","))?;
         let rhs = self.parse_expr(Lowest, Left_To_Right)?;
-        let end_index = rhs.span.end_index;
-        let span = Span {start_index, end_index};
+        let span = Span::merge(lhs.span, rhs.span);
         let content = ExprType::CommaExpression(Box::new(lhs), Box::new(rhs));
         Ok(Expr::new(content, span))
     }
 
     fn parse_funcall(&mut self, lhs:Expr) -> Result<Expr, String> {
-        let start_index = lhs.span.start_index;
         let args_list = self.parse_args()?;
-        let end_index = self.previous_token().span.end_index;
-        let span = Span {start_index, end_index};
+        let span = self.span_since(lhs.span);
         let content = FuncCall(Box::new(lhs), args_list);
         Ok(Expr::new(content, span))
     }
@@ -1650,10 +1610,7 @@ impl Parser {
         let the_index = self.parse_expr(Lowest, Left_To_Right)?;
         let close_bracket = self.expect(&Punct("]"))?;
 
-        let span = Span {
-            start_index: lhs.span.start_index,
-            end_index: close_bracket.span.end_index,
-        };
+        let span = self.span_since(lhs.span);
         let content = ArrayIndexing(Box::new(lhs), Box::new(the_index));
         Ok(Expr::new(content, span))
     }
@@ -1689,13 +1646,24 @@ impl Parser {
         let dector = self.parse_declarator()?;
         if let Some(FuncParam{..}) = &dector.suffix {
             if !self.at(&Punct("{")) {
-                return Err(error_token(self.cur_token(), "expected function body"));
+                return Err(self.error_token(self.cur_token(), "expected function body"));
             }
             let items = self.parse_block();
             Ok(Function{specs, dector, items, stmt_labels: self.stmt_labels.clone()})
         } else {
-            Err(error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
+            Err(self.error_token(self.cur_token(), "error: declarator suffix is not function parameters"))
         }
+    }
+
+    fn syntax_error(&self, span: Span, diagno_info: &str) -> String {
+        let error_stage_info = "syntax error: ".to_string();
+        let file_index = span.file_index;
+        error_span_at_file(&self.file_records[file_index], span, &(error_stage_info+diagno_info))
+    }
+
+
+    fn error_token(&self, tok: &Token, info: &str) -> String {
+        self.syntax_error(tok.span, info)
     }
 }
 
@@ -1746,44 +1714,35 @@ fn starts_abstract_declarator(kind: &TokenKind) -> bool {
     matches!(kind, Punct("*") | Punct("[") | Punct("("))
 }
 
-
-fn syntax_error(span: Span, err_msg: &str) -> String {
-    let error_stage_info = "syntax error: ".to_string();
-    error_span(span, &(error_stage_info+err_msg))
-}
-
 // @Smell: Create a new error_reporter.rs file?
-pub fn error_span(span: Span, info: &str) -> String {
-    let mut err_msg = String::new();
+pub fn error_span_at_file(source_file: &Source_File, span: Span, info: &str) -> String {
+    let mut the_error = String::new();
     let (start_line, start_column, end_line, end_column) = span.locate();
-    let extended_error_info = format!(":{}:{}: {}\n", start_line, start_column, info.red());
-    err_msg.push_str(&extended_error_info);
-    let start_line_content = get_src_content_at_line(start_line);
-    err_msg.push_str(&start_line_content);
-    err_msg.push_str("\n");
+                                                            // @Question: what is display()?
+    let error_with_location = format!("{}:{}:{}: {}\n", source_file.path.display(), start_line, start_column, info.red());
+    the_error.push_str(&error_with_location);
+    let line_content = get_content_at_line(source_file, start_line);
+    the_error.push_str(&line_content);
+    the_error.push_str("\n");
     let spaces = " ".repeat(start_column - 1);
     let arrows = if start_line == end_line {
         "^".repeat(span.end_index - span.start_index + 1)
     } else {
         "^".to_string()
     };
-    err_msg.push_str(&format!("{}{}", spaces, arrows.red()));
-    err_msg
-}
-
-fn error_token(tok: &Token, info: &str) -> String {
-    syntax_error(tok.span, info)
+    the_error.push_str(&format!("{}{}", spaces, arrows.red()));
+    return the_error;
 }
 
 // This is just a utility function used to visually show where the given token is in
 // the source code.
-fn token_to_context(tok: &Token) -> String {
+fn token_to_context(source_file: &Source_File, tok: &Token) -> String {
     let span = tok.span;
     let mut context_info = String::new();
     let (start_line, start_column, end_line, end_column) = span.locate();
     let location_info = format!(":{}:{}:\n", start_line, start_column);
     context_info.push_str(&location_info);
-    let start_line_content = get_src_content_at_line(start_line);
+    let start_line_content = get_content_at_line(source_file, start_line);
     context_info.push_str(&start_line_content);
     context_info.push_str("\n");
     let spaces = " ".repeat(start_column - 1);
