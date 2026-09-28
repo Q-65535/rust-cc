@@ -69,6 +69,12 @@ mytest:
 	$(CC) -o mytest.exe test/mytest.o -xc test/common
 	echo mytest.exe; ./mytest.exe || exit 1; echo;
 
+mymacrotest:
+	cargo build
+	$(RUST_CC) -c -o test/mymacro.o test/mymacro.c
+	$(CC) -o mymacro.exe test/mymacro.o -xc test/common
+	echo mymacro.exe; ./mymacro.exe || exit 1; echo;
+
 local_test:
 	rm -f test.o
 	rm -f test.exe
