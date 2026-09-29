@@ -822,7 +822,7 @@ impl Lexer {
     }
 
     fn lexical_error_at(&self, index: usize, error_description: &str) -> ! {
-        use crate::error_span;
+        use crate::common::error_span;
         let span = Span {
             file_index: self.file_index,
             start_index: index,

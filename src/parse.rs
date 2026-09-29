@@ -1661,31 +1661,6 @@ fn syntax_error(span: Span, diagno_info: &str) -> String {
     error_span(span, &(error_stage_info+diagno_info))
 }
 
-// @Smell: Create a new error_reporter.rs file?
-pub fn error_span(span: Span, info: &str) -> String {
-    let (start_line, start_column, end_line, end_column) = {
-        span.locate()
-    };
-    let source_file = &FILE_RECORDS.lock().unwrap()[span.file_index];
-    let source_file_path = source_file.path.clone();
-    let line_content = get_content_at_line(source_file, start_line);
-
-    let mut the_error = String::new();
-                                                            // @Question: what is display()?
-    let error_with_location = format!("{}:{}:{}: {}\n", source_file_path.display(), start_line, start_column, info.red());
-    the_error.push_str(&error_with_location);
-    the_error.push_str(&line_content);
-    the_error.push_str("\n");
-    let spaces = " ".repeat(start_column - 1);
-    let arrows = if start_line == end_line {
-        "^".repeat(span.end_index - span.start_index + 1)
-    } else {
-        "^".to_string()
-    };
-    the_error.push_str(&format!("{}{}", spaces, arrows.red()));
-    return the_error;
-}
-
 fn get_declarator_name(dector: &Declarator) -> &str {
     match &*dector.direct_dector {
         Direct_Declarator::Identifier(ident) => {return &ident.name;}
