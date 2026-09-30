@@ -47,13 +47,10 @@ pub enum BlockItem {
 }
 use BlockItem::*;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum DeclaratorSuffix {
-    ArrayLen(Option<Box<Expr>>, Option<Box<DeclaratorSuffix>>),
-    FuncParam{params: Vec<Func_Parameter>, is_variadic: bool},
+#[derive(Debug)]
+pub struct Program {
+    pub translation_units: Vec<TranslationUnit>,
 }
-use DeclaratorSuffix::*;
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TranslationUnit {
@@ -62,11 +59,6 @@ pub enum TranslationUnit {
 }
 use TranslationUnit::*;
 
-#[derive(Debug)]
-pub struct Program {
-    pub translation_units: Vec<TranslationUnit>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub specs: Vec<Decl_Spec>,
@@ -74,6 +66,71 @@ pub struct Function {
     pub items: Vec<BlockItem>,
     pub stmt_labels: Vec<String>,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Declaration {
+    pub decl_specs: Vec<Decl_Spec>,
+    pub init_dectors: Vec<Init_Declarator>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Init_Declarator {
+    pub dector: Declarator,
+    pub init: Option<Initializer>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Initializer {
+    pub content: Initializer_Type,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Initializer_Type {
+    Expr(Expr),
+    Init_List(Vec<Initializer>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Declarator {
+    pub qualifiers_and_pointers: Vec<Decl_Spec_Kind>,
+    pub direct_dector: Box<Direct_Declarator>,
+    pub suffix: Option<DeclaratorSuffix>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Direct_Declarator {
+    Identifier(Identifier),
+    Paren_Enclosed_Declarator(Declarator),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Type_Name {
+    pub decl_specs: Vec<Decl_Spec>,
+    pub abs_dector: Option<Abs_Declarator>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Abs_Declarator {
+    pub qualifiers_and_pointers: Vec<Decl_Spec_Kind>,
+    pub direct_abs_dector: Option<Box<Abs_Declarator>>,
+    pub suffix: Option<DeclaratorSuffix>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Abs_Direct_Declarator {
+    Paren_Enclosed_Abs_Declarator(Abs_Declarator),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeclaratorSuffix {
+    ArrayLen(Option<Box<Expr>>, Option<Box<DeclaratorSuffix>>),
+    FuncParam{params: Vec<Func_Parameter>, is_variadic: bool},
+}
+use DeclaratorSuffix::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Func_Parameter {
@@ -89,15 +146,29 @@ pub enum Param_Declarator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Declaration {
-    pub decl_specs: Vec<Decl_Spec>,
-    pub init_dectors: Vec<Init_Declarator>,
+pub enum Struct_Or_Union {
+    Is_Struct,
+    Is_Union,
+}
+use Struct_Or_Union::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Struct_Union_Specifier {
+    pub kind: Struct_Or_Union,
+    pub ident: Option<Identifier>,
+    pub members: Option<Vec<Member>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
     pub decl_specs: Vec<Decl_Spec>,
     pub dector: Declarator,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decl_Spec {
+    pub content: Decl_Spec_Kind,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,26 +203,6 @@ pub enum Decl_Spec_Kind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Decl_Spec {
-    pub content: Decl_Spec_Kind,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Struct_Or_Union {
-    Is_Struct,
-    Is_Union,
-}
-use Struct_Or_Union::*;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Struct_Union_Specifier {
-    pub kind: Struct_Or_Union,
-    pub ident: Option<Identifier>,
-    pub members: Option<Vec<Member>>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Enum_Specifier {
     pub ident: Option<Identifier>,
     pub enumerators: Option<Vec<Enumerator>>,
@@ -164,54 +215,21 @@ pub struct Enumerator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Abs_Declarator {
-    pub qualifiers_and_pointers: Vec<Decl_Spec_Kind>,
-    pub direct_abs_dector: Option<Box<Abs_Declarator>>,
-    pub suffix: Option<DeclaratorSuffix>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Abs_Direct_Declarator {
-    Paren_Enclosed_Abs_Declarator(Abs_Declarator),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Initializer_Type {
-    Expr(Expr),
-    Init_List(Vec<Initializer>),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Initializer {
-    pub content: Initializer_Type,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Init_Declarator {
-    pub dector: Declarator,
-    pub init: Option<Initializer>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Declarator {
-    pub qualifiers_and_pointers: Vec<Decl_Spec_Kind>,
-    pub direct_dector: Box<Direct_Declarator>,
-    pub suffix: Option<DeclaratorSuffix>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Direct_Declarator {
-    Identifier(Identifier),
-    Paren_Enclosed_Declarator(Declarator),
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Identifier {
     pub name: String,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Expr {
+    pub content: ExprType,
+    pub span: Span,
+}
+
+impl Expr {
+    pub fn new(content: ExprType, span: Span) -> Self {
+        Expr{content, span}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -315,51 +333,6 @@ fn get_infix_operator_precedence(token_kind: &TokenKind) -> Precedence {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Type_Name {
-    pub decl_specs: Vec<Decl_Spec>,
-    pub abs_dector: Option<Abs_Declarator>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Expr {
-    pub content: ExprType,
-    pub span: Span,
-}
-
-impl Expr {
-    pub fn new(content: ExprType, span: Span) -> Self {
-        Expr{content, span}
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Scope {
-    pub typedef_names: Vec<String>,
-}
-
-impl Scope {
-    pub fn new() -> Self {
-        Scope{
-            typedef_names: Vec::new(),
-        }
-    }
-
-    pub fn add_typedef_name(&mut self, name: &str) {
-        self.typedef_names.push(name.to_string());
-    }
-
-    pub fn is_typedef_name(&self, name: &str) -> bool {
-        for typedef_name in &self.typedef_names {
-            if typedef_name == name {
-                return true;
-            }
-        }
-        return false;
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct ScopeManager {
     pub scopes: Vec<Scope>,
     pub current_scope_index: usize,
@@ -404,6 +377,33 @@ impl ScopeManager {
     }
 }
 
+
+// This scope exists only for handling typedef stuff.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Scope {
+    pub typedef_names: Vec<String>,
+}
+
+impl Scope {
+    pub fn new() -> Self {
+        Scope{
+            typedef_names: Vec::new(),
+        }
+    }
+
+    pub fn add_typedef_name(&mut self, name: &str) {
+        self.typedef_names.push(name.to_string());
+    }
+
+    pub fn is_typedef_name(&self, name: &str) -> bool {
+        for typedef_name in &self.typedef_names {
+            if typedef_name == name {
+                return true;
+            }
+        }
+        return false;
+    }
+}
 
 pub struct Parser {
     tokens: Vec<Token>,
