@@ -590,7 +590,7 @@ impl Parser {
     }
 
     fn parse_decl_specs(&mut self) -> Result<Vec<Decl_Spec>, String> {
-        // debug_assert!(self.is_decl_spec(self.cur_token()));
+        debug_assert!(self.is_decl_spec(self.cur_token()));
         let mut decl_specs = Vec::new();
         while self.is_decl_spec(self.cur_token()) {
             let start = self.cur_token().span;
