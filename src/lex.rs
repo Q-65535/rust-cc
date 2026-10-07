@@ -11,28 +11,28 @@ use std::{
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
+    // Maybe another more efficent way of representing punctuators and keywords
+    // is just that every one of them is a member of this TokenKind enum (just as not long before).
+    // That is more efficient because when we do match statement, we don't
+    // need to do string comparasion (which involves memory access and one by one charactor comparasion),
+    // we just check the underlying digits of any particular punctuator or keyword.
+    // But the downside is that the redability is lower; since, for example, LessThanEqual is
+    // less straight forward than "<=" to code readers.
     Punct(&'static str),
     Keyword(&'static str),
-    // @Refactor?: Should we just use u64 for integer constant all the way during compilation?
-    Lex_Integer { value: i64, ty: Integer_Const_Type },
-    Lex_Float(f32),
-    Lex_Double(f64),
-    Lex_Unsigned(u64),
-    LexIdent(String),
-    StringLiteral(Vec<u8>),
 
+    Int_Num(i64),
+    Long_Num(i64),
+    UInt_Num(i64),
+    ULong_Num(i64),
+    Float_Num(f32),
+    Double_Num(f64),
+
+    LexIdent(Box<String>),
+    StringLiteral(Box<Vec<u8>>),
     Eof,
 }
 use TokenKind::*;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Integer_Const_Type {
-    tInt,
-    tLong,
-    tUInt,
-    tULong,
-}
-use Integer_Const_Type::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
@@ -185,7 +185,7 @@ impl Lexer {
                 'A'..='Z' | 'a'..='z' | '_' => {
                     let name = self.read_ident();
                     let len = name.len();
-                    let kind = Self::keyword_kind(&name).unwrap_or(LexIdent(name));
+                    let kind = Self::keyword_kind(&name).unwrap_or(LexIdent(Box::new(name)));
                     tokens.push(self.gen_token(kind, start_index, len));
                 }
                 '0'..='9' => {
@@ -212,14 +212,7 @@ impl Lexer {
                             // number whose data type is 32-bit singed integer.
                             // So, in GCC, (-128=='\x80') evaluates to 1, in this compiler, (128=='\x80') evaluates to 1.
                             // I don't known whether this difference will cause any problem, we'll see.
-                            tokens.push(self.gen_token(
-                                Lex_Integer {
-                                    value: byte as i64,
-                                    ty: tInt,
-                                },
-                                start_index,
-                                len,
-                            ));
+                            tokens.push(self.gen_token(Int_Num(byte as i64), start_index, len));
                         }
                         Err(s) => {
                             self.lexical_error_at(start_index, &s);
@@ -229,7 +222,7 @@ impl Lexer {
                 '"' => match self.read_string() {
                     Ok(bytes) => {
                         let consumed = self.index - start_index + 1;
-                        tokens.push(self.gen_token(StringLiteral(bytes), start_index, consumed));
+                        tokens.push(self.gen_token(StringLiteral(Box::new(bytes)), start_index, consumed));
                     }
                     Err(s) => {
                         self.lexical_error_at(start_index, &s);
@@ -320,8 +313,8 @@ impl Lexer {
     }
 
     // This function can read integer and floating point constant number in C.
-    // For floating point number this function return either Lex_Double(f64) or Lex_Float(f32).
-    // For integer number, this function return Lex_Integer{}.
+    // For floating point number this function return either Double_Num(f64) or Float_Num(f32).
+    // For integer number, this function return a kind of integer constant.
     fn read_num(&mut self) -> TokenKind {
         debug_assert!(matches!(self.cur_char(), '0'..='9' | '.'));
 
@@ -461,9 +454,9 @@ impl Lexer {
         };
 
         if is_float_type {
-            Lex_Float(value as f32)
+            Float_Num(value as f32)
         } else {
-            Lex_Double(value)
+            Double_Num(value)
         }
     }
 
@@ -639,7 +632,15 @@ impl Lexer {
             }
         }
 
+
         // Infer a type.
+        pub enum Integer_Const_Type {
+            tInt,
+            tLong,
+            tUInt,
+            tULong,
+        }
+        use Integer_Const_Type::*;
         let ty: Integer_Const_Type;
         if base == 10 {
             if l && u {
@@ -672,11 +673,13 @@ impl Lexer {
                 ty = tInt;
             }
         }
-
-        return Lex_Integer {
-            value: result as i64,
-            ty,
-        };
+        let result = result as i64;
+        match ty {
+            tInt => return Int_Num(result),
+            tLong => return Long_Num(result),
+            tUInt => return UInt_Num(result),
+            tULong => return ULong_Num(result),
+        }
     }
 
     // @Question: Should we return a u8 or i8?

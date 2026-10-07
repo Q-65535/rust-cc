@@ -2,7 +2,6 @@ use crate::exit;
 use colored::*;
 use crate::lex::*;
 use crate::lex::TokenKind::{self, *};
-use crate::lex::Integer_Const_Type::{self, *};
 use ExprType::*;
 use crate::FILE_RECORDS;
 use crate::common::*;
@@ -216,7 +215,11 @@ pub struct Identifier {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType {
-    Integer_Const{value: i64, ty: Integer_Const_Type},
+    Int_Const(i64),
+    Long_Const(i64),
+    UInt_Const(i64),
+    ULong_Const(i64),
+
     Float_Const(f32),
     Double_Const(f64),
     Binary(Box<Expr>, Box<Expr>, TokenKind),
@@ -623,7 +626,7 @@ impl Parser {
                 }
                 TokenKind::LexIdent(name) => {
                     self.bump();
-                    Decl_Spec_Kind::Typedef_Name(name)
+                    Decl_Spec_Kind::Typedef_Name(*name)
                 }
                 Keyword("int") => {
                     self.bump();
@@ -845,7 +848,7 @@ impl Parser {
             LexIdent(ident) => {
                 let name = ident.clone();
                 let span = self.cur_token().span;
-                let ident = Identifier {name, span};
+                let ident = Identifier {name: *name, span};
                 self.bump();
                 Box::new(Direct_Declarator::Identifier(ident))
             },
@@ -1321,17 +1324,32 @@ impl Parser {
                     return self.parse_paren();
                 }
             },
-            Lex_Integer{value, ty} => {
+            Int_Num(value) => {
                 let token = self.bump();
-                let expr = Expr::new(Integer_Const{value, ty}, token.span);
+                let expr = Expr::new(Int_Const(value), token.span);
                 return Ok(expr);
             }
-            Lex_Float(value) => {
+            Long_Num(value) => {
+                let token = self.bump();
+                let expr = Expr::new(Long_Const(value), token.span);
+                return Ok(expr);
+            }
+            UInt_Num(value) => {
+                let token = self.bump();
+                let expr = Expr::new(UInt_Const(value), token.span);
+                return Ok(expr);
+            }
+            ULong_Num(value) => {
+                let token = self.bump();
+                let expr = Expr::new(ULong_Const(value), token.span);
+                return Ok(expr);
+            }
+            Float_Num(value) => {
                 let token = self.bump();
                 let expr = Expr::new(Float_Const(value), token.span);
                 return Ok(expr);
             }
-            Lex_Double(value) => {
+            Double_Num(value) => {
                 let token = self.bump();
                 let expr = Expr::new(Double_Const(value), token.span);
                 return Ok(expr);
@@ -1499,7 +1517,7 @@ impl Parser {
     fn parse_string(&mut self) -> Result<Expr, String> {
         let tok = self.bump();
         if let StringLiteral(s) = &tok.kind {
-            let content = Str(s.clone());
+            let content = Str(*s.clone());
             let expr = Expr::new(content, tok.span);
             Ok(expr)
         } else {
@@ -1510,7 +1528,7 @@ impl Parser {
     fn parse_raw_ident_name(&mut self) -> Result<String, String> {
         let tok = self.bump();
         if let LexIdent(name) = &tok.kind {
-            Ok(name.clone())
+            Ok(*name.clone())
         } else {
             Err(error_token(&tok, "expect an identifier"))
         }
@@ -1519,7 +1537,7 @@ impl Parser {
     fn parse_ident(&mut self) -> Result<Expr, String> {
         let tok = self.bump();
         if let LexIdent(name) = &tok.kind {
-            let expr = Expr::new(Ident(name.clone()), tok.span);
+            let expr = Expr::new(Ident(*name.clone()), tok.span);
             Ok(expr)
         } else {
             Err(error_token(&tok, "expect an identifier"))
@@ -1559,7 +1577,7 @@ impl Parser {
         match member_token.kind {
             LexIdent(name) => {
                 let span = Span::merge(lhs.span, member_token.span);
-                let content = ExprType::RequestStructMember(Box::new(lhs), name);
+                let content = ExprType::RequestStructMember(Box::new(lhs), *name);
                 Ok(Expr::new(content, span))
             },
             _ => {
@@ -1662,7 +1680,7 @@ fn syntax_error(span: Span, diagno_info: &str) -> String {
 }
 
 fn get_declarator_name(dector: &Declarator) -> &str {
-    match &*dector.direct_dector {
+    match dector.direct_dector.as_ref() {
         Direct_Declarator::Identifier(ident) => {return &ident.name;}
         Direct_Declarator::Paren_Enclosed_Declarator(inner_declarator) => {
             return get_declarator_name(inner_declarator);
@@ -1697,7 +1715,7 @@ fn gen_identifier_from_token(token: &Token) -> Identifier {
     if let LexIdent(name) = &token.kind {
         let name = name.clone();
         let span = token.span;
-        return Identifier{name, span};
+        return Identifier{name: *name, span};
     } else {
         println!("you are trying to get an identifier from {:?} token", token.kind);
         exit(1);

@@ -29,7 +29,7 @@ pub fn preprocess(mut tokens: Vec<Token>) -> Vec<Token> {
                                 file_records[file_index].path.clone()
                             };
                             let mut new_path_buf = cur_path_buf.parent().unwrap().to_path_buf();
-                            let file_name = String::from_utf8(file_name_bytes.clone()).unwrap();
+                            let file_name = String::from_utf8(*file_name_bytes.clone()).unwrap();
                             new_path_buf.push(file_name);
 
                             let final_path_name = new_path_buf.to_str().unwrap();

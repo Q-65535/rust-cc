@@ -36,6 +36,7 @@ pub fn build_line_starts(src: &str) -> Vec<usize> {
 }
 
 fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
+    use std::time::Instant;
 
     let file = load_file(path);
     let master_file_index = {
@@ -44,6 +45,7 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
         file_records.len() - 1
     };
 
+    let start = Instant::now();
     // lex
     let mut lexer = Lexer::new(master_file_index);
     let mut tokens = lexer.lex();
@@ -61,6 +63,8 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
         set_output(&output);
         let mut gen = Generator::new();
         gen.gen_code(analyzed_program);
+        let elapsed = start.elapsed();
+        println!("Elapsed: {:?}", elapsed);
         Ok(())
     } else {
         for e in syntax_errors {

@@ -2,7 +2,6 @@ use std::{io::{self, Write}, collections::{VecDeque, HashMap, HashSet}, process:
 use colored::*;
 use crate::parse::{self, *};
 use crate::lex::{self, *};
-use crate::lex::Integer_Const_Type::{self, *};
 use crate::ir;
 use ir::OP;
 use ir::Data_Directive::{self, *};
@@ -1614,7 +1613,10 @@ impl ProgramAnalyzer {
         use ir::OP;
         let span = expr.span;
         match &expr.content {
-            Integer_Const{value, ty} => gen_num_expr_with_specified_type(*value,  &ty, span),
+            Int_Const(value) => gen_num_expr_with_specified_type(*value, Int, span),
+            Long_Const(value) => gen_num_expr_with_specified_type(*value, Long, span),
+            UInt_Const(value) => gen_num_expr_with_specified_type(*value, UInt, span),
+            ULong_Const(value) => gen_num_expr_with_specified_type(*value, ULong, span),
             Float_Const(value) => gen_float_expr(*value, span),
             Double_Const(value) => gen_double_expr(*value, span),
 
@@ -2182,14 +2184,8 @@ fn gen_num_expr(number: i64, span: Span) -> ir::Expr {
         ir::Expr {content, ty, span}
 }
 
-fn gen_num_expr_with_specified_type(number: i64, ty: &Integer_Const_Type, span: Span) -> ir::Expr {
+fn gen_num_expr_with_specified_type(number: i64, ty: Type, span: Span) -> ir::Expr {
         let content = ir::ExprType::Integer_Const(number);
-        let ty = match ty {
-            tInt   => Int,
-            tLong  => Long,
-            tUInt  => UInt,
-            tULong => ULong,
-        };
         ir::Expr {content, ty, span}
 }
 
@@ -2749,7 +2745,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             }
                             for i in 0..s.len() {
                                 // @Duplication_2
-                                let char_init_expr_content = Integer_Const{value: s[i].clone() as i64, ty: tInt};
+                                let char_init_expr_content = Int_Const(s[i].clone() as i64);
                                 let char_init_expr = Expr{content: char_init_expr_content, span};
                                 let element_init_content = Initializer_Type::Expr(char_init_expr);
                                 new_init_list.push(Initializer{content: element_init_content, span});
@@ -2758,7 +2754,7 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                             // Then, the arary length actually is s.len()+1.
                             if array_len == 0 {
                                 // @Duplication_2
-                                let char_init_expr_content = Integer_Const{value: 0, ty: tInt};
+                                let char_init_expr_content = Int_Const(0);
                                 let char_init_expr = Expr{content: char_init_expr_content, span};
                                 let element_init_content = Initializer_Type::Expr(char_init_expr);
                                 new_init_list.push(Initializer{content: element_init_content, span});
@@ -3118,7 +3114,7 @@ fn create_zerolized_init(ty: &Type, span: Span) -> Initializer {
         _ => {
             // @Smell: Maybe we should make the normalized init to use ir::Expr instead
             // of parse::Expr?
-            let content = ExprType::Integer_Const{value: 0, ty: tInt};
+            let content = Int_Const(0);
             let zero_value_expr = Expr {content, span};
             let content = Initializer_Type::Expr(zero_value_expr);
             return Initializer{content, span};
