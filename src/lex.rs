@@ -11,12 +11,20 @@ use std::{
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
-    // Maybe another more efficent way of representing punctuators and keywords
+    // Maybe a better way of representing punctuators and keywords
     // is just that every one of them is a member of this TokenKind enum (just as not long before).
-    // That is more efficient because when we do match statement, we don't
+    // That is better in 3 factors:
+    // First, that is more efficient because when we do match statement, we don't
     // need to do string comparasion (which involves memory access and one by one charactor comparasion),
-    // we just check the underlying digits of any particular punctuator or keyword.
-    // But the downside is that the redability is lower; since, for example, LessThanEqual is
+    // we just check the underlying number of any particular punctuator or keyword.
+    // Second, currently, the size of this enum is 24 bytes: union tag occupies 8 bytes,
+    // &str is a fat pointer which stores both address(8 bytes) and length info (8 bytes).
+    // If we use numerical representation for punctuators and keywords, we can get rid of
+    // &str, so the size can be reduced from 24 bytes to 16 bytes.
+    // Third, it's more robust in that a typo of any kind of punctuator or keyword in the code
+    // will cause a compile error instead of a runtime error which happens if we use &str.
+
+    // However, the (only?) downside is that the redability is lower; since, for example, LessThanEqual is
     // less straight forward than "<=" to code readers.
     Punct(&'static str),
     Keyword(&'static str),
@@ -838,5 +846,3 @@ impl Lexer {
         exit(1);
     }
 }
-
-
