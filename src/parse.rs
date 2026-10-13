@@ -3,7 +3,6 @@ use colored::*;
 use crate::lex::*;
 use crate::lex::TokenKind::{self, *};
 use ExprType::*;
-use crate::FILE_RECORDS;
 use crate::common::*;
 
 #[derive(Debug, Clone, PartialEq)]

@@ -24,24 +24,25 @@ pub fn preprocess(mut tokens: Vec<Token>) -> Vec<Token> {
                             index += 1;
                             if let StringLiteral(file_name_bytes) = &tokens[index].kind {
 
-                            let cur_path_buf = {
-                                let file_index = cur_token.span.file_index;
-                                let mut file_records = FILE_RECORDS.lock().unwrap();
-                                file_records[file_index].path.clone()
-                            };
-                            let mut new_path_buf = cur_path_buf.parent().unwrap().to_path_buf();
-                            let file_name = String::from_utf8(*file_name_bytes.clone()).unwrap();
-                            new_path_buf.push(file_name);
+                                let cur_path_buf = {
+                                    let file_index = cur_token.span.file_index;
+                                    let mut file_records = FILE_RECORDS.lock().unwrap();
+                                    file_records[file_index].path.clone()
+                                };
+                                let mut cur_dir_path_buf = cur_path_buf.parent().unwrap().to_path_buf();
+                                let include_file_name = String::from_utf8(*file_name_bytes.clone()).unwrap();
+                                let include_file_path = cur_dir_path_buf.join(include_file_name);
 
-                                let final_path_name = new_path_buf.to_str().unwrap();
+                                let final_path_name = include_file_path.to_str().unwrap();
                                 let file = load_file(final_path_name);
-                                let file_index = {
+                                let mut include_tokens: Vec<Token>;
+                                {
                                     let mut file_records = FILE_RECORDS.lock().unwrap();
                                     file_records.push(file);
-                                    file_records.len() - 1
-                                };
-                                let mut lexer = Lexer::new(file_index);
-                                let mut include_tokens = lexer.lex();
+                                    let content_ref: &str = &file_records.last().unwrap().content;
+                                    let mut lexer = Lexer::new(file_records.len()-1, content_ref);
+                                    include_tokens = lexer.lex();
+                                }
                                 // @Temporary: better way to handle it
                                 let mut include_tokens = include_tokens[..include_tokens.len()-1].to_vec(); // get rid of Eof
                                 let mut preprocessed_include_tokens = preprocess(include_tokens);

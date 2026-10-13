@@ -37,18 +37,19 @@ pub fn build_line_starts(src: &str) -> Vec<usize> {
 
 fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
     use std::time::Instant;
-
-    let file = load_file(path);
-    let master_file_index = {
-        let mut file_records = FILE_RECORDS.lock().unwrap();
-        file_records.push(file);
-        file_records.len() - 1
-    };
-
     let start = Instant::now();
+
     // lex
-    let mut lexer = Lexer::new(master_file_index);
-    let mut tokens = lexer.lex();
+    let mut tokens: Vec<Token>;
+    {
+        let file = load_file(path);
+        let mut files = FILE_RECORDS.lock().unwrap();
+        files.push(file);
+        let master_file_index = files.len() - 1;
+        let content_ref: &str = &files[master_file_index].content;
+        let mut lexer = Lexer::new(master_file_index, content_ref);
+        tokens = lexer.lex();
+    }
 
     // preprocess
     let mut preprocessed_tokens = preprocess(tokens);
