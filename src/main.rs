@@ -35,6 +35,52 @@ pub fn build_line_starts(src: &str) -> Vec<usize> {
     starts
 }
 
+fn expand(input: &str, output: Option<String>) {
+    // lex
+    let mut tokens: Vec<Token>;
+    {
+        let file = load_file(input);
+        let mut files = FILE_RECORDS.lock().unwrap();
+        files.push(file);
+        let master_file_index = files.len() - 1;
+        let content_ref: &str = &files[master_file_index].content;
+        let mut lexer = Lexer::new(master_file_index, content_ref);
+        tokens = lexer.lex();
+    }
+
+    // preprocess
+    let mut preprocessed_tokens = preprocess(tokens);
+    let content = revert_tokens_to_string(preprocessed_tokens);
+
+    if let Some(output) = output {
+        if output == "-" {
+            println!("{}", content);
+        } else {
+            use std::fs;
+            fs::write(output, &content);
+        }
+    }
+}
+
+fn revert_tokens_to_string(tokens: Vec<Token>) -> String {
+    let mut result = String::new();
+    let source_files = &FILE_RECORDS.lock().unwrap();
+    for tok in tokens {
+        if tok.at_bol {
+            result.push('\n');
+        }
+        let belonging_file = &source_files[tok.span.file_index];
+        let src = &belonging_file.content;
+        if tok.kind == Eof {
+            continue;
+        }
+        let tok_content = &src[tok.span.start_index..tok.span.end_index+1];
+        result.push_str(tok_content);
+        result.push(' ');
+    }
+    return result;
+}
+
 fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
     use std::time::Instant;
     let start = Instant::now();
@@ -88,12 +134,18 @@ fn main() {
         if let Some(input) = options.cc1_input.as_deref() {
             path = input;
         } else {
+            // If we manually run command like this: ./rust-cc -cc1 test.c,
+            // then control flow goes here.
             path = options.inputs.first().unwrap().as_str();
         }
         let output = options.cc1_output.clone().or(options.output.clone());
-        if compile(path, output).is_err() {
-            exit(1);
+
+        if options.preprocess_only {
+            expand(path, output);
+        } else {
+            compile(path, output);
         }
+
     } else if let Err(err) = driver::run(&options, &args) {
         eprintln!("{err}");
         exit(1);

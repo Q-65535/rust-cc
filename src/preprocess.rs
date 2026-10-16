@@ -19,6 +19,9 @@ pub fn preprocess(mut tokens: Vec<Token>) -> Vec<Token> {
             Punct("#") => {
                 if cur_token.at_bol {
                     index += 1;
+                    if tokens[index].at_bol {
+                        continue;
+                    }
                     if let LexIdent(directive) = &tokens[index].kind {
                         if directive.as_ref() == "include" {
                             index += 1;
@@ -58,9 +61,16 @@ pub fn preprocess(mut tokens: Vec<Token>) -> Vec<Token> {
                                 }
                             }
                         }
+                    } else {
+                        let error_description = "there is no directive following '#'";
+                        let error_info = error_span(tokens[index].span, error_description);
+                        println!("{}", error_info);
+                        exit(1);
                     }
                 } else {
-                    println!("invalid preprocessor directive");
+                    let error_description = "Currently only support '#' at the begining of line.";
+                    let error_info = error_span(tokens[index].span, error_description);
+                    println!("{}", error_info);
                     exit(1);
                 }
             }

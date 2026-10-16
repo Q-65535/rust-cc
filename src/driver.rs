@@ -28,7 +28,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         output: None,
         compile_only: false,
         assembly_only: false,
-        preprocess_only: bool,
+        preprocess_only: false,
         cc1: false,
         print_commands: false,
         cc1_input: None,
@@ -94,9 +94,18 @@ pub fn run(options: &Options, original_args: &[String]) -> Result<(), String> {
     let mut linker_inputs = Vec::new();
 
     for input in &options.inputs {
-        let output = options.output.clone().unwrap_or_else(|| {
-            replace_extension(input, if options.assembly_only { ".s" } else { ".o" })
-        });
+        let output = if options.output.is_some() {
+            options.output.clone().unwrap()
+        } else {
+            if options.preprocess_only {
+                // '-' means output to stdout.
+                "-".to_string()
+            } else if options.assembly_only {
+                replace_extension(input, ".s")
+            } else {
+                replace_extension(input, ".o")
+            }
+        };
 
         if input.ends_with(".o") {
             if !options.compile_only && !options.assembly_only {

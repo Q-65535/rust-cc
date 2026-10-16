@@ -296,6 +296,11 @@ impl <'a>Lexer<'a> {
         // So We get an empty string from src[start_index.. end_index].
         // In fact, for any string and index:
         // as long as 0 ≤ index ≤ string.len() satisfied, string[index.. index] is a empty string.
+
+        // @Fix: We need to figure out a better way to handle Eof.
+        // @Fix: We need to figure out a better way to handle Eof.
+        // @Fix: We need to figure out a better way to handle Eof.
+        // @Fix: We need to figure out a better way to handle Eof.
         tokens.push(self.gen_token(Eof, self.file_content.len(), 0));
         tokens
     }
