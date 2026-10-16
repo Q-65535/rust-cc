@@ -11,6 +11,7 @@ pub struct Options {
     pub output: Option<String>,
     pub compile_only: bool,
     pub assembly_only: bool,
+    pub preprocess_only: bool,
     pub cc1: bool,
     pub print_commands: bool,
     pub cc1_input: Option<String>,
@@ -27,6 +28,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         output: None,
         compile_only: false,
         assembly_only: false,
+        preprocess_only: bool,
         cc1: false,
         print_commands: false,
         cc1_input: None,
@@ -44,6 +46,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "-###" => options.print_commands = true,
             "-cc1" => options.cc1 = true,
             "-S" => options.assembly_only = true,
+            "-E" => options.preprocess_only = true,
             "-c" => options.compile_only = true,
             "-o" | "-cc1-input" | "-cc1-output" => {
                 let option = args[i].clone();
@@ -78,9 +81,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 
     if options.inputs.len() > 1
         && options.output.is_some()
-        && (options.compile_only || options.assembly_only)
+        && (options.compile_only || options.assembly_only || options.preprocess_only)
     {
-        return Err("cannot specify '-o' with '-c' or '-S' with multiple files".to_string());
+        return Err("cannot specify '-o' with '-c' or '-S' or '-E' with multiple files".to_string());
     }
 
     Ok(options)
@@ -121,7 +124,9 @@ pub fn run(options: &Options, original_args: &[String]) -> Result<(), String> {
             return Err(format!("unknown file extension: {input}"));
         }
 
-        if options.assembly_only {
+        if options.preprocess_only {
+            run_cc1(original_args, input, &output, options.print_commands)?;
+        } else if options.assembly_only {
             run_cc1(original_args, input, &output, options.print_commands)?;
         } else if options.compile_only {
             let assembly = temporary_files.create()?;
