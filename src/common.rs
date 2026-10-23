@@ -89,9 +89,7 @@ pub fn error_span(span: Span, info: &str) -> String {
 
 pub fn gen_colored_report(span: Span, info: &str, color: Color) -> String {
     use std::path::absolute;
-    let (start_line, start_column, end_line, end_column) = {
-        span.locate()
-    };
+    let (start_line, start_column, end_line, end_column) = span.locate();
     let source_file = &FILE_RECORDS.lock().unwrap()[span.file_index];
     let source_file_abs_path = absolute(&source_file.path).unwrap();
     let line_content = get_content_at_line(source_file, start_line);
