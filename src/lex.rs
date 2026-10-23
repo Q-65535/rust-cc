@@ -59,15 +59,10 @@ pub struct Source_File {
 pub fn load_file(path: &str) -> Source_File {
     let content = if path == "-" {
         let mut buf = String::new();
-        io::stdin()
-            .read_to_string(&mut buf)
-            .expect("failed to read from stdin");
+        io::stdin().read_to_string(&mut buf).expect("failed to read from stdin");
         buf
     } else {
-        fs::read_to_string(&path).unwrap_or_else(|err| {
-            eprintln!("cannot open {}: {}", path, err);
-            exit(1);
-        })
+        fs::read_to_string(&path).unwrap()
     };
     let path = PathBuf::from(path);
     let line_starts = build_line_starts(&content);

@@ -111,7 +111,7 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
         let mut gen = Generator::new();
         gen.gen_code(analyzed_program);
         let elapsed = start.elapsed();
-        println!("Elapsed: {:?}", elapsed);
+        println!("Compile time: {:?}", elapsed);
         Ok(())
     } else {
         for e in syntax_errors {

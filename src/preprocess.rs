@@ -55,7 +55,7 @@ pub fn preprocess(mut tokens: Vec<Token>) -> Vec<Token> {
                                 // Skip extra tokens after #include "..".
                                 while !tokens[index].at_bol {
                                     let error_description = "Warning: Extra token.";
-                                    let error_info = error_span(tokens[index].span, error_description);
+                                    let error_info = warning_span(tokens[index].span, error_description);
                                     println!("{}", error_info);
                                     index += 1;
                                 }

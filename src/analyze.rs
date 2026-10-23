@@ -411,7 +411,7 @@ impl ProgramAnalyzer {
 
                     let (function_type, name) = self.resolve_declarator(&symbol_attribute, &base_type, &func.dector);
                     if !self.defined_functions.insert(name.clone()) {
-                        let err_info = format!("semantic error: function {} redefined", name);
+                        let err_info = format!("function {} redefined", name);
                         report_semantic_error(func.dector.span, &err_info);
                     }
                     let object = create_global_obj_with_attribute(&name, &function_type, &symbol_attribute);
@@ -494,12 +494,12 @@ impl ProgramAnalyzer {
     fn register_global_object(&mut self, object: Obj, span: Span) {
         if let Some(previous) = self.scope_manager.resolve_object_at_current_scope(&object.name) {
             if previous.ty != object.ty || previous.is_static != object.is_static {
-                let err_info = format!("semantic error: incompatible redeclaration of {}", object.name);
+                let err_info = format!("incompatible redeclaration of {}", object.name);
                 report_semantic_error(span, &err_info);
             }
             self.scope_manager.replace_object(object);
         } else if self.scope_manager.contains_symbol_at_current_scope(&object.name) {
-            let err_info = format!("semantic error: {} redeclared as a different kind of symbol", object.name);
+            let err_info = format!("{} redeclared as a different kind of symbol", object.name);
             report_semantic_error(span, &err_info);
         } else {
             self.scope_manager.add_object(object);
@@ -558,7 +558,7 @@ impl ProgramAnalyzer {
                 continue;
             }
             if !self.defined_global_objects.insert(name.clone()) {
-                let err_info = format!("semantic error: global object {} redefined", name);
+                let err_info = format!("global object {} redefined", name);
                 report_semantic_error(cur_dector.span, &err_info);
             }
             let analyzed_decl = Global_Data_Decl{obj: object, init_data};
@@ -583,7 +583,7 @@ impl ProgramAnalyzer {
                     }
                     return init_data;
                 } else {
-                    let err_info = format!("semantic error: trying to init an array variable with scalar data.");
+                    let err_info = format!("trying to init an array variable with scalar data.");
                     report_semantic_error(span, &err_info);
                     exit(1);
                 }
@@ -608,7 +608,7 @@ impl ProgramAnalyzer {
                     }
                     return init_data;
                 } else {
-                    let err_info = format!("semantic error: trying to init a struct variable with scalar data.");
+                    let err_info = format!("trying to init a struct variable with scalar data.");
                     report_semantic_error(span, &err_info);
                     exit(1);
                 }
@@ -683,7 +683,7 @@ impl ProgramAnalyzer {
                     }
 
                 } else {
-                    let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
+                    let err_info = format!("trying to init a scalar variable with non scalar data.");
                     report_semantic_error(span, &err_info);
                     exit(1);
                 }
@@ -703,7 +703,7 @@ impl ProgramAnalyzer {
                         // We must truncate i64 to i32 before use it as array length.
                         (num as i32) as usize
                     } else {
-                        let err_info = format!("semantic error: array size is negative number: {}", num);
+                        let err_info = format!("array size is negative number: {}", num);
                         report_semantic_error(len_expr.span, &err_info);
                         exit(1);
                     };
@@ -997,7 +997,7 @@ impl ProgramAnalyzer {
                         stmts.append(&mut init_stmts);
                     }
                 } else {
-                    let err_info = format!("semantic error: trying to init an array variable with scalar data.");
+                    let err_info = format!("trying to init an array variable with scalar data.");
                     report_semantic_error(span, &err_info);
                 }
             }
@@ -1056,7 +1056,7 @@ impl ProgramAnalyzer {
                     let assignment_expr_stmt = ir::StmtType::Ex(assignment_expr);
                     stmts.push(assignment_expr_stmt);
                 } else {
-                    let err_info = format!("semantic error: trying to init a scalar variable with non scalar data.");
+                    let err_info = format!("trying to init a scalar variable with non scalar data.");
                     report_semantic_error(span, &err_info);
                 }
             }
@@ -1252,7 +1252,7 @@ impl ProgramAnalyzer {
         if let Some(ident) = &st.ident {
             if let Some(members) = &st.members {
                 if self.scope_manager.resolve_tag_at_current_scope(&ident.name).is_some() {
-                    let err_info = format!("semantic error: redefinition of tag name: '{}'", ident.name);
+                    let err_info = format!("redefinition of tag name: '{}'", ident.name);
                     report_semantic_error(ident.span, &err_info);
                 } else {
                     self.scope_manager.add_tag(&ident.name, &the_type);
@@ -1268,7 +1268,7 @@ impl ProgramAnalyzer {
                 // If it has a tag name, and the tag name is already registerd at
                 // current scope, enumerator list shall not appear, otherwise it is an semantic error.
                 if enum_spec.enumerators.is_some() {
-                    let err_info = format!("semantic error: redefinition of tag name: '{}'", ident.name);
+                    let err_info = format!("redefinition of tag name: '{}'", ident.name);
                     report_semantic_error(ident.span, &err_info);
                     exit(1);
                 } else {
@@ -1289,7 +1289,7 @@ impl ProgramAnalyzer {
                     }
                     return the_type;
                 } else {
-                    let err_info = format!("semantic error: undefined tag name: '{}'", ident.name);
+                    let err_info = format!("undefined tag name: '{}'", ident.name);
                     report_semantic_error(ident.span, &err_info);
                     exit(1);
                 }
@@ -1752,7 +1752,7 @@ impl ProgramAnalyzer {
                 } else if let Some(number) = self.scope_manager.resolve_enum(s) {
                     return gen_num_expr(number, span);
                 } else {
-                    let err_info = format!("semantic error: symbol '{}' doesn't exist or is nither a variable nor enum constant.", s);
+                    let err_info = format!("symbol '{}' doesn't exist or is nither a variable nor enum constant.", s);
                     report_semantic_error(expr.span, &err_info);
                     exit(1);
                 };
@@ -1790,7 +1790,7 @@ impl ProgramAnalyzer {
                         }
                     }
                 } else {
-                    let err_info = format!("semantic error: trying to request struct member, but this is not even a struct!");
+                    let err_info = format!("trying to request struct member, but this is not even a struct!");
                     report_semantic_error(struct_expr.span, &err_info);
                     exit(1);
                 }
