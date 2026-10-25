@@ -1,5 +1,7 @@
 use crate::common::*;
 use crate::lex::*;
+use crate::parse::*;
+use crate::ExprType::*;
 use TokenKind::*;
 use std::collections::HashMap;
 use std::process::exit;
@@ -76,9 +78,24 @@ impl<'a> Preprocessor<'a> {
                                     }
                                 }
                             } else if directive.as_ref() == "if" {
+                                let span = self.cur_token().span;
                                 self.bump();
-                                let raw_expr_tokens = self.read_tokens_till_end_of_line();
+                                if self.cur_token().at_bol {
+                                    let error_description = "No expression found after #if";
+                                    report_preprocess_error(span, error_description);
+                                }
+                                let raw_expr_tokens = self.read_tokens_till_next_line();
                                 let expanded_expr_tokens = self.expand(raw_expr_tokens);
+
+                                let mut parser = Parser::new(expanded_expr_tokens);
+                                let expr = match parser.parse_expr(Precedence::Lowest, Associativity::Left_To_Right) {
+                                    Ok(result) => result,
+                                    Err(e) => {
+                                        println!("{}", e);
+                                        exit(1);
+                                    }
+                                };
+                                let num = eval_integer_const(&expr);
                                 
                             } else if directive.as_ref() == "endif" {
                                 todo!();
@@ -101,10 +118,9 @@ impl<'a> Preprocessor<'a> {
         return preprocessed_tokens;
     }
 
-    pub fn read_tokens_till_end_of_line(&mut self) -> &[Token] {
+    pub fn read_tokens_till_next_line(&mut self) -> &'a [Token] {
         debug_assert!(self.cur_token().at_bol);
         let start_index = self.cur_index;
-        // @Temporary: Currenly just copy.
         while (!self.cur_token().at_bol) {
             self.bump();
         }
@@ -114,6 +130,7 @@ impl<'a> Preprocessor<'a> {
 
     pub fn expand(&mut self, raw_tokens: &[Token]) -> Vec<Token> {
         let mut expanded_tokens = Vec::new();
+        // @Temporary: Currenly just copy.
         for token in raw_tokens {
             expanded_tokens.push(token.clone());
         }
@@ -128,5 +145,28 @@ fn report_preprocess_error(span: Span, error_description: &str) {
     let error_info = error_span(span, &prefixed_error_description);
     println!("{}", error_info);
     exit(1);
+}
+
+// @Pending: How to handle usual arithmatic conversion?
+fn eval_integer_const(expr: &Expr) -> i64 {
+    match &expr.content {
+        Int_Const(n) => *n,
+        Long_Const(n) => *n,
+        UInt_Const(n) => *n,
+        ULong_Const(n) => *n,
+
+        Binary(lhs, rhs, op) => {
+            let left_num = eval_integer_const(lhs);
+            let right_num = eval_integer_const(rhs);
+            match op {
+                Punct("+") => left_num + right_num,
+                Punct("-") => left_num - right_num,
+                Punct("*") => left_num * right_num,
+                Punct("/") => left_num / right_num,
+                _ => todo!(),
+            }
+        }
+        _ => todo!(),
+    }
 }
 
