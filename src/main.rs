@@ -49,8 +49,7 @@ fn expand(input: &str, output: Option<String>) {
     }
 
     // preprocess
-    let mut preprocessor = Preprocessor::new(&tokens);
-    let mut preprocessed_tokens = preprocessor.preprocess();
+    let mut preprocessed_tokens = preprocess(&tokens);
     let content = revert_tokens_to_string(preprocessed_tokens);
 
     if let Some(output) = output {
@@ -99,8 +98,7 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
     }
 
     // preprocess
-    let mut preprocessor = Preprocessor::new(&tokens);
-    let mut preprocessed_tokens = preprocessor.preprocess();
+    let mut preprocessed_tokens = preprocess(&tokens);
     // parse
     let mut parser = Parser::new(preprocessed_tokens);
     let (program, syntax_errors) = parser.parse();

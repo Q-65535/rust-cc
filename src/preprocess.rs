@@ -7,161 +7,34 @@ use std::collections::HashMap;
 use std::process::exit;
 use crate::FILE_RECORDS;
 
+/*
 #[derive(Debug, Clone, Default)]
-pub struct Preprocessor<'a> {
-    tokens: &'a [Token],
-    cur_index: usize,
+pub enum PP_Unit {
+    Token(Box<Token>),
+    If_Group(Box<If_Group>),
+}
+
+#[derive(Debug, Clone, Default)]
+struct If_Group {
+    condition: i64,
+    then: Vec<PP_Unit>,
+    otherwise: Option<Box::<If_Group>>,
+}
+*/
+
+#[derive(Debug, Clone, Default)]
+pub struct Preprocessor {
     nested_if_layer: usize,
 }
 
-impl<'a> Preprocessor<'a> {
-    pub fn new(tokens: &'a [Token]) -> Self {
+impl Preprocessor {
+    pub fn new() -> Self {
         Preprocessor {
-            tokens,
-            cur_index: 0,
             nested_if_layer: 0,
         }
     }
     
-    fn bump(&mut self) {
-        self.cur_index += 1;
-    }
-
-    pub fn cur_token(&self) -> &Token {
-        &self.tokens[self.cur_index]
-    }
-    
-    pub fn preprocess(&mut self) -> Vec<Token> {
-        let mut preprocessed_tokens = Vec::new();
-        while self.cur_index < self.tokens.len() {
-            match self.cur_token().kind {
-                Punct("#") => {
-                    if self.cur_token().at_bol {
-                        self.bump();
-                        if self.cur_token().at_bol {
-                            continue;
-                        }
-                        if let LexIdent(directive) = &self.cur_token().kind {
-                            if directive.as_ref() == "include" {
-                                self.bump();
-                                if let StringLiteral(file_name_bytes) = &self.cur_token().kind {
-                                    let cur_file_path_buf = {
-                                        let file_index = self.cur_token().span.file_index;
-                                        let mut file_records = FILE_RECORDS.lock().unwrap();
-                                        file_records[file_index].path.clone()
-                                    };
-                                    let cur_dir_path_buf = cur_file_path_buf.parent().unwrap().to_path_buf();
-                                    let include_file_name = String::from_utf8(*file_name_bytes.clone()).unwrap();
-                                    let include_file_path = cur_dir_path_buf.join(include_file_name);
-    
-                                    let include_file_path_str = include_file_path.to_str().unwrap();
-                                    let file = load_file(include_file_path_str);
-                                    let mut include_tokens: Vec<Token>;
-                                    {
-                                        let mut file_records = FILE_RECORDS.lock().unwrap();
-                                        file_records.push(file);
-                                        let content_ref: &str = &file_records.last().unwrap().content;
-                                        let mut lexer = Lexer::new(file_records.len()-1, content_ref);
-                                        include_tokens = lexer.lex();
-                                    }
-                                    // @Temporary: better way to handle it
-                                    let mut include_tokens = include_tokens[..include_tokens.len()-1].to_vec(); // get rid of Eof
-                                    let mut inner_preprocessor = Preprocessor::new(&include_tokens);
-                                    let mut preprocessed_include_tokens = inner_preprocessor.preprocess();
-                                    preprocessed_tokens.append(&mut preprocessed_include_tokens);
-    
-                                    self.bump();
-                                    // Skip extra tokens after #include "..".
-                                    while !self.cur_token().at_bol {
-                                        let error_description = "Warning: Extra token.";
-                                        let error_info = warning_span(self.cur_token().span, error_description);
-                                        println!("{}", error_info);
-                                        self.bump();
-                                    }
-                                }
-                            } else if directive.as_ref() == "if" {
-                                self.nested_if_layer += 1;
-                                let span = self.cur_token().span;
-                                self.bump();
-                                if self.cur_token().at_bol {
-                                    let error_description = "No expression found after #if";
-                                    report_preprocess_error(span, error_description);
-                                }
-                                let raw_expr_tokens = self.read_tokens_till_next_line();
-                                let expanded_expr_tokens = self.expand(raw_expr_tokens);
-
-                                let mut parser = Parser::new(expanded_expr_tokens);
-                                let expr = match parser.parse_expr(Precedence::Lowest, Associativity::Left_To_Right) {
-                                    Ok(result) => result,
-                                    Err(e) => {
-                                        println!("{}", e);
-                                        exit(1);
-                                    }
-                                };
-
-                                let num = eval_integer_const(&expr);
-                                if num > 0 {
-                                    continue;
-                                } else {
-                                    self.skip_cur_block();
-                                }
-                                
-                            } else if directive.as_ref() == "endif" {
-                                todo!();
-                            }
-                        } else {
-                            let error_description = "there is no directive following '#'";
-                            report_preprocess_error(self.cur_token().span, error_description);
-                        }
-                    } else {
-                        let error_description = "Currently only support '#' be at the begining of a line.";
-                        report_preprocess_error(self.cur_token().span, error_description);
-                    }
-                }
-                _ => {
-                    preprocessed_tokens.push(self.cur_token().clone());
-                    self.bump();
-                }
-            }
-        }
-        return preprocessed_tokens;
-    }
-
-    pub fn skip_cur_block(&mut self) {
-        let start_if_layer = self.nested_if_layer;
-        let start_span = self.cur_token().span;
-        loop {
-            if self.cur_index >= self.tokens.len() {
-                let error_description = format!("starting from this point, missing #endif.");
-                report_preprocess_error(start_span, &error_description);
-            }
-
-            if self.cur_token().at_bol && self.cur_token().kind == Punct("#") {
-                self.bump();
-                if let LexIdent(directive) = &self.cur_token().kind {
-                    if matches!(directive.as_str(), "elif" | "else" | "endif") {
-                        if self.nested_if_layer == start_if_layer {
-                            // Go back to # punctuator, so that preprocess can handle after this function returns.
-                            self.cur_index -= 1;
-                            return;
-                        } else {
-                            if matches!(directive.as_str(), "endif") {
-                                self.nested_if_layer -= 1;
-                            }
-                            self.bump();
-                        }
-                    } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
-                        self.nested_if_layer += 1;
-                        self.bump();
-                    }
-                }
-            } else {
-                self.bump();
-            }
-        }
-    }
-
-    pub fn preprocess_2(&mut self, tokens: &[Token]) -> Vec<Token> {
+    pub fn inner_preprocess(&mut self, tokens: &[Token]) -> Vec<Token> {
         let mut preprocessed_tokens = Vec::new();
         let mut index = 0;
         while index < tokens.len() {
@@ -172,76 +45,124 @@ impl<'a> Preprocessor<'a> {
                         if tokens[index].at_bol {
                             continue;
                         }
-                        if let LexIdent(directive) = &tokens[index].kind {
-                            if directive.as_ref() == "include" {
-                                index += 1;
-                                if let StringLiteral(file_name_bytes) = &tokens[index].kind {
-                                    let cur_file_path_buf = {
-                                        let file_index = tokens[index].span.file_index;
-                                        let mut file_records = FILE_RECORDS.lock().unwrap();
-                                        file_records[file_index].path.clone()
-                                    };
-                                    let cur_dir_path_buf = cur_file_path_buf.parent().unwrap().to_path_buf();
-                                    let include_file_name = String::from_utf8(*file_name_bytes.clone()).unwrap();
-                                    let include_file_path = cur_dir_path_buf.join(include_file_name);
-    
-                                    let include_file_path_str = include_file_path.to_str().unwrap();
-                                    let file = load_file(include_file_path_str);
-                                    let mut include_tokens: Vec<Token>;
-                                    {
-                                        let mut file_records = FILE_RECORDS.lock().unwrap();
-                                        file_records.push(file);
-                                        let content_ref: &str = &file_records.last().unwrap().content;
-                                        let mut lexer = Lexer::new(file_records.len()-1, content_ref);
-                                        include_tokens = lexer.lex();
-                                    }
-                                    // @Temporary: better way to handle it
-                                    let mut include_tokens = include_tokens[..include_tokens.len()-1].to_vec(); // get rid of Eof
-                                    let mut inner_preprocessor = Preprocessor::new(&include_tokens);
-                                    let mut preprocessed_include_tokens = inner_preprocessor.preprocess();
-                                    preprocessed_tokens.append(&mut preprocessed_include_tokens);
-    
-                                    index += 1;
-                                    // Skip extra tokens after #include "..".
-                                    while !tokens[index].at_bol {
-                                        let error_description = "Warning: Extra token.";
-                                        let error_info = warning_span(tokens[index].span, error_description);
-                                        println!("{}", error_info);
-                                        index += 1;
-                                    }
+
+                        let directive = match &tokens[index].kind {
+                            LexIdent(name) => name.as_str(),
+                            Keyword(name) => name,
+                            _ => {
+                                let error_description = format!("the token follwing '#' is invalid: {:?}", tokens[index].kind);
+                                report_preprocess_error(tokens[index].span, &error_description);
+                                exit(1);
+                            }
+                        };
+                        let span = tokens[index].span;
+                        if directive == "include" {
+                            index += 1;
+                            if let StringLiteral(file_name_bytes) = &tokens[index].kind {
+                                let cur_file_path_buf = {
+                                    let file_index = tokens[index].span.file_index;
+                                    let mut file_records = FILE_RECORDS.lock().unwrap();
+                                    file_records[file_index].path.clone()
+                                };
+                                let cur_dir_path_buf = cur_file_path_buf.parent().unwrap().to_path_buf();
+                                let include_file_name = String::from_utf8(*file_name_bytes.clone()).unwrap();
+                                let include_file_path = cur_dir_path_buf.join(include_file_name);
+
+                                let include_file_path_str = include_file_path.to_str().unwrap();
+                                let file = load_file(include_file_path_str);
+                                let mut include_tokens: Vec<Token>;
+                                {
+                                    let mut file_records = FILE_RECORDS.lock().unwrap();
+                                    file_records.push(file);
+                                    let content_ref: &str = &file_records.last().unwrap().content;
+                                    let mut lexer = Lexer::new(file_records.len()-1, content_ref);
+                                    include_tokens = lexer.lex();
                                 }
-                            } else if directive.as_ref() == "if" {
-                                let span = tokens[index].span;
+                                // @Temporary: better way to handle it
+                                let mut include_tokens = include_tokens[..include_tokens.len()-1].to_vec(); // get rid of Eof
+                                let mut preprocessed_include_tokens = preprocess(&include_tokens);
+                                preprocessed_tokens.append(&mut preprocessed_include_tokens);
+
                                 index += 1;
-                                if tokens[index].at_bol {
-                                    let error_description = "No expression found after #if";
+                                // Skip extra tokens after #include "..".
+                                while !tokens[index].at_bol {
+                                    let error_description = "Warning: Extra token.";
+                                    let error_info = warning_span(tokens[index].span, error_description);
+                                    println!("{}", error_info);
+                                    index += 1;
+                                }
+                            }
+                        } else if matches!(directive, "if" | "elif") {
+                            if directive == "elif" {
+                                if self.nested_if_layer == 0 {
+                                    let error_description = "WTF are you doing; we are not inside any #if group.";
                                     report_preprocess_error(span, error_description);
                                 }
-                                let raw_expr_tokens = self.read_tokens_till_next_line();
-                                let expanded_expr_tokens = self.expand(raw_expr_tokens);
-
-                                let mut parser = Parser::new(expanded_expr_tokens);
-                                let expr = match parser.parse_expr(Precedence::Lowest, Associativity::Left_To_Right) {
-                                    Ok(result) => result,
-                                    Err(e) => {
-                                        println!("{}", e);
-                                        exit(1);
-                                    }
-                                };
-
-                                let num = eval_integer_const(&expr);
-                                if num > 0 {
-
-                                } else {
-
-                                }
-                                
-                            } else if directive.as_ref() == "endif" {
-                                todo!();
                             }
-                        } else {
-                            let error_description = "there is no directive following '#'";
-                            report_preprocess_error(tokens[index].span, error_description);
+                            self.nested_if_layer += 1;
+                            index += 1;
+                            if tokens[index].at_bol {
+                                let error_description = "No expression found after #if";
+                                report_preprocess_error(span, error_description);
+                            }
+
+                            let expr_start_index = index;
+                            while !tokens[index].at_bol {
+                                index += 1;
+                            }
+                            let raw_expr_tokens = &tokens[expr_start_index..index];
+                            let expanded_expr_tokens = self.expand(raw_expr_tokens);
+
+                            let mut parser = Parser::new(expanded_expr_tokens);
+                            let expr = match parser.parse_expr(Precedence::Lowest, Associativity::Left_To_Right) {
+                                Ok(result) => result,
+                                Err(e) => {
+                                    println!("{}", e);
+                                    exit(1);
+                                }
+                            };
+
+                            let num = eval_integer_const(&expr);
+                            if num != 0 {
+                                // @Duplication_a
+                                let block_start_index = index;
+                                self.skip_cur_block(&mut index, tokens);
+                                let skipped_block = &tokens[block_start_index..index];
+                                let mut preprocessed_block = self.inner_preprocess(skipped_block);
+                                preprocessed_tokens.append(&mut preprocessed_block);
+                                self.skip_cur_if_layer(&mut index, tokens);
+                                continue;
+                            } else {
+                                self.skip_cur_block(&mut index, tokens);
+                                continue;
+                            }
+                        } else if directive == "else" {
+                            index += 1;
+                            if !tokens[index].at_bol {
+                                let error_description = "Extra token(s) after #else.";
+                                report_preprocess_error(tokens[index].span, error_description);
+                            }
+
+                            // @Duplication_a
+                            let block_start_index = index;
+                            self.skip_cur_block(&mut index, tokens);
+                            let skipped_block = &tokens[block_start_index..index];
+                            let mut preprocessed_block = self.inner_preprocess(skipped_block);
+                            preprocessed_tokens.append(&mut preprocessed_block);
+                            self.skip_cur_if_layer(&mut index, tokens);
+                            continue;
+                        } else if directive == "ifdef" {
+                            todo!();
+                        } else if directive == "ifndef" {
+                            todo!();
+                        } else if directive == "endif" {
+                            if self.nested_if_layer > 0 {
+                                index += 1;
+                                self.nested_if_layer -= 1;
+                            } else {
+                                let error_description = "extra endif directive";
+                                report_preprocess_error(tokens[index].span, error_description);
+                            }
                         }
                     } else {
                         let error_description = "Currently only support '#' be at the begining of a line.";
@@ -257,14 +178,72 @@ impl<'a> Preprocessor<'a> {
         return preprocessed_tokens;
     }
 
-    pub fn read_tokens_till_next_line(&mut self) -> &'a [Token] {
-        debug_assert!(self.cur_token().at_bol);
-        let start_index = self.cur_index;
-        while (!self.cur_token().at_bol) {
-            self.bump();
+    pub fn skip_cur_block(&mut self, index: &mut usize, tokens: &[Token]) {
+        let start_if_layer = self.nested_if_layer;
+        let start_span = tokens[*index].span;
+        loop {
+            if *index >= tokens.len() {
+                let error_description = format!("starting from this point, missing #endif.");
+                report_preprocess_error(start_span, &error_description);
+            }
+
+            if tokens[*index].at_bol && tokens[*index].kind == Punct("#") {
+                *index += 1;
+                if let LexIdent(directive) = &tokens[*index].kind {
+                    if matches!(directive.as_str(), "elif" | "else" | "endif") {
+                        if self.nested_if_layer == start_if_layer {
+                            // Go back to # punctuator, so that preprocess can handle after this function returns.
+                            *index -= 1;
+                            return;
+                        } else {
+                            if matches!(directive.as_str(), "endif") {
+                                self.nested_if_layer -= 1;
+                            }
+                            *index += 1;
+                        }
+                    } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
+                        self.nested_if_layer += 1;
+                        *index += 1;
+                    }
+                }
+            } else {
+                *index += 1;
+            }
         }
-        let end_index_exclusive = self.cur_index;
-        return &self.tokens[start_index..end_index_exclusive];
+    }
+
+    pub fn skip_cur_if_layer(&mut self, index: &mut usize, tokens: &[Token]) {
+        let start_if_layer = self.nested_if_layer;
+        let start_span = tokens[*index].span;
+        loop {
+            if *index >= tokens.len() {
+                let error_description = format!("starting from this point, missing #endif.");
+                report_preprocess_error(start_span, &error_description);
+            }
+
+            if tokens[*index].at_bol && tokens[*index].kind == Punct("#") {
+                *index += 1;
+                if let LexIdent(directive) = &tokens[*index].kind {
+                    if matches!(directive.as_str(), "endif") {
+                        if self.nested_if_layer == start_if_layer {
+                            // Go over #endif
+                            *index += 1;
+                            return;
+                        } else {
+                            if matches!(directive.as_str(), "endif") {
+                                self.nested_if_layer -= 1;
+                            }
+                            *index += 1;
+                        }
+                    } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
+                        self.nested_if_layer += 1;
+                        *index += 1;
+                    }
+                }
+            } else {
+                *index += 1;
+            }
+        }
     }
 
     pub fn expand(&mut self, raw_tokens: &[Token]) -> Vec<Token> {
@@ -275,6 +254,11 @@ impl<'a> Preprocessor<'a> {
         }
         return expanded_tokens;
     }
+}
+
+pub fn preprocess(tokens: &[Token]) -> Vec<Token> {
+    let mut preprocessor = Preprocessor::new();
+    return preprocessor.inner_preprocess(tokens);
 }
 
 // @Pending: How to handle usual arithmatic conversion?

@@ -1237,6 +1237,15 @@ impl Parser {
         let mut expr = self.parse_prefix()?;
 
         loop {
+            // @Smell: Maybe this is a bad practice to cater to preprocess in parse module:
+            // this if statement is just for the convenience of preprocessing directives where
+            // the constant expression needs to be parsed and evaluated, e.g., "#if 3".
+            // The problem is, without this if statement, after the expression is parsed
+            // self.cur_token() in the following code results in a out of bounds error.
+            if self.cur_index >= self.tokens.len() {
+                return Ok(expr);
+            }
+
             let cur_precedence = get_infix_operator_precedence(&self.cur_token().kind);
             if cur_precedence == Lowest {break;}
             let cur_precedence_is_weaker = match asso {
