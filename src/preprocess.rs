@@ -78,9 +78,8 @@ impl Preprocessor {
                                     let mut lexer = Lexer::new(file_records.len()-1, content_ref);
                                     include_tokens = lexer.lex();
                                 }
-                                // @Temporary: better way to handle it
-                                let mut include_tokens = include_tokens[..include_tokens.len()-1].to_vec(); // get rid of Eof
-                                let mut preprocessed_include_tokens = preprocess(&include_tokens);
+                                let include_tokens = &include_tokens[..include_tokens.len()-1]; // get rid of Eof
+                                let mut preprocessed_include_tokens = self.inner_preprocess(include_tokens);
                                 preprocessed_tokens.append(&mut preprocessed_include_tokens);
 
                                 index += 1;
@@ -226,7 +225,7 @@ impl Preprocessor {
                 if let LexIdent(directive) = &tokens[*index].kind {
                     if matches!(directive.as_str(), "endif") {
                         if self.nested_if_layer == start_if_layer {
-                            // Go over #endif
+                            // Jump over #endif.
                             *index += 1;
                             return;
                         } else {
