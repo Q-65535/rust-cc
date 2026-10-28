@@ -164,7 +164,8 @@ impl Preprocessor {
                             }
                         }
                     } else {
-                        let error_description = "Currently only support '#' be at the begining of a line.";
+                        let error_description = "'#' shouldn't be here, because \
+                        it is not at the begining of a line or at macro replacement-list.";
                         report_preprocess_error(tokens[index].span, error_description);
                     }
                 }

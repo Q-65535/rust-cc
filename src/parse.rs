@@ -558,7 +558,19 @@ impl Parser {
                 }
             }
         }
-        self.expect(&Punct(";"))?;
+        if let Err(e) = self.expect(&Punct(";")) {
+            // @Refactor:
+            // We shall be serious about error reporting latter.
+            // Compile errors should be very clear about what is the
+            // context the error happens. Instead of just saying "expect blabla",
+            // we should say something like "I reached the end of a declaration,
+            // and expect a semicolon at the end, but I don't see it."
+            // expect() function should just return a error description, not
+            // the whole info string reported to the user. It is parse_***()'s
+            // responsibility to report the whole compiler error to the user.
+            let error_context = " We expect A semicolon after declaration";
+            return Err(e+error_context);
+        }
         Ok(Declaration{decl_specs, init_dectors})
     }
 
@@ -592,11 +604,13 @@ impl Parser {
     }
 
     fn parse_decl_specs(&mut self) -> Result<Vec<Decl_Spec>, String> {
-        debug_assert!(self.is_decl_spec(self.cur_token()));
+        if !self.is_decl_spec(self.cur_token()) {
+            let error_info = "Trying to parse declaration here, but can't; because this is not the start of any declaration.";
+            return Err(syntax_error(self.cur_token().span, error_info));
+        }
         let mut decl_specs = Vec::new();
         while self.is_decl_spec(self.cur_token()) {
             let start = self.cur_token().span;
-            // let start_index = self.cur_token().span.start_index;
             let cur_decl_spec_kind = match self.cur_token().kind.clone() {
                 Keyword("typedef") => {
                     self.bump();
@@ -709,8 +723,6 @@ impl Parser {
                 }
             };
             let span = self.span_since(start);
-            // let end_index = self.previous_token().span.end_index;
-            // let span = Span{start_index, end_index};
             let decl_spec = Decl_Spec{content: cur_decl_spec_kind, span};
             decl_specs.push(decl_spec);
         }
@@ -1683,7 +1695,7 @@ fn error_token(tok: &Token, info: &str) -> String {
 }
 
 fn syntax_error(span: Span, diagno_info: &str) -> String {
-    let error_stage_info = "syntax error: ".to_string();
+    let error_stage_info = "Syntax error: ".to_string();
     error_span(span, &(error_stage_info+diagno_info))
 }
 
