@@ -410,6 +410,7 @@ impl Scope {
 pub struct Parser {
     tokens: Vec<Token>,
     cur_index: usize,
+    dummy_eof_token: Token,
     scope_manager: ScopeManager,
     syntax_errors: Vec<String>,
     // stmt_labels stores every statement labels.
@@ -424,6 +425,7 @@ impl Parser {
         Parser {
             tokens,
             cur_index: 0,
+            dummy_eof_token: gen_dummy_token(Eof),
             scope_manager: ScopeManager::new(),
             syntax_errors: Vec::new(),
             stmt_labels: Vec::new(),
@@ -435,26 +437,36 @@ impl Parser {
     // parse_* function consumes the grammar production it owns and returns
     // with this cursor on the first token outside that production.
     fn cur_token(&self) -> &Token {
-        &self.tokens[self.cur_index]
+        if self.cur_index < self.tokens.len() {
+            return &self.tokens[self.cur_index];
+        } else {
+            return &self.dummy_eof_token;
+        }
     }
 
     fn previous_token(&self) -> &Token {
-        &self.tokens[self.cur_index - 1]
+        if self.cur_index == 0 {
+            return &self.dummy_eof_token;
+        } else {
+            return &self.tokens[self.cur_index - 1];
+        }
     }
 
     fn at(&self, kind: &TokenKind) -> bool {
         &self.cur_token().kind == kind
     }
 
-    fn bump(&mut self) -> Token {
-        let token = self.cur_token().clone();
-        if token.kind != Eof {
+    fn bump(&mut self) -> &Token {
+        if self.cur_index >= self.tokens.len() {
+            return &self.dummy_eof_token;
+        } else {
+            let t = &self.tokens[self.cur_index];
             self.cur_index += 1;
             // Uncomment this when you want to see where we are
             // parsing now while using a debugger by examine self.cur_parsing_context.
             // self.cur_parsing_context = token_to_context(self.cur_token());
+            return t;
         }
-        token
     }
 
     fn eat(&mut self, kind: &TokenKind) -> bool {
@@ -467,10 +479,14 @@ impl Parser {
     }
 
     fn peek_token(&self) -> &Token {
-        self.tokens.get(self.cur_index + 1).unwrap_or(self.cur_token())
+        if self.cur_index >= self.tokens.len() - 1 {
+            return &self.dummy_eof_token;
+        } else {
+            return &self.tokens[self.cur_index + 1];
+        }
     }
 
-    fn expect(&mut self, expect_kind: &TokenKind) -> Result<Token, String> {
+    fn expect(&mut self, expect_kind: &TokenKind) -> Result<&Token, String> {
         if self.at(expect_kind) {
             Ok(self.bump())
         } else {
@@ -1109,7 +1125,7 @@ impl Parser {
                     return Err(error_token(self.cur_token(), &error_message));
                 }
                 self.stmt_labels.push(label_name.clone());
-                self.expect(&Punct(":"));
+                self.expect(&Punct(":"))?;
                 let stmt = self.parse_stmt()?;
                 Ok(StmtType::LabeledStmt(label_name, Box::new(stmt)))
             }
@@ -1148,8 +1164,9 @@ impl Parser {
 
         while !matches!(self.cur_token().kind, Punct("}") | Eof) {
             let start_index = self.cur_index;
+            //                         In C, typedef name and statement label are allowed to be identical.
             //                         This avoids conflicts between statement labels and typedef names.
-            //                         If peeked token is a colon, then this is a labeled statement, not a decl.                             
+            //                         If peeked token is a colon, then this is a labeled statement, not a decl.
             //                                                      |
             //                                                      V
             if self.is_decl_spec(self.cur_token()) && self.peek_token().kind != Punct(":") {
@@ -1249,15 +1266,6 @@ impl Parser {
         let mut expr = self.parse_prefix()?;
 
         loop {
-            // @Smell: Maybe this is a bad practice to cater to preprocess in parse module:
-            // this if statement is just for the convenience of preprocessing directives where
-            // the constant expression needs to be parsed and evaluated, e.g., "#if 3".
-            // The problem is, without this if statement, after the expression is parsed
-            // self.cur_token() in the following code results in a out of bounds error.
-            if self.cur_index >= self.tokens.len() {
-                return Ok(expr);
-            }
-
             let cur_precedence = get_infix_operator_precedence(&self.cur_token().kind);
             if cur_precedence == Lowest {break;}
             let cur_precedence_is_weaker = match asso {
@@ -1307,11 +1315,12 @@ impl Parser {
 
     fn parse_paren(&mut self) -> Result<Expr, String> {
         let open_paren = self.expect(&Punct("("))?;
+        let open_paren_span = open_paren.span;
         let inner = self.parse_expr(Lowest, Left_To_Right)?;
         let close_paren = self.expect(&Punct(")"))?;
         // Wrap, don't mutate: the inner expression keeps its own span; the Paren
         // node carries the wider span that includes the parentheses.
-        let span = Span::merge(open_paren.span, close_paren.span);
+        let span = Span::merge(open_paren_span, close_paren.span);
         Ok(Expr::new(Paren(Box::new(inner)), span))
     }
 
@@ -1565,11 +1574,11 @@ impl Parser {
     }
 
     fn parse_infix(&mut self, lhs: Expr) -> Result<Expr, String> {
-        let infix_operator = self.bump().kind;
+        let infix_operator = self.bump().kind.clone();
         let precedence = get_infix_operator_precedence(&infix_operator);
         let rhs = self.parse_expr(precedence, get_associativity(precedence))?;
         let span = Span::merge(lhs.span, rhs.span);
-        let content = Binary(Box::new(lhs), Box::new(rhs), infix_operator);
+        let content = Binary(Box::new(lhs), Box::new(rhs), infix_operator.clone());
         Ok(Expr::new(content, span))
     }
 
@@ -1594,10 +1603,10 @@ impl Parser {
         let start_index = lhs.span.start_index;
         self.bump(); // skip '.' or '->'
         let member_token = self.bump();
-        match member_token.kind {
+        match &member_token.kind {
             LexIdent(name) => {
                 let span = Span::merge(lhs.span, member_token.span);
-                let content = ExprType::RequestStructMember(Box::new(lhs), *name);
+                let content = ExprType::RequestStructMember(Box::new(lhs), *name.clone());
                 Ok(Expr::new(content, span))
             },
             _ => {

@@ -84,13 +84,13 @@ fn revert_tokens_to_string(tokens: Vec<Token>) -> String {
 fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
     use std::time::Instant;
     let start = Instant::now();
-    println!("Compile time consumption:");
 
+    let load_file_time;
     // lex
     let mut tokens: Vec<Token>;
     {
         let file = load_file(path);
-        println!("load file time:        {:?}", start.elapsed());
+        load_file_time = start.elapsed();
         let mut files = FILE_RECORDS.lock().unwrap();
         files.push(file);
         let master_file_index = files.len() - 1;
@@ -98,7 +98,7 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
         let mut lexer = Lexer::new(master_file_index, content_ref);
         tokens = lexer.lex();
     }
-    let lex_time = start.elapsed();
+    let lex_time = start.elapsed() - load_file_time;
 
     // preprocess
     let mut preprocessed_tokens = preprocess(&tokens);
@@ -129,12 +129,14 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
     let parse_time = parse_finish_time_stamp - preprocess_finish_time_stamp;
     let analyze_time = analyze_finish_time_stamp - parse_finish_time_stamp;
     let codegen_time = compile_end_time_stamp - analyze_finish_time_stamp;
-    println!("lex:        {:?}", lex_time);
-    println!("preprocess: {:?}", preprocess_time);
-    println!("parse:      {:?}", parse_time);
-    println!("analyze:    {:?}", analyze_time);
-    println!("codegen:    {:?}", codegen_time);
-    println!("Total:      {:?}", compile_end_time_stamp);
+    println!("Compile time consumption:");
+    println!("load file time: {:?}", load_file_time);
+    println!("lex:            {:?}", lex_time);
+    println!("preprocess:     {:?}", preprocess_time);
+    println!("parse:          {:?}", parse_time);
+    println!("analyze:        {:?}", analyze_time);
+    println!("codegen:        {:?}", codegen_time);
+    println!("Total:          {:?}", compile_end_time_stamp);
     Ok(())
 }
 

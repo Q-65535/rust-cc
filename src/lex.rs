@@ -283,20 +283,6 @@ impl <'a>Lexer<'a> {
                 break;
             }
         }
-        // Rust interprets slicing indices as pointing to the spaces between elements,
-        // not the elements themselves.
-        // Since we set Eof token's start_index to src.len(), length to 0,
-        // both start_index and end_index are src.len(), i.e., both
-        // points to the space at the very end after the last element.
-        // So We get an empty string from src[start_index.. end_index].
-        // In fact, for any string and index:
-        // as long as 0 ≤ index ≤ string.len() satisfied, string[index.. index] is a empty string.
-
-        // @Fix: We need to figure out a better way to handle Eof.
-        // @Fix: We need to figure out a better way to handle Eof.
-        // @Fix: We need to figure out a better way to handle Eof.
-        // @Fix: We need to figure out a better way to handle Eof.
-        tokens.push(self.gen_token(Eof, self.file_content.len(), 0));
         tokens
     }
 
@@ -830,4 +816,13 @@ impl <'a>Lexer<'a> {
         // Lex error is strict, once encountered, we force the compilation to stop.
         exit(1);
     }
+}
+
+pub fn gen_dummy_token(kind: TokenKind) -> Token {
+    let span = Span {
+        file_index: 0,
+        start_index: 0,
+        end_index: 0,
+    };
+    return Token{kind, at_bol: false, span};
 }
