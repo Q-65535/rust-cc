@@ -7,21 +7,6 @@ use std::collections::HashMap;
 use std::process::exit;
 use crate::FILE_RECORDS;
 
-/*
-#[derive(Debug, Clone, Default)]
-pub enum PP_Unit {
-    Token(Box<Token>),
-    If_Group(Box<If_Group>),
-}
-
-#[derive(Debug, Clone, Default)]
-struct If_Group {
-    condition: i64,
-    then: Vec<PP_Unit>,
-    otherwise: Option<Box::<If_Group>>,
-}
-*/
-
 #[derive(Debug, Clone, Default)]
 pub struct Preprocessor {
     nested_if_layer: usize,
@@ -46,6 +31,9 @@ impl Preprocessor {
                         report_preprocess_error(tokens[index].span, error_description);
                     }
                     index += 1;
+                    if index > tokens.len() {
+                        "Trying to preprocess directive, but reach end of input.";
+                    }
                     if tokens[index].at_bol {
                         continue;
                     }

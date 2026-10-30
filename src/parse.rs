@@ -422,10 +422,13 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
+        let mut dummy_eof_token = gen_dummy_token(Eof);
+        dummy_eof_token.span.start_index = tokens.last().unwrap().span.end_index + 1;
+        dummy_eof_token.span.end_index = tokens.last().unwrap().span.end_index + 1;
         Parser {
             tokens,
             cur_index: 0,
-            dummy_eof_token: gen_dummy_token(Eof),
+            dummy_eof_token,
             scope_manager: ScopeManager::new(),
             syntax_errors: Vec::new(),
             stmt_labels: Vec::new(),
@@ -805,7 +808,7 @@ impl Parser {
     fn parse_struct_decl_list(&mut self) -> Result<Vec<Member>, String> {
         self.expect(&Punct("{"))?;
         let mut members = Vec::new();
-        while !matches!(self.cur_token().kind, Punct("}") | Eof) {
+        while !matches!(self.cur_token().kind, Punct("}")) {
             let decl_specs = self.parse_decl_specs()?;
             // parse declarators separated by ','
             loop {
@@ -828,7 +831,7 @@ impl Parser {
         self.bump();
 
         let mut enumerators = Vec::new();
-        while !matches!(self.cur_token().kind, Punct("}") | Eof) {
+        while !matches!(self.cur_token().kind, Punct("}")) {
             let ident = if let LexIdent(name) = &self.cur_token().kind {
                 gen_identifier_from_token(self.cur_token())
             } else {
@@ -863,7 +866,6 @@ impl Parser {
 
     fn parse_declarator(&mut self) -> Result<Declarator, String> {
         let start_span = self.cur_token().span;
-        // let start_index = self.cur_token().span.start_index;
 
         let mut qualifiers_and_pointers = Vec::new();
         while let Some(spec) = get_pointer_or_type_qualifier(self.cur_token()) {
@@ -989,7 +991,7 @@ impl Parser {
                 let mut params: Vec<Func_Parameter> = Vec::new();
                 let mut is_variadic = false;
 
-                'parse_params_loop: while !matches!(self.cur_token().kind, Punct(")") | Eof) {
+                'parse_params_loop: while !matches!(self.cur_token().kind, Punct(")")) {
                     if self.cur_token().kind == Punct("...") {
                         is_variadic = true;
                         self.bump();
@@ -1162,7 +1164,7 @@ impl Parser {
         debug_assert!(self.at(&Punct("{")));
         self.bump();
 
-        while !matches!(self.cur_token().kind, Punct("}") | Eof) {
+        while !matches!(self.cur_token().kind, Punct("}")) {
             let start_index = self.cur_index;
             //                         In C, typedef name and statement label are allowed to be identical.
             //                         This avoids conflicts between statement labels and typedef names.
