@@ -7,51 +7,124 @@ use std::collections::HashMap;
 use std::process::exit;
 use crate::FILE_RECORDS;
 
+#[derive(Debug, Clone)]
+struct PP_Context<'a> {
+    cur_if_layer: usize,
+    tokens: &'a [Token],
+    cur_index: usize,
+    eof_token: Token,
+}
+
+impl<'a> PP_Context<'a> {
+    pub fn new(tokens: &'a [Token]) -> Self {
+        let eof_span = if tokens.len() > 0 {
+            let last_token_span = tokens[tokens.len() - 1].span;
+            Span {
+                file_index: last_token_span.file_index,
+                start_index: last_token_span.end_index + 1,
+                end_index: last_token_span.end_index + 1,
+            }
+        } else {
+            Span {
+                file_index: 0,
+                start_index: 0,
+                end_index: 0,
+            }
+        };
+        PP_Context {
+            cur_if_layer: 0,
+            tokens,
+            cur_index: 0,
+            eof_token: gen_token(Eof, eof_span),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
-pub struct Preprocessor {
+pub struct Preprocessor<'a> {
+    context_stack: Vec<PP_Context<'a>>,
     nested_if_layer: usize,
 }
 
-impl Preprocessor {
+impl<'a> Preprocessor<'a> {
     pub fn new() -> Self {
         Preprocessor {
+            context_stack: Vec::new(),
             nested_if_layer: 0,
         }
     }
-    
-    pub fn inner_preprocess(&mut self, tokens: &[Token]) -> Vec<Token> {
-        let mut preprocessed_tokens = Vec::new();
+
+    pub fn cur_token(&self) -> &Token {
+        let c = self.context_stack.last().unwrap();
+        if c.cur_index >= c.tokens.len() {
+            return &c.eof_token;
+        }
+        return &c.tokens[c.cur_index];
+    }
+
+    pub fn peek_token(&self) -> &Token {
+        let c = self.context_stack.last().unwrap();
+        if c.cur_index + 1 >= c.tokens.len() {
+            return &c.eof_token;
+        }
+        return &c.tokens[c.cur_index+1];
+    }
+
+    pub fn eat_token(&mut self) {
+        let c = self.context_stack.last_mut().unwrap();
+        c.cur_index += 1;
+    }
+
+    pub fn cur_if_layer(&self) -> usize {
+        let c = self.context_stack.last().unwrap();
+        return c.cur_if_layer;
+    }
+
+    pub fn enter_if(&mut self) {
+        let c = self.context_stack.last_mut().unwrap();
+        c.cur_if_layer += 1;
+    }
+
+    pub fn exit_if(&mut self) {
+        let c = self.context_stack.last_mut().unwrap();
+        debug_assert!(c.cur_if_layer != 0);
+        let c = self.context_stack.last_mut().unwrap();
+        c.cur_if_layer -= 1;
+    }
+
+    pub fn inner_preprocess(&mut self, tokens: &'a [Token]) -> Vec<Token> {
         let mut index = 0;
-        while index < tokens.len() {
-            match &tokens[index].kind {
+        let c = PP_Context::new(tokens);
+        self.context_stack.push(c);
+
+        let mut preprocessed_tokens = Vec::new();
+        while self.cur_token().kind != Eof {
+            match &self.cur_token().kind {
                 Punct("#") => {
-                    if !tokens[index].at_bol {
+                    if !self.cur_token().at_bol {
                         let error_description = "'#' shouldn't be here, because \
                         '#' is only allowed to be at the begining of a line or in macro replacement-list.";
-                        report_preprocess_error(tokens[index].span, error_description);
+                        report_preprocess_error(self.cur_token().span, error_description);
                     }
-                    index += 1;
-                    if index > tokens.len() {
-                        "Trying to preprocess directive, but reach end of input.";
-                    }
-                    if tokens[index].at_bol {
+                    self.eat_token();
+                    if self.cur_token().at_bol {
                         continue;
                     }
 
-                    let directive = match &tokens[index].kind {
+                    let directive = match &self.cur_token().kind {
                         LexIdent(name) => name.as_str(),
                         Keyword(name) => name,
                         _ => {
-                            let error_description = format!("the token follwing '#' is invalid: {:?}", tokens[index].kind);
-                            report_preprocess_error(tokens[index].span, &error_description);
+                            let error_description = format!("the token follwing '#' is invalid: {:?}", self.cur_token().kind);
+                            report_preprocess_error(self.cur_token().span, &error_description);
                         }
                     };
-                    let span = tokens[index].span;
+                    let span = self.cur_token().span;
                     if directive == "include" {
-                        index += 1;
-                        if let StringLiteral(file_name_bytes) = &tokens[index].kind {
+                        self.eat_token();
+                        if let StringLiteral(file_name_bytes) = &self.cur_token().kind {
                             let cur_file_path_buf = {
-                                let file_index = tokens[index].span.file_index;
+                                let file_index = self.cur_token().span.file_index;
                                 let mut file_records = FILE_RECORDS.lock().unwrap();
                                 file_records[file_index].path.clone()
                             };
@@ -72,34 +145,36 @@ impl Preprocessor {
                             let mut preprocessed_include_tokens = self.inner_preprocess(&include_tokens);
                             preprocessed_tokens.append(&mut preprocessed_include_tokens);
 
-                            index += 1;
+                            self.eat_token();
                             // Skip extra tokens after #include "..".
-                            while index < tokens.len() && !tokens[index].at_bol {
+                            while !self.cur_token().at_bol && self.cur_token().kind != Eof {
                                 let error_description = "Warning: Extra token.";
-                                let error_info = warning_span(tokens[index].span, error_description);
+                                let error_info = warning_span(self.cur_token().span, error_description);
                                 println!("{}", error_info);
-                                index += 1;
+                                self.eat_token();
                             }
                         }
                     } else if matches!(directive, "if" | "elif") {
                         if directive == "elif" {
-                            if self.nested_if_layer == 0 {
+                            if self.cur_if_layer() == 0 {
                                 let error_description = "WTF are you doing; we are not inside any #if group.";
                                 report_preprocess_error(span, error_description);
                             }
                         }
-                        self.nested_if_layer += 1;
-                        index += 1;
-                        if tokens[index].at_bol {
+                        self.enter_if();
+                        self.eat_token();
+                        if self.cur_token().at_bol {
                             let error_description = "No expression found after #if";
                             report_preprocess_error(span, error_description);
                         }
 
                         let expr_start_index = index;
-                        while !tokens[index].at_bol {
-                            index += 1;
+                        while !self.cur_token().at_bol {
+                            self.eat_token();
                         }
                         let raw_expr_tokens = &tokens[expr_start_index..index];
+                        // let raw_expr_tokens = self.skip_to_next_line();
+
                         let expanded_expr_tokens = self.expand(raw_expr_tokens);
 
                         let mut parser = Parser::new(expanded_expr_tokens);
@@ -126,10 +201,10 @@ impl Preprocessor {
                             continue;
                         }
                     } else if directive == "else" {
-                        index += 1;
-                        if !tokens[index].at_bol {
+                        self.eat_token();
+                        if !self.cur_token().at_bol {
                             let error_description = "Extra token(s) after #else.";
-                            report_preprocess_error(tokens[index].span, error_description);
+                            report_preprocess_error(self.cur_token().span, error_description);
                         }
 
                         // @Duplication_a
@@ -145,21 +220,23 @@ impl Preprocessor {
                     } else if directive == "ifndef" {
                         todo!();
                     } else if directive == "endif" {
-                        if self.nested_if_layer > 0 {
-                            index += 1;
-                            self.nested_if_layer -= 1;
+                        if self.cur_if_layer() > 0 {
+                            self.eat_token();
+                            self.exit_if();
                         } else {
                             let error_description = "extra endif directive";
-                            report_preprocess_error(tokens[index].span, error_description);
+                            report_preprocess_error(self.cur_token().span, error_description);
                         }
                     }
                 }
                 _ => {
-                    preprocessed_tokens.push(tokens[index].clone());
-                    index += 1;
+                    preprocessed_tokens.push(self.cur_token().clone());
+                    self.eat_token();
                 }
             }
         }
+
+        self.context_stack.pop();
         return preprocessed_tokens;
     }
 

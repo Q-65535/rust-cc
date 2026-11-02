@@ -826,3 +826,7 @@ pub fn gen_dummy_token(kind: TokenKind) -> Token {
     };
     return Token{kind, at_bol: false, span};
 }
+
+pub fn gen_token(kind: TokenKind, span: Span) -> Token {
+    return Token{kind, at_bol: false, span};
+}
