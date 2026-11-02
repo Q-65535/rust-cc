@@ -44,7 +44,6 @@ impl Preprocessor {
                         _ => {
                             let error_description = format!("the token follwing '#' is invalid: {:?}", tokens[index].kind);
                             report_preprocess_error(tokens[index].span, &error_description);
-                            exit(1);
                         }
                     };
                     let span = tokens[index].span;
@@ -294,7 +293,6 @@ fn eval_integer_const(expr: &Expr) -> i64 {
                 _ => {
                     let error_description = format!("Unable to handle this binary operator at preprocess phase: {:?}", op);
                     report_preprocess_error(expr.span, &error_description);
-                    exit(1);
                 }
             }
         }
@@ -331,12 +329,11 @@ fn eval_integer_const(expr: &Expr) -> i64 {
         bad_expr => {
             let error_description = format!("Unable to handle this expression at preprocess phase: {:?}", bad_expr);
             report_preprocess_error(expr.span, &error_description);
-            exit(1);
         }
     }
 }
 
-fn report_preprocess_error(span: Span, error_description: &str) {
+fn report_preprocess_error(span: Span, error_description: &str) -> ! {
     let mut prefixed_error_description = String::new();
     prefixed_error_description.push_str("Preprocess error: ");
     prefixed_error_description.push_str(error_description);

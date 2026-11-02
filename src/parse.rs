@@ -423,8 +423,12 @@ pub struct Parser {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         let mut dummy_eof_token = gen_dummy_token(Eof);
-        dummy_eof_token.span.start_index = tokens.last().unwrap().span.end_index + 1;
-        dummy_eof_token.span.end_index = tokens.last().unwrap().span.end_index + 1;
+        let eof_index = match tokens.last() {
+            Some(tok) => tok.span.end_index + 1,
+            None => 0,
+        };
+        dummy_eof_token.span.start_index = eof_index;
+        dummy_eof_token.span.end_index = eof_index;
         Parser {
             tokens,
             cur_index: 0,

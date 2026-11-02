@@ -98,7 +98,7 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
         let mut lexer = Lexer::new(master_file_index, content_ref);
         tokens = lexer.lex();
     }
-    let lex_time = start.elapsed() - load_file_time;
+    let lex_finish_time_stamp = start.elapsed();
 
     // preprocess
     let mut preprocessed_tokens = preprocess(&tokens);
@@ -125,7 +125,8 @@ fn compile(path: &str, output: Option<String>) -> Result<(), ()> {
     }
     let compile_end_time_stamp = start.elapsed();
 
-    let preprocess_time = preprocess_finish_time_stamp - lex_time;
+    let lex_time = lex_finish_time_stamp - load_file_time;
+    let preprocess_time = preprocess_finish_time_stamp - lex_finish_time_stamp;
     let parse_time = parse_finish_time_stamp - preprocess_finish_time_stamp;
     let analyze_time = analyze_finish_time_stamp - parse_finish_time_stamp;
     let codegen_time = compile_end_time_stamp - analyze_finish_time_stamp;
