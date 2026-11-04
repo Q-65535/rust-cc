@@ -116,16 +116,8 @@ impl Preprocessor {
                     if context.cur_token().at_bol {
                         continue;
                     }
-
-                    let directive = match &context.cur_token().kind {
-                        LexIdent(name) => name.as_str(),
-                        Keyword(name) => name,
-                        _ => {
-                            let error_description = format!("the token follwing '#' is invalid: {:?}", context.cur_token().kind);
-                            report_preprocess_error(context.cur_token().span, &error_description);
-                            break;
-                        }
-                    };
+                    
+                    let directive = get_directive(&context.cur_token().kind);
                     let span = context.cur_token().span;
                     if directive == "include" {
                         context.eat_token();
@@ -268,22 +260,21 @@ pub fn eat_and_get_cur_block<'ctx, 'tokens>(context: &'ctx mut PP_Context<'token
         }
         if context.cur_token().at_bol && context.cur_token().kind == Punct("#") {
             context.eat_token();
-            if let LexIdent(directive) = &context.cur_token().kind {
-                if matches!(directive.as_str(), "elif" | "else" | "endif") {
-                    if context.cur_if_layer() == target_if_layer {
-                        // Go back to # punctuator, so that preprocess can handle after this function returns.
-                        context.cur_index -= 1;
-                        break;
-                    } else {
-                        if matches!(directive.as_str(), "endif") {
-                            context.exit_if();
-                        }
-                        context.eat_token();
+            let directive = get_directive(&context.cur_token().kind);
+            if matches!(directive, "elif" | "else" | "endif") {
+                if context.cur_if_layer() == target_if_layer {
+                    // Go back to # punctuator, so that preprocess can handle after this function returns.
+                    context.cur_index -= 1;
+                    break;
+                } else {
+                    if matches!(directive, "endif") {
+                        context.exit_if();
                     }
-                } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
-                    context.enter_if();
                     context.eat_token();
                 }
+            } else if matches!(directive, "if" | "ifdef" | "ifndef") {
+                context.enter_if();
+                context.eat_token();
             }
         } else {
             context.eat_token();
@@ -307,18 +298,17 @@ pub fn eat_remaining_cur_if_layer(context: &mut PP_Context) {
         };
         if context.cur_token().at_bol && context.cur_token().kind == Punct("#") {
             context.eat_token();
-            if let LexIdent(directive) = &context.cur_token().kind {
-                if matches!(directive.as_str(), "endif") {
-                    context.eat_token();
-                    context.exit_if();
-                    if context.cur_if_layer() == target_if_layer - 1 {
-                        // Skip the whole if group, including the ending "#endif".
-                        break;
-                    }
-                } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
-                    context.enter_if();
-                    context.eat_token();
+            let directive = get_directive(&context.cur_token().kind);
+            if matches!(directive, "endif") {
+                context.eat_token();
+                context.exit_if();
+                if context.cur_if_layer() == target_if_layer - 1 {
+                    // Skip the whole if group, including the ending "#endif".
+                    break;
                 }
+            } else if matches!(directive, "if" | "ifdef" | "ifndef") {
+                context.enter_if();
+                context.eat_token();
             }
         } else {
             context.eat_token();
@@ -419,5 +409,12 @@ fn eval_integer_const(expr: &Expr) -> i64 {
             let error_description = format!("Unable to handle this expression at preprocess phase: {:?}", bad_expr);
             report_preprocess_error(expr.span, &error_description);
         }
+    }
+}
+fn get_directive<'a>(kind: &'a TokenKind) -> &'a str {
+    match kind {
+        LexIdent(name) => name.as_str(),
+        Keyword(name) => name,
+        _ => "",
     }
 }
