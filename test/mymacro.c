@@ -32,3 +32,9 @@ int main() {
   printf("OK\n");
   return 0;
 }
+
+#if 0
+#elif 3
+
+#if 0
+#endif

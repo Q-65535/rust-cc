@@ -9,7 +9,7 @@ use crate::FILE_RECORDS;
 
 #[derive(Debug, Clone)]
 struct PP_Context<'a> {
-    cur_if_layer: usize,
+    if_layers: Vec<Span>,
     tokens: &'a [Token],
     cur_index: usize,
     eof_token: Token,
@@ -32,7 +32,7 @@ impl<'a> PP_Context<'a> {
             }
         };
         PP_Context {
-            cur_if_layer: 0,
+            if_layers: Vec::new(),
             tokens,
             cur_index: 0,
             eof_token: gen_token(Eof, eof_span),
@@ -53,32 +53,32 @@ impl<'a> PP_Context<'a> {
         return &self.tokens[self.cur_index+1];
     }
 
-    // @Refactor: This just returns an Eof if reaching end of input.
-    // The error info should be reported at where the error happens.
     pub fn eat_token(&mut self) {
-        if self.cur_token().kind == Eof {
-            let error_description = "Reaching end of input.";
-            report_preprocess_error(self.cur_token().span, &error_description);
-        }
         self.cur_index += 1;
     }
 
     pub fn cur_if_layer(&self) -> usize {
-        return self.cur_if_layer;
+        return self.if_layers.len();
+    }
+
+    pub fn cur_if_directive_position(&self) -> Span {
+        return self.if_layers[self.if_layers.len() - 1];
     }
 
     pub fn enter_if(&mut self) {
-        self.cur_if_layer += 1;
+        self.if_layers.push(self.cur_token().span);
     }
 
     pub fn exit_if(&mut self) {
-        debug_assert!(self.cur_if_layer != 0);
-        self.cur_if_layer -= 1;
+        debug_assert!(self.if_layers.len() > 0);
+        self.if_layers.pop();
     }
 
-    pub fn advance_to_next_line(&mut self) -> &[Token] {
+    pub fn eat_and_get_remainder_of_line(&mut self) -> &[Token] {
         let begin_index = self.cur_index;
-        while !self.cur_token().at_bol {
+        loop {
+            if self.cur_token().at_bol {break};
+            if self.cur_token().kind == Eof {break};
             self.eat_token();
         }
         let end_index = self.cur_index;
@@ -109,8 +109,10 @@ impl Preprocessor {
                         let error_description = "'#' shouldn't be here, because \
                         '#' is only allowed to be at the begining of a line or in macro replacement-list.";
                         report_preprocess_error(context.cur_token().span, error_description);
+                        break;
                     }
                     context.eat_token();
+                    // A single # with no follwing stuff is just a null directive.
                     if context.cur_token().at_bol {
                         continue;
                     }
@@ -121,6 +123,7 @@ impl Preprocessor {
                         _ => {
                             let error_description = format!("the token follwing '#' is invalid: {:?}", context.cur_token().kind);
                             report_preprocess_error(context.cur_token().span, &error_description);
+                            break;
                         }
                     };
                     let span = context.cur_token().span;
@@ -157,23 +160,28 @@ impl Preprocessor {
                                 println!("{}", error_info);
                                 context.eat_token();
                             }
+                        } else {
+                            let error_description = "Currently Only support string format include path (\"path\"), so we don't understand this.";
+                            report_preprocess_error(context.cur_token().span, error_description);
                         }
                     } else if matches!(directive, "if" | "elif") {
                         if directive == "elif" {
-                            // @Smell: just access the field, don't use function.
                             if context.cur_if_layer() == 0 {
                                 let error_description = "WTF are you doing; we are not inside any #if group.";
                                 report_preprocess_error(span, error_description);
                             }
                         }
-                        context.enter_if();
+                        if directive == "if" {
+                            context.enter_if();
+                        }
                         context.eat_token();
                         if context.cur_token().at_bol {
-                            let error_description = "No expression found after #if";
+                            let error_description = "Nothing found after #if";
                             report_preprocess_error(span, error_description);
+                            break;
                         }
 
-                        let raw_expr_tokens = context.advance_to_next_line();
+                        let raw_expr_tokens = context.eat_and_get_remainder_of_line();
                         let expanded_expr_tokens = self.expand(raw_expr_tokens);
 
                         let mut parser = Parser::new(expanded_expr_tokens);
@@ -187,14 +195,13 @@ impl Preprocessor {
 
                         let num = eval_integer_const(&expr);
                         if num != 0 {
-                            // @Duplication_a
-                            let skipped_block = skip_cur_block(&mut context);
+                            let skipped_block = eat_and_get_cur_block(&mut context);
                             let mut preprocessed_block = self.inner_preprocess(skipped_block);
                             preprocessed_tokens.append(&mut preprocessed_block);
-                            skip_cur_if_layer(&mut context);
+                            eat_remaining_cur_if_layer(&mut context);
                             continue;
                         } else {
-                            skip_cur_block(&mut context);
+                            eat_and_get_cur_block(&mut context);
                             continue;
                         }
                     } else if directive == "else" {
@@ -204,11 +211,10 @@ impl Preprocessor {
                             report_preprocess_error(context.cur_token().span, error_description);
                         }
 
-                        // @Duplication_a
-                        let skipped_block = skip_cur_block(&mut context);
+                        let skipped_block = eat_and_get_cur_block(&mut context);
                         let mut preprocessed_block = self.inner_preprocess(skipped_block);
                         preprocessed_tokens.append(&mut preprocessed_block);
-                        skip_cur_if_layer(&mut context);
+                        eat_remaining_cur_if_layer(&mut context);
                         continue;
                     } else if directive == "ifdef" {
                         todo!();
@@ -219,7 +225,7 @@ impl Preprocessor {
                             context.eat_token();
                             context.exit_if();
                         } else {
-                            let error_description = "extra endif directive";
+                            let error_description = "Unpaired endif directive.";
                             report_preprocess_error(context.cur_token().span, error_description);
                         }
                     }
@@ -249,6 +255,84 @@ impl Preprocessor {
 pub fn preprocess(tokens: &[Token]) -> Vec<Token> {
     let mut preprocessor = Preprocessor::new();
     return preprocessor.inner_preprocess(tokens);
+}
+
+pub fn eat_and_get_cur_block<'ctx, 'tokens>(context: &'ctx mut PP_Context<'tokens>) -> &'ctx [Token] {
+    let start_index = context.cur_index;
+    let target_if_layer = context.cur_if_layer();
+    loop {
+        if context.cur_token().kind == Eof {
+            let error_description = "Reached end of input, still can't find a matching #endif for this directive.";
+            report_preprocess_error(context.cur_if_directive_position(), &error_description);
+            break;
+        }
+        if context.cur_token().at_bol && context.cur_token().kind == Punct("#") {
+            context.eat_token();
+            if let LexIdent(directive) = &context.cur_token().kind {
+                if matches!(directive.as_str(), "elif" | "else" | "endif") {
+                    if context.cur_if_layer() == target_if_layer {
+                        // Go back to # punctuator, so that preprocess can handle after this function returns.
+                        context.cur_index -= 1;
+                        break;
+                    } else {
+                        if matches!(directive.as_str(), "endif") {
+                            context.exit_if();
+                        }
+                        context.eat_token();
+                    }
+                } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
+                    context.enter_if();
+                    context.eat_token();
+                }
+            }
+        } else {
+            context.eat_token();
+        }
+    }
+    return &context.tokens[start_index..context.cur_index];
+}
+
+pub fn eat_remaining_cur_if_layer(context: &mut PP_Context) {
+    debug_assert!(context.cur_if_layer() > 0);
+
+    let start_span = context.cur_token().span;
+   
+    let start_index = context.cur_index;
+    let target_if_layer = context.cur_if_layer();
+    loop {
+        if context.cur_token().kind == Eof {
+            let error_description = "Reached end of input, still can't find a matching #endif for this directive.";
+            report_preprocess_error(context.cur_if_directive_position(), &error_description);
+            break;
+        };
+        if context.cur_token().at_bol && context.cur_token().kind == Punct("#") {
+            context.eat_token();
+            if let LexIdent(directive) = &context.cur_token().kind {
+                if matches!(directive.as_str(), "endif") {
+                    context.eat_token();
+                    context.exit_if();
+                    if context.cur_if_layer() == target_if_layer - 1 {
+                        // Skip the whole if group, including the ending "#endif".
+                        break;
+                    }
+                } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
+                    context.enter_if();
+                    context.eat_token();
+                }
+            }
+        } else {
+            context.eat_token();
+        }
+    }
+}
+
+fn report_preprocess_error(span: Span, error_description: &str) -> ! {
+    let mut prefixed_error_description = String::new();
+    prefixed_error_description.push_str("Preprocess error: ");
+    prefixed_error_description.push_str(error_description);
+    let error_info = error_span(span, &prefixed_error_description);
+    println!("{}", error_info);
+    exit(1);
 }
 
 // @Pending: How to handle usual arithmatic conversion?
@@ -336,73 +420,4 @@ fn eval_integer_const(expr: &Expr) -> i64 {
             report_preprocess_error(expr.span, &error_description);
         }
     }
-}
-
-fn report_preprocess_error(span: Span, error_description: &str) -> ! {
-    let mut prefixed_error_description = String::new();
-    prefixed_error_description.push_str("Preprocess error: ");
-    prefixed_error_description.push_str(error_description);
-    let error_info = error_span(span, &prefixed_error_description);
-    println!("{}", error_info);
-    exit(1);
-}
-
-pub fn skip_cur_block<'ctx, 'tokens>(context: &'ctx mut PP_Context<'tokens>) -> &'ctx [Token] {
-    let start_index = context.cur_index;
-    let start_if_layer = context.cur_if_layer;
-    loop {
-        if context.cur_token().at_bol && context.cur_token().kind == Punct("#") {
-            context.eat_token();
-            if let LexIdent(directive) = &context.cur_token().kind {
-                if matches!(directive.as_str(), "elif" | "else" | "endif") {
-                    if context.cur_if_layer == start_if_layer {
-                        // Go back to # punctuator, so that preprocess can handle after this function returns.
-                        context.cur_index -= 1;
-                        break;
-                    } else {
-                        if matches!(directive.as_str(), "endif") {
-                            context.cur_if_layer -= 1;
-                        }
-                        context.eat_token();
-                    }
-                } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
-                    context.cur_if_layer += 1;
-                    context.eat_token();
-                }
-            }
-        } else {
-            context.eat_token();
-        }
-    }
-    return &context.tokens[start_index..context.cur_index];
-}
-
-pub fn skip_cur_if_layer<'ctx, 'tokens>(context: &'ctx mut PP_Context<'tokens>) -> &'ctx [Token] {
-    let start_index = context.cur_index;
-    let start_if_layer = context.cur_if_layer;
-    loop {
-        if context.cur_token().at_bol && context.cur_token().kind == Punct("#") {
-            context.eat_token();
-            if let LexIdent(directive) = &context.cur_token().kind {
-                if matches!(directive.as_str(), "endif") {
-                    if context.cur_if_layer == start_if_layer {
-                        // Go back to # punctuator, so that preprocess can handle after this function returns.
-                        context.cur_index -= 1;
-                        break;
-                    } else {
-                        if matches!(directive.as_str(), "endif") {
-                            context.cur_if_layer -= 1;
-                        }
-                        context.eat_token();
-                    }
-                } else if matches!(directive.as_str(), "if" | "ifdef" | "ifndef") {
-                    context.cur_if_layer += 1;
-                    context.eat_token();
-                }
-            }
-        } else {
-            context.eat_token();
-        }
-    }
-    return &context.tokens[start_index..context.cur_index];
 }
