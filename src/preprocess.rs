@@ -320,10 +320,16 @@ impl Preprocessor {
 
 
 
-    pub fn expand(&mut self, raw_tokens: &[Token]) -> Vec<Token> {
+    pub fn expand(&self, raw_tokens: &[Token]) -> Vec<Token> {
         let mut expanded_tokens = Vec::new();
-        // @Temporary: Currenly just copy.
         for token in raw_tokens {
+            if matches!(token.kind, LexIdent(..) | Keyword(..)) {
+                let name = get_name(&token.kind);
+                if let Some(replacement_list) = self.macros.get(name) {
+                    expanded_tokens.append(&mut replacement_list.clone());
+                    continue;
+                }
+            }
             expanded_tokens.push(token.clone());
         }
         return expanded_tokens;
