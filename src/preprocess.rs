@@ -96,6 +96,11 @@ impl Preprocessor {
         }
     }
 
+    // @TODO: To be implemented.
+    pub fn is_defined(&self, name: &str) -> bool {
+        return false;
+    }
+
 
     pub fn inner_preprocess(&mut self, tokens: &[Token]) -> Vec<Token> {
         let mut preprocessed_tokens = Vec::new();
@@ -112,12 +117,12 @@ impl Preprocessor {
                         break;
                     }
                     context.eat_token();
-                    // A single # with no follwing stuff is just a null directive.
+                    // A single # with no follwing stuff in the same line is just a null directive; we skip it.
                     if context.cur_token().at_bol {
                         continue;
                     }
                     
-                    let directive = get_directive(&context.cur_token().kind);
+                    let directive = get_name(&context.cur_token().kind);
                     let span = context.cur_token().span;
                     if directive == "include" {
                         context.eat_token();
@@ -197,6 +202,11 @@ impl Preprocessor {
                             continue;
                         }
                     } else if directive == "else" {
+                        if context.cur_if_layer() == 0 {
+                            let error_description = "Not in any if-group.";
+                            report_preprocess_error(context.cur_token().span, error_description);
+                            break;
+                        }
                         context.eat_token();
                         if !context.cur_token().at_bol {
                             let error_description = "Extra token(s) after #else.";
@@ -208,18 +218,48 @@ impl Preprocessor {
                         preprocessed_tokens.append(&mut preprocessed_block);
                         eat_remaining_cur_if_layer(&mut context);
                         continue;
-                    } else if directive == "ifdef" {
-                        todo!();
-                    } else if directive == "ifndef" {
-                        todo!();
-                    } else if directive == "endif" {
-                        if context.cur_if_layer() > 0 {
-                            context.eat_token();
-                            context.exit_if();
-                        } else {
-                            let error_description = "Unpaired endif directive.";
-                            report_preprocess_error(context.cur_token().span, error_description);
+                    } else if matches!(directive, "ifdef" | "ifndef") {
+                        let is_ifdef = if directive == "ifdef" {true} else {false};
+                        context.enter_if();
+                        context.eat_token();
+                        if context.cur_token().at_bol {
+                            let error_description = "Nothing found after #ifdef";
+                            report_preprocess_error(span, error_description);
+                            break;
                         }
+
+                        let name = get_name(&context.cur_token().kind);
+                        let symbol_is_defined = self.is_defined(name);
+                        let condition_satisfied = if is_ifdef {symbol_is_defined} else {!symbol_is_defined};
+
+                        context.eat_token();
+                        if !context.cur_token().at_bol {
+                            let error_description = "Extra token(s).";
+                            report_preprocess_error(context.cur_token().span, error_description);
+                            break;
+                        }
+                        
+                        if condition_satisfied {
+                            let skipped_block = eat_and_get_cur_block(&mut context);
+                            let mut preprocessed_block = self.inner_preprocess(skipped_block);
+                            preprocessed_tokens.append(&mut preprocessed_block);
+                            eat_remaining_cur_if_layer(&mut context);
+                            continue;
+                        } else {
+                            eat_and_get_cur_block(&mut context);
+                            continue;
+                        }
+                    } else if directive == "endif" {
+                        if context.cur_if_layer() == 0 {
+                            let error_description = "Not in any if-group";
+                            report_preprocess_error(context.cur_token().span, error_description);
+                            break;
+                        }
+                        context.eat_token();
+                        context.exit_if();
+                    } else {
+                        let error_description = "Unknown directive.";
+                        report_preprocess_error(context.cur_token().span, error_description);
                     }
                 }
                 _ => {
@@ -254,13 +294,13 @@ pub fn eat_and_get_cur_block<'ctx, 'tokens>(context: &'ctx mut PP_Context<'token
     let target_if_layer = context.cur_if_layer();
     loop {
         if context.cur_token().kind == Eof {
-            let error_description = "Reached end of input, still can't find a matching #endif for this directive.";
+            let error_description = "Can't find a matching #endif for this directive.";
             report_preprocess_error(context.cur_if_directive_position(), &error_description);
             break;
         }
         if context.cur_token().at_bol && context.cur_token().kind == Punct("#") {
             context.eat_token();
-            let directive = get_directive(&context.cur_token().kind);
+            let directive = get_name(&context.cur_token().kind);
             if matches!(directive, "elif" | "else" | "endif") {
                 if context.cur_if_layer() == target_if_layer {
                     // Go back to # punctuator, so that preprocess can handle after this function returns.
@@ -292,13 +332,13 @@ pub fn eat_remaining_cur_if_layer(context: &mut PP_Context) {
     let target_if_layer = context.cur_if_layer();
     loop {
         if context.cur_token().kind == Eof {
-            let error_description = "Reached end of input, still can't find a matching #endif for this directive.";
+            let error_description = "Can't find a matching #endif for this directive.";
             report_preprocess_error(context.cur_if_directive_position(), &error_description);
             break;
         };
         if context.cur_token().at_bol && context.cur_token().kind == Punct("#") {
             context.eat_token();
-            let directive = get_directive(&context.cur_token().kind);
+            let directive = get_name(&context.cur_token().kind);
             if matches!(directive, "endif") {
                 context.eat_token();
                 context.exit_if();
@@ -411,7 +451,8 @@ fn eval_integer_const(expr: &Expr) -> i64 {
         }
     }
 }
-fn get_directive<'a>(kind: &'a TokenKind) -> &'a str {
+
+fn get_name<'a>(kind: &'a TokenKind) -> &'a str {
     match kind {
         LexIdent(name) => name.as_str(),
         Keyword(name) => name,

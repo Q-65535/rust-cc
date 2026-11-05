@@ -34,7 +34,8 @@ int main() {
 }
 
 #if 0
-#elif 3
+#elif 3*1
 
 #if 0
+#endif
 #endif
