@@ -88,11 +88,13 @@ impl<'a> PP_Context<'a> {
 
 #[derive(Debug, Clone, Default)]
 pub struct Preprocessor {
+    pub macros: HashMap<String, Vec<Token>>,
 }
 
 impl Preprocessor {
     pub fn new() -> Self {
         Preprocessor {
+            macros: HashMap::new(),
         }
     }
 
@@ -257,12 +259,36 @@ impl Preprocessor {
                         }
                         context.eat_token();
                         context.exit_if();
+                    } else if directive == "define" {
+                        context.eat_token();
+                        let remainder_of_line = context.eat_and_get_remainder_of_line();
+                        if remainder_of_line.len() == 0 {
+                            let error_description = "No macro name given in #define directive";
+                            report_preprocess_error(span, error_description);
+                            break;
+                        }
+                        let name = get_name(&remainder_of_line[0].kind);
+                        if name == "" {
+                            let error_description = "Macro name must be an identifier.";
+                            report_preprocess_error(context.cur_token().span, error_description);
+                            break;
+                        }
+                        let replacement_list = remainder_of_line[1..].to_vec();
+                        self.macros.insert(name.to_string(), replacement_list);
                     } else {
                         let error_description = "Unknown directive.";
                         report_preprocess_error(context.cur_token().span, error_description);
                     }
                 }
                 _ => {
+                    if matches!(context.cur_token().kind, LexIdent(..) | Keyword(..)) {
+                        let name = get_name(&context.cur_token().kind);
+                        if let Some(replacement_list) = self.macros.get(name) {
+                            preprocessed_tokens.append(&mut replacement_list.clone());
+                            context.eat_token();
+                            continue;
+                        }
+                    }
                     preprocessed_tokens.push(context.cur_token().clone());
                     context.eat_token();
                 }
