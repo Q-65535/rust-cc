@@ -100,7 +100,7 @@ impl Preprocessor {
 
     // @TODO: To be implemented.
     pub fn is_defined(&self, name: &str) -> bool {
-        return false;
+        return self.macros.contains_key(name);
     }
 
 
@@ -275,6 +275,26 @@ impl Preprocessor {
                         }
                         let replacement_list = remainder_of_line[1..].to_vec();
                         self.macros.insert(name.to_string(), replacement_list);
+                    } else if directive == "undef" {
+                        context.eat_token();
+                        if context.cur_token().at_bol {
+                            let error_description = "No macro name given in #undef directive";
+                            report_preprocess_error(span, error_description);
+                            break;
+                        }
+                        let name = get_name(&context.cur_token().kind);
+                        if name == "" {
+                            let error_description = "Macro name must be an identifier.";
+                            report_preprocess_error(context.cur_token().span, error_description);
+                            break;
+                        }
+                        self.macros.remove(name);
+                        context.eat_token();
+                        if !context.cur_token().at_bol {
+                            let error_description = "Extra token(s) after #undef.";
+                            report_preprocess_error(context.cur_token().span, error_description);
+                            break;
+                        }
                     } else {
                         let error_description = "Unknown directive.";
                         report_preprocess_error(context.cur_token().span, error_description);
