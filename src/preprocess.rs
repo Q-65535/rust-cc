@@ -4,6 +4,7 @@ use crate::parse::*;
 use crate::ExprType::*;
 use TokenKind::*;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::process::exit;
 use crate::FILE_RECORDS;
 
@@ -181,7 +182,7 @@ impl Preprocessor {
                         }
 
                         let raw_expr_tokens = context.eat_and_get_remainder_of_line();
-                        let expanded_expr_tokens = self.expand(raw_expr_tokens);
+                        let expanded_expr_tokens = self.expand(raw_expr_tokens, &mut HashSet::new());
 
                         let mut parser = Parser::new(expanded_expr_tokens);
                         let expr = match parser.parse_expr(Precedence::Lowest, Associativity::Left_To_Right) {
@@ -304,7 +305,10 @@ impl Preprocessor {
                     if matches!(context.cur_token().kind, LexIdent(..) | Keyword(..)) {
                         let name = get_name(&context.cur_token().kind);
                         if let Some(replacement_list) = self.macros.get(name) {
-                            preprocessed_tokens.append(&mut replacement_list.clone());
+                            let mut avoid_expand_idents = HashSet::new();
+                            avoid_expand_idents.insert(name.to_string());
+                            let expanded_replacement_list = self.expand(replacement_list, &mut avoid_expand_idents);
+                            preprocessed_tokens.append(&mut expanded_replacement_list.clone());
                             context.eat_token();
                             continue;
                         }
@@ -319,15 +323,21 @@ impl Preprocessor {
     }
 
 
-
-    pub fn expand(&self, raw_tokens: &[Token]) -> Vec<Token> {
+    // @Smell: Maybe we can put avoid_expand_idents in Preprocessor struct, so that we
+    // don't need pass this argument anymore.
+    pub fn expand(&self, raw_tokens: &[Token], avoid_expand_idents: &mut HashSet<String>) -> Vec<Token> {
         let mut expanded_tokens = Vec::new();
         for token in raw_tokens {
             if matches!(token.kind, LexIdent(..) | Keyword(..)) {
                 let name = get_name(&token.kind);
-                if let Some(replacement_list) = self.macros.get(name) {
-                    expanded_tokens.append(&mut replacement_list.clone());
-                    continue;
+                if !avoid_expand_idents.contains(name) {
+                    if let Some(replacement_list) = self.macros.get(name) {
+                        avoid_expand_idents.insert(name.to_string());
+                        let mut expanded_replacement_list = self.expand(replacement_list, avoid_expand_idents);
+                        avoid_expand_idents.remove(name);
+                        expanded_tokens.append(&mut expanded_replacement_list);
+                        continue;
+                    }
                 }
             }
             expanded_tokens.push(token.clone());
