@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 import re
 import sys
-
 
 print("""
 typedef signed char int8_t;
@@ -14,6 +13,8 @@ typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long uint64_t;
+
+typedef unsigned long size_t;
 
 typedef struct FILE FILE;
 extern FILE *stdin;
@@ -90,28 +91,22 @@ int execvp(char *file, char **argv);
 void _exit(int code);
 int wait(int *wstatus);
 int atexit(void (*)(void));
+FILE *open_memstream(char **ptr, size_t *sizeloc);
+char *dirname(char *path);
 """)
 
 for path in sys.argv[1:]:
     with open(path) as file:
-        source = file.read()
-        source = re.sub(r'\\\n', '', source)
-        source = re.sub(r'^\s*#.*', '', source, flags=re.MULTILINE)
-        source = re.sub(r'"\n\s*"', '', source)
-        source = re.sub(r'\bbool\b', '_Bool', source)
-        source = re.sub(r'\berrno\b', '*__errno_location()', source)
-        source = re.sub(r'\btrue\b', '1', source)
-        source = re.sub(r'\bfalse\b', '0', source)
-        source = re.sub(r'\bNULL\b', '0', source)
-        source = re.sub(
-            r'\bva_start\(([^)]*),([^)]*)\)',
-            r'*(\1)=*(__va_elem*)__va_area__',
-            source,
-        )
-        source = re.sub(r'\bunreachable\(\)', 'error("unreachable")', source)
-        source = re.sub(
-            r'\bMIN\(([^)]*),([^)]*)\)',
-            r'((\1)<(\2)?(\1):(\2))',
-            source,
-        )
-        print(source)
+        s = file.read()
+        s = re.sub(r'\\\n', '', s)
+        s = re.sub(r'^\s*#.*', '', s, flags=re.MULTILINE)
+        s = re.sub(r'"\n\s*"', '', s)
+        s = re.sub(r'\bbool\b', '_Bool', s)
+        s = re.sub(r'\berrno\b', '*__errno_location()', s)
+        s = re.sub(r'\btrue\b', '1', s)
+        s = re.sub(r'\bfalse\b', '0', s)
+        s = re.sub(r'\bNULL\b', '0', s)
+        s = re.sub(r'\bva_start\(([^)]*),([^)]*)\)', '*(\\1)=*(__va_elem*)__va_area__', s)
+        s = re.sub(r'\bunreachable\(\)', 'error("unreachable")', s)
+        s = re.sub(r'\bMIN\(([^)]*),([^)]*)\)', '((\\1)<(\\2)?(\\1):(\\2))', s)
+        print(s)

@@ -2051,8 +2051,8 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
         }
     }
     if matches!(to_type, ArrayOf(..)) {
-        exit(1);
         report_semantic_error(span, "the cast-to type must not be array type!");
+        exit(1);
     }
     if !from_type.is_scalar() || !to_type.is_scalar() {
         let error_info = format!("Oops! If cast-to type is not void, both cast-from and \
@@ -2063,8 +2063,8 @@ fn cast(expr: ir::Expr, to_type: &Type) -> ir::Expr {
         to type is:
         {:#?}", from_type, to_type);
         
-        exit(1);
         report_semantic_error(span, &error_info);
+        exit(1);
     } else {
         return expr;
     }
@@ -2084,6 +2084,11 @@ fn array_of(ty: &Type, len: usize) -> Type {
 // of left type
 fn can_assign(left_type: &Type, right_type: &Type) -> bool {
     if left_type.is_arith() && right_type.is_arith() {
+        return true;
+    }
+
+    // That said, C allows implicit conversion from any scalar type to _Bool.
+    if *left_type == Bool && right_type.is_scalar() {
         return true;
     }
 
@@ -2142,14 +2147,14 @@ fn can_be_lvalue(expr: &ir::Expr) -> bool {
 fn gen_assign_expr(lhs: ir::Expr, mut rhs: ir::Expr) -> ir::Expr {
         if !can_be_lvalue(&lhs) {
             let err_info = format!("this expr (type: {:?}) cannot be lvalue!", &lhs.ty);
-            exit(1);
             report_semantic_error(lhs.span, &err_info);
+            exit(1);
         }
         if !can_assign_expr(&lhs.ty, &rhs) {
             let err_info = format!("mismatch types: try to assign type {:?} to type {:?}",
             &rhs.ty, &lhs.ty);
-            exit(1);
             report_semantic_error(lhs.span, &err_info);
+            exit(1);
         }
         // Cast rhs to match lhs when they are not struct type.
         if !matches!(lhs.ty, Struct(..) | Union(..) | Tag(..) ) {
@@ -2206,9 +2211,9 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
     match op {
         OP::Plus => {
             if lhs.is_pointer_or_array() && rhs.is_pointer_or_array() {
-                exit(1);
                 report_semantic_error(lhs.span, "error: both lhs and rhs are of ptr type");
                 report_semantic_error(rhs.span, "error: both lhs and rhs are of ptr type");
+                exit(1);
             }
             if lhs.is_integer() && rhs.is_pointer_or_array() {
                 swap(&mut lhs, &mut rhs);
@@ -2217,7 +2222,10 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                 let scale = match &lhs.ty {
                     Pointer_To(pointee_type) => sizeof(pointee_type),
                     ArrayOf(element_type, _) => sizeof(element_type),
-                    _ => exit(1),
+                    _ => {
+                        report_semantic_error(lhs.span, "Compiler bug: lhs is not a pointer or array.");
+                        exit(1);
+                    }
                 };
                 rhs = scale_expr(rhs, scale, ir::OP::Mul);
             }
@@ -2225,8 +2233,8 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
         }
         OP::Minus => {
             if lhs.is_integer() && rhs.is_pointer_or_array() {
-                exit(1);
                 report_semantic_error(rhs.span, "error: integer - ptr");
+                exit(1);
             }
             if lhs.is_pointer_or_array() && rhs.is_integer() {
                 let scale = match &lhs.ty {
@@ -2251,8 +2259,8 @@ fn gen_binary_expr(mut lhs: ir::Expr, mut rhs: ir::Expr, op: ir::OP) -> ir::Expr
                     }
                 };
                 if lhs.ty != rhs.ty {
-                    exit(1);
                     report_semantic_error(rhs.span, "pointer arithmatic error: type doesn't match");
+                    exit(1);
                 }
                 // The result of "pointer - pointer" is the gap between them,
                 // measured in terms of number of elements (the result can be negative). 
@@ -2342,14 +2350,12 @@ fn gen_promoted_binary_expr(lhs: ir::Expr, rhs: ir::Expr, op: ir::OP) -> ir::Exp
         if op.is_bitwise() {
             let error_info = format!("Bitwise operation '{:?}' cannot be applied to this \
                 floating point type expression.", op);
-            exit(1);
             report_semantic_error(lhs.span, &error_info);
             exit(1);
         }
         if op == OP::Modulus {
             let error_info = format!("Modulus operation cannot be applied to this \
                 floating point type expression.");
-            exit(1);
             report_semantic_error(lhs.span, &error_info);
             exit(1);
         }
@@ -2371,7 +2377,6 @@ fn gen_deref_expr(expr: ir::Expr) -> ir::Expr {
     let dereferenced_type = match &expr.ty {
         Pointer_To(pointee_type) => {
             if **pointee_type == Void {
-                exit(1);
                 report_semantic_error(expr.span, "Hey bro no, you are trying to dereference a void pointer!");
                 exit(1);
             }
@@ -2379,7 +2384,6 @@ fn gen_deref_expr(expr: ir::Expr) -> ir::Expr {
         },
         ArrayOf(element_type, _) => *element_type.clone(),
         _ => {
-            exit(1);
             report_semantic_error(expr.span, "unable to generate deference of this expression, because it is
             nither a pointer nor array.");
             exit(1);
@@ -2620,7 +2624,6 @@ fn eval_integer_label_const(expr: &ir::Expr) -> (Option<String>, i64) {
         ir::ExprType::Object(obj) => {
             if !obj.is_global {
                 let error_info = format!("not a compile-time constant");
-                exit(1);
                 report_semantic_error(expr.span, &error_info);
                 exit(1);
             }
@@ -2640,7 +2643,6 @@ fn eval_integer_label_const(expr: &ir::Expr) -> (Option<String>, i64) {
         }
         _ => {
             let error_info = format!("this cannot be evaluated to integer costant: {:?}", expr);
-            exit(1);
             report_semantic_error(expr.span, &error_info);
             exit(1);
         }
@@ -2671,7 +2673,6 @@ fn eval_fp_const(expr: &ir::Expr) -> f64 {
                 _ => {
                     let error_info = format!("Binary operation '{:?}' cannot be applied to this \
                         floating point type expression.", op);
-                    exit(1);
                     report_semantic_error(lhs.span, &error_info);
                     exit(1);
                 }
@@ -2696,7 +2697,6 @@ fn eval_fp_const(expr: &ir::Expr) -> f64 {
         }
         _ => {
             let error_info = format!("this cannot be evaluated to a floting point costant: {:?}", expr);
-            exit(1);
             report_semantic_error(expr.span, &error_info);
             exit(1);
         }
@@ -2710,7 +2710,6 @@ fn resolve_array_size_from_init(init: &Initializer) -> usize {
         }
         _ => {
             let error_info = format!("Compiler bug: After normalization, this init should be a init list.");
-            exit(1);
             report_semantic_error(init.span, &error_info);
             exit(1);
         }
@@ -2859,8 +2858,8 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     if old_init_list.len() > 1 {
                         let error_info = format!("Excess elements in union initializer: The union initialzer
                         can only have 1 members for initializing the first member of the union, but you provide {} elements in the init_list here.", old_init_list.len());
-                        exit(1);
                         report_semantic_error(span, &error_info);
+                        exit(1);
                     }
                     let first_member_type = &st.members[0].ty;
                     let new_init = normalize_init(&old_init_list[0], first_member_type);
@@ -2883,8 +2882,8 @@ fn normalize_init(init: &Initializer, ty: &Type) -> Initializer {
                     if init_list.len() > 1 {
                         let error_info = format!("Excess elements for initialize a scalar variable: you can provide \
                         at most 1 element in the init_list, but the number of elements in the init_list you given is {}.", init_list.len());
-                        exit(1);
                         report_semantic_error(span, &error_info);
+                        exit(1);
                     }
                     if init_list.len() == 0 {
                         return create_zerolized_init(ty, span);
