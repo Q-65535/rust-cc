@@ -182,7 +182,8 @@ impl Preprocessor {
                         }
 
                         let raw_expr_tokens = context.eat_and_get_remainder_of_line();
-                        let expanded_expr_tokens = self.expand(raw_expr_tokens, &mut HashSet::new());
+                        let mut expanded_expr_tokens = Vec::new();
+                        self.expand(raw_expr_tokens, &mut expanded_expr_tokens, &mut HashSet::new());
 
                         let mut parser = Parser::new(expanded_expr_tokens);
                         let expr = match parser.parse_expr(Precedence::Lowest, Associativity::Left_To_Right) {
@@ -307,8 +308,7 @@ impl Preprocessor {
                         if let Some(replacement_list) = self.macros.get(name) {
                             let mut avoid_expand_idents = HashSet::new();
                             avoid_expand_idents.insert(name.to_string());
-                            let expanded_replacement_list = self.expand(replacement_list, &mut avoid_expand_idents);
-                            preprocessed_tokens.append(&mut expanded_replacement_list.clone());
+                            let expanded_replacement_list = self.expand(replacement_list, &mut preprocessed_tokens, &mut avoid_expand_idents);
                             context.eat_token();
                             continue;
                         }
@@ -325,24 +325,21 @@ impl Preprocessor {
 
     // @Smell: Maybe we can put avoid_expand_idents in Preprocessor struct, so that we
     // don't need pass this argument anymore.
-    pub fn expand(&self, raw_tokens: &[Token], avoid_expand_idents: &mut HashSet<String>) -> Vec<Token> {
-        let mut expanded_tokens = Vec::new();
-        for token in raw_tokens {
+    pub fn expand(&self, original_tokens: &[Token], receive_buffer: &mut Vec<Token>, avoid_expand_idents: &mut HashSet<String>) {
+        for token in original_tokens {
             if matches!(token.kind, LexIdent(..) | Keyword(..)) {
                 let name = get_name(&token.kind);
                 if !avoid_expand_idents.contains(name) {
                     if let Some(replacement_list) = self.macros.get(name) {
                         avoid_expand_idents.insert(name.to_string());
-                        let mut expanded_replacement_list = self.expand(replacement_list, avoid_expand_idents);
+                        self.expand(replacement_list, receive_buffer, avoid_expand_idents);
                         avoid_expand_idents.remove(name);
-                        expanded_tokens.append(&mut expanded_replacement_list);
                         continue;
                     }
                 }
             }
-            expanded_tokens.push(token.clone());
+            receive_buffer.push(token.clone());
         }
-        return expanded_tokens;
     }
 }
 
