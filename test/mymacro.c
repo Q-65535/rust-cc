@@ -197,3 +197,5 @@ int main() {
   printf("OK\n");
   return 0;
 }
+
+#define PLUS(@, y) x + y

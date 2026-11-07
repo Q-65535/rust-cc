@@ -87,9 +87,30 @@ impl<'a> PP_Context<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum Macro_Content {
+    Obj_Like(Vec<Token>),
+    Func_Like(Box<Function_Macro>),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Function_Macro {
+    params: Vec<String>,
+    body: Vec<Token>,
+}
+
+impl Function_Macro {
+    fn default() -> Self {
+        return Function_Macro {
+            params: Vec::new(),
+            body: Vec::new(),
+        };
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Preprocessor {
-    pub macros: HashMap<String, Vec<Token>>,
+    pub macros: HashMap<String, Macro_Content>,
 }
 
 impl Preprocessor {
@@ -99,7 +120,6 @@ impl Preprocessor {
         }
     }
 
-    // @TODO: To be implemented.
     pub fn is_defined(&self, name: &str) -> bool {
         return self.macros.contains_key(name);
     }
@@ -263,7 +283,7 @@ impl Preprocessor {
                         context.exit_if();
                     } else if directive == "define" {
                         context.eat_token();
-                        let remainder_of_line = context.eat_and_get_remainder_of_line();
+                        let mut remainder_of_line = context.eat_and_get_remainder_of_line();
                         if remainder_of_line.len() == 0 {
                             let error_description = "No macro name given in #define directive";
                             report_preprocess_error(span, error_description);
@@ -275,8 +295,22 @@ impl Preprocessor {
                             report_preprocess_error(context.cur_token().span, error_description);
                             break;
                         }
-                        let replacement_list = remainder_of_line[1..].to_vec();
-                        self.macros.insert(name.to_string(), replacement_list);
+
+                        remainder_of_line = &remainder_of_line[1..];
+
+                        let macro_content;
+                        // if remainder_of_line[0].kind == Punct("(") && !remainder_of_line[0].preceded_by_space {
+                        if remainder_of_line.len() > 0 && remainder_of_line[0].kind == Punct("(") {
+                            let function_macro = parse_function_like_macro(remainder_of_line);
+                            macro_content = Macro_Content::Func_Like(Box::new(function_macro));
+                        } else {
+                            let replacement_list = remainder_of_line.to_vec();
+                            macro_content = Macro_Content::Obj_Like(replacement_list);
+                        }
+
+                        // @Compatibility: Currently we don't consider duplicate macro definition.
+                        // New macro defines shadow old one if their name is the same.
+                        self.macros.insert(name.to_string(), macro_content);
                     } else if directive == "undef" {
                         context.eat_token();
                         if context.cur_token().at_bol {
@@ -305,11 +339,18 @@ impl Preprocessor {
                 _ => {
                     if matches!(context.cur_token().kind, LexIdent(..) | Keyword(..)) {
                         let name = get_name(&context.cur_token().kind);
-                        if let Some(replacement_list) = self.macros.get(name) {
+                        if let Some(m) = self.macros.get(name) {
                             let mut avoid_expand_idents = HashSet::new();
                             avoid_expand_idents.insert(name.to_string());
-                            let expanded_replacement_list = self.expand(replacement_list, &mut preprocessed_tokens, &mut avoid_expand_idents);
-                            context.eat_token();
+                            match m {
+                                Macro_Content::Obj_Like(replacement_list) => {
+                                    let expanded_replacement_list = self.expand(replacement_list, &mut preprocessed_tokens, &mut avoid_expand_idents);
+                                    context.eat_token();
+                                }
+                                Macro_Content::Func_Like(function_macro) => {
+                                    todo!();
+                                }
+                            }
                             continue;
                         }
                     }
@@ -330,10 +371,17 @@ impl Preprocessor {
             if matches!(token.kind, LexIdent(..) | Keyword(..)) {
                 let name = get_name(&token.kind);
                 if !avoid_expand_idents.contains(name) {
-                    if let Some(replacement_list) = self.macros.get(name) {
-                        avoid_expand_idents.insert(name.to_string());
-                        self.expand(replacement_list, receive_buffer, avoid_expand_idents);
-                        avoid_expand_idents.remove(name);
+                    if let Some(m) = self.macros.get(name) {
+                        match m {
+                            Macro_Content::Obj_Like(replacement_list) => {
+                                avoid_expand_idents.insert(name.to_string());
+                                self.expand(replacement_list, receive_buffer, avoid_expand_idents);
+                                avoid_expand_idents.remove(name);
+                            }
+                            Macro_Content::Func_Like(function_macro) => {
+                                todo!();
+                            }
+                        }
                         continue;
                     }
                 }
@@ -517,4 +565,53 @@ fn get_name<'a>(kind: &'a TokenKind) -> &'a str {
         Keyword(name) => name,
         _ => "",
     }
+}
+
+fn parse_function_like_macro(tokens: &[Token]) -> Function_Macro {
+    debug_assert!(tokens[0].kind == Punct("("));
+    let mut params = Vec::new();
+    let start_span = tokens[0].span;
+
+    let mut index = 1;
+    if index >= tokens.len() {
+        let error_description = "Unable to find a matching ')' for this.";
+        report_preprocess_error(start_span, error_description);
+        return Function_Macro::default();
+    }
+    if tokens[index].kind == Punct(")") {
+        index += 1;
+        let body = tokens[index..].to_vec();
+        return Function_Macro{params, body};
+    }
+
+    loop {
+        let param_name = get_name(&tokens[index].kind);
+        if param_name != "" {
+            params.push(param_name.to_string());
+            index += 1;
+        } else {
+            let error_description = "Expected to see an identifier, what the fuck is this?";
+            report_preprocess_error(tokens[index].span, error_description);
+            return Function_Macro::default();
+        }
+        if index >= tokens.len() {
+            let error_description = "Unable to find a matching ')' for this.";
+            report_preprocess_error(start_span, error_description);
+            break;
+        };
+
+        if tokens[index].kind == Punct(",") {
+            index += 1;
+            continue;
+        } else if tokens[index].kind == Punct(")") {
+            index += 1;
+            break;
+        } else {
+            let error_description = "Expect ',' or ')' after a parameter name.";
+            report_preprocess_error(tokens[index].span, error_description);
+            break;
+        }
+    }
+    let body = tokens[index..].to_vec();
+    return Function_Macro{params, body};
 }
