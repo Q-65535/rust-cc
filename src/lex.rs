@@ -38,6 +38,7 @@ pub enum TokenKind {
     LexIdent(Box<String>),
     StringLiteral(Box<Vec<u8>>),
     Eof,
+    Eol,
 }
 use TokenKind::*;
 
