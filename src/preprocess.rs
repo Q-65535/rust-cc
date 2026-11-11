@@ -54,8 +54,14 @@ impl<'a> PP_Context<'a> {
         return &self.tokens[self.cur_index+1];
     }
 
-    pub fn eat_token(&mut self) {
-        self.cur_index += 1;
+    pub fn eat_token(&mut self) -> &Token {
+        if self.cur_index >= self.tokens.len() {
+            return &self.eof_token;
+        } else {
+            let result = &self.tokens[self.cur_index];
+            self.cur_index += 1;
+            return result;
+        }
     }
 
     pub fn cur_if_layer(&self) -> usize {
@@ -298,6 +304,7 @@ impl Preprocessor {
 
                         let mut remainder_of_line = context.eat_and_get_remainder_of_line();
                         let macro_content;
+                        // @TODO: Add preceded_by_space to token.
                         // if remainder_of_line[0].kind == Punct("(") && !remainder_of_line[0].preceded_by_space {
                         if remainder_of_line.len() > 0 && remainder_of_line[0].kind == Punct("(") {
                             let function_macro = parse_function_like_macro_definition(remainder_of_line);
@@ -342,11 +349,12 @@ impl Preprocessor {
                             avoid_expand_idents.insert(name.to_string());
                             match m {
                                 Macro_Content::Obj_Like(replacement_list) => {
-                                    let expanded_replacement_list = self.expand(replacement_list, &mut preprocessed_tokens, &mut avoid_expand_idents);
+                                    self.expand(replacement_list, &mut preprocessed_tokens, &mut avoid_expand_idents);
                                     context.eat_token();
                                 }
                                 Macro_Content::Func_Like(function_macro) => {
                                     todo!();
+                                    // self.parse_func_macro_invocation();
                                 }
                             }
                             continue;
@@ -359,6 +367,32 @@ impl Preprocessor {
         }
 
         return preprocessed_tokens;
+    }
+
+    pub fn parse_func_macro_invocation(&self, context: &mut PP_Context) -> HashMap<String, Vec<Token>> {
+        todo!();
+        // let macro_name = get_name(&context.cur_token().kind).to_string();
+        // debug_assert!(macro_name != "");
+        // if context.cur_token().kind != Punct("(") {
+        //     report_out_of_expect_token_error("We are trying to parse function like macro \
+        //     invocation, after macro name, we expect to see a ')', ");
+        // }
+        // context.eat_token();
+
+        // loop {
+        //     let cur_argument;
+        //     if context.cur_token().kind == Eof {
+        //         let error_description = "Expect to see argument, but reached end of input.";
+        //         report_preprocess_error(context.cur_token().span, error_description);
+        //         break;
+        //     } else if context.cur_token().kind == Punct("(") {
+        //         cur_argument = context.eat_paren_enclosed_tokens();
+        //     } else {
+        //         cur_argument = Vec::new();
+        //         cur_argument.push(context.eat_token());
+        //     }
+        // }
+        
     }
 
 

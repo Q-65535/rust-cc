@@ -198,4 +198,4 @@ int main() {
   return 0;
 }
 
-#define PLUS(@, y) x + y
+#define PLUS(x, y) x + y
