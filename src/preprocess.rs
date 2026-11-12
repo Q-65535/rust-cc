@@ -91,6 +91,34 @@ impl<'a> PP_Context<'a> {
         let end_index = self.cur_index;
         return &self.tokens[begin_index..end_index];
     }
+
+    pub fn eat_and_get_one_arg(&mut self) -> &'a [Token] {
+        let start_index = self.cur_index;
+        let mut cur_paren_layer: usize = 0;
+        loop {
+            let tok = self.cur_token();
+            if tok.kind == Eof {
+                let error_description = "During parsing argument, reached end of input.";
+                report_preprocess_error(tok.span, error_description);
+                break;
+            }
+            if cur_paren_layer == 0 && tok.kind == Punct(",") {
+                break;
+            }
+            if cur_paren_layer == 0 && tok.kind == Punct(")") {
+                break;
+            }
+
+            if tok.kind == Punct("(") {
+                cur_paren_layer += 1;
+            }
+            if tok.kind == Punct(")") {
+                cur_paren_layer -= 1;
+            }
+            self.eat_token();
+        }
+        return &self.tokens[start_index..self.cur_index];
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -353,8 +381,8 @@ impl Preprocessor {
                                     context.eat_token();
                                 }
                                 Macro_Content::Func_Like(function_macro) => {
-                                    todo!();
-                                    // self.parse_func_macro_invocation();
+                                    let arguments = self.parse_func_macro_invocation(&mut context);
+                                    println!("hey!");
                                 }
                             }
                             continue;
@@ -369,30 +397,44 @@ impl Preprocessor {
         return preprocessed_tokens;
     }
 
-    pub fn parse_func_macro_invocation(&self, context: &mut PP_Context) -> HashMap<String, Vec<Token>> {
-        todo!();
-        // let macro_name = get_name(&context.cur_token().kind).to_string();
-        // debug_assert!(macro_name != "");
-        // if context.cur_token().kind != Punct("(") {
-        //     report_out_of_expect_token_error("We are trying to parse function like macro \
-        //     invocation, after macro name, we expect to see a ')', ");
-        // }
-        // context.eat_token();
+    pub fn parse_func_macro_invocation<'a>(&self, context: &'a mut PP_Context) -> Vec<&'a [Token]> {
+        let mut arguments = Vec::new();
 
-        // loop {
-        //     let cur_argument;
-        //     if context.cur_token().kind == Eof {
-        //         let error_description = "Expect to see argument, but reached end of input.";
-        //         report_preprocess_error(context.cur_token().span, error_description);
-        //         break;
-        //     } else if context.cur_token().kind == Punct("(") {
-        //         cur_argument = context.eat_paren_enclosed_tokens();
-        //     } else {
-        //         cur_argument = Vec::new();
-        //         cur_argument.push(context.eat_token());
-        //     }
-        // }
-        
+        let macro_name = get_name(&context.cur_token().kind).to_string();
+        debug_assert!(macro_name != "");
+        context.eat_token();
+        if context.cur_token().kind != Punct("(") {
+            report_out_of_expect_token_error("We are trying to parse function like macro \
+            invocation and we have seen a valid macro name; but after macro name, we expect to see '(', ", context.cur_token());
+        }
+        context.eat_token();
+        // Special case: 0 argument.
+        if context.cur_token().kind == Punct(")") {
+            context.eat_token();
+            return Vec::new();
+        }
+
+        loop {
+            if context.cur_token().kind == Eof {
+                let error_description = "Expect to see argument, but reached end of input.";
+                report_preprocess_error(context.cur_token().span, error_description);
+                break;
+            }
+            let arg = context.eat_and_get_one_arg();
+            arguments.push(arg);
+            if context.cur_token().kind == Punct(")") {
+                context.eat_token();
+                break;
+            } else if context.cur_token().kind == Punct(",") {
+                context.eat_token();
+                continue;
+            } else {
+                report_out_of_expect_token_error("Compiler bug: We shouldn't see \
+                anything other than ')' and ',' after parsing an argument.", context.cur_token());
+                break;
+            }
+        }
+        return arguments;
     }
 
 

@@ -194,8 +194,8 @@ int main() {
 #else
 #endif
 
+#define PLUS(x, y) x + y
+
   printf("OK\n");
   return 0;
 }
-
-#define PLUS(x, y) x + y
