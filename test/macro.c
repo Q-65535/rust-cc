@@ -10,6 +10,9 @@ int memcmp(char *p, char *q, long n);
 
 /* */ #
 
+int ret3(void) { return 3; }
+int dbl(int x) { return x*x; }
+
 int main() {
   assert(5, include1, "include1");
   assert(7, include2, "include2");
@@ -193,6 +196,36 @@ int main() {
 #endif
 #else
 #endif
+
+#define M7() 1
+  int M7 = 5;
+  assert(1, M7(), "M7()");
+  assert(5, M7, "M7");
+
+#define M7 ()
+  assert(3, ret3 M7, "ret3 M7");
+
+#define M8(x,y) x+y
+  assert(7, M8(3, 4), "M8(3, 4)");
+
+#define M8(x,y) x*y
+  assert(24, M8(3+4, 4+5), "M8(3+4, 4+5)");
+
+#define M8(x,y) (x)*(y)
+  assert(63, M8(3+4, 4+5), "M8(3+4, 4+5)");
+
+#define M8(x,y) x y
+  assert(9, M8(, 4+5), "M8(, 4+5)");
+
+#define M8(x,y) x*y
+  assert(20, M8((2+3), 4), "M8((2+3), 4)");
+
+#define M8(x,y) x*y
+  assert(12, M8((2,3), 4), "M8((2,3), 4)");
+
+#define dbl(x) M10(x) * x
+#define M10(x) dbl(x) + 3
+  assert(10, dbl(2), "dbl(2)");
 
   printf("OK\n");
   return 0;

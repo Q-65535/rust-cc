@@ -236,8 +236,7 @@ impl Preprocessor {
                         }
 
                         let raw_expr_tokens = context.eat_and_get_remainder_of_line();
-                        let mut expanded_expr_tokens = Vec::new();
-                        self.expand(raw_expr_tokens, &mut expanded_expr_tokens, &mut HashSet::new());
+                        let mut expanded_expr_tokens = self.expand_to_new_buffer(raw_expr_tokens, &mut HashSet::new());
 
                         let mut parser = Parser::new(expanded_expr_tokens);
                         let expr = match parser.parse_expr(Precedence::Lowest, Associativity::Left_To_Right) {
@@ -332,9 +331,7 @@ impl Preprocessor {
 
                         let mut remainder_of_line = context.eat_and_get_remainder_of_line();
                         let macro_content;
-                        // @TODO: Add preceded_by_space to token.
-                        // if remainder_of_line[0].kind == Punct("(") && !remainder_of_line[0].preceded_by_space {
-                        if remainder_of_line.len() > 0 && remainder_of_line[0].kind == Punct("(") {
+                        if remainder_of_line.len() > 0 && remainder_of_line[0].kind == Punct("(") && !remainder_of_line[0].preceded_by_space {
                             let function_macro = parse_function_like_macro_definition(remainder_of_line);
                             macro_content = Macro_Content::Func_Like(Box::new(function_macro));
                         } else {
@@ -370,26 +367,48 @@ impl Preprocessor {
                     }
                 }
                 _ => {
-                    if matches!(context.cur_token().kind, LexIdent(..) | Keyword(..)) {
-                        let name = get_name(&context.cur_token().kind);
-                        if let Some(m) = self.macros.get(name) {
-                            let mut avoid_expand_idents = HashSet::new();
-                            avoid_expand_idents.insert(name.to_string());
-                            match m {
-                                Macro_Content::Obj_Like(replacement_list) => {
-                                    self.expand(replacement_list, &mut preprocessed_tokens, &mut avoid_expand_idents);
-                                    context.eat_token();
-                                }
-                                Macro_Content::Func_Like(function_macro) => {
-                                    let arguments = self.parse_func_macro_invocation(&mut context);
-                                    println!("hey!");
-                                }
-                            }
-                            continue;
-                        }
+                    let name = get_name(&context.cur_token().kind);
+                    if name == "" {
+                        preprocessed_tokens.push(context.cur_token().clone());
+                        context.eat_token();
+                        continue;
                     }
-                    preprocessed_tokens.push(context.cur_token().clone());
-                    context.eat_token();
+                    if let Some(m) = self.macros.get(name) {
+                        let mut avoid_expand_idents = HashSet::new();
+                        avoid_expand_idents.insert(name.to_string());
+                        match m {
+                            Macro_Content::Obj_Like(replacement_list) => {
+                                let mut expanded = self.expand_to_new_buffer(replacement_list, &mut avoid_expand_idents);
+                                preprocessed_tokens.append(&mut expanded);
+                                context.eat_token();
+                            }
+                            Macro_Content::Func_Like(function_macro) => {
+                                if context.peek_token().kind != Punct("(") {
+                                    preprocessed_tokens.push(context.cur_token().clone());
+                                    context.eat_token();
+                                    continue;
+                                }
+                                let arguments = self.eat_and_get_macro_invocation(&mut context);
+                                if function_macro.params.len() != arguments.len() {
+                                    let error_description = format!("The function-like macro accepts {} argument(s), \
+                                    but you provide {}.", function_macro.params.len(), arguments.len());
+                                    report_preprocess_error(context.cur_token().span, &error_description);
+                                    break;
+                                }
+                                let mut param_to_arg_map = HashMap::new();
+                                for i in (0..function_macro.params.len()) {
+                                    param_to_arg_map.insert(function_macro.params[i].clone(), arguments[i].to_vec());
+                                }
+                                let mut expanded = self.expand_func_macro_invocation(&function_macro.body, &param_to_arg_map, &mut avoid_expand_idents);
+                                preprocessed_tokens.append(&mut expanded);
+                            }
+                        }
+                        continue;
+                    } else {
+                        preprocessed_tokens.push(context.cur_token().clone());
+                        context.eat_token();
+                        continue;
+                    }
                 }
             }
         }
@@ -397,7 +416,8 @@ impl Preprocessor {
         return preprocessed_tokens;
     }
 
-    pub fn parse_func_macro_invocation<'a>(&self, context: &'a mut PP_Context) -> Vec<&'a [Token]> {
+    // @TODO: Move this to PP_Context.
+    pub fn eat_and_get_macro_invocation<'a>(&self, context: &'a mut PP_Context) -> Vec<&'a [Token]> {
         let mut arguments = Vec::new();
 
         let macro_name = get_name(&context.cur_token().kind).to_string();
@@ -437,6 +457,123 @@ impl Preprocessor {
         return arguments;
     }
 
+    pub fn expand_func_macro_invocation(&self, macro_body: &[Token], param_to_arg_map: &HashMap<String, Vec<Token>>, avoid_expand_idents: &mut HashSet<String>) -> Vec<Token> {
+        let mut result = Vec::new();
+        let mut context = PP_Context::new(macro_body);
+
+        while context.cur_token().kind != Eof {
+            let name = &get_name(&context.cur_token().kind).to_string();
+            if name == "" || avoid_expand_idents.contains(name) {
+                result.push(context.cur_token().clone());
+                context.eat_token();
+                continue;
+            }
+            if let Some(arg) = param_to_arg_map.get(name) {
+                let mut expanded = self.expand_to_new_buffer(&arg, avoid_expand_idents);
+                result.append(&mut expanded);
+                context.eat_token();
+                continue;
+            }
+
+            if let Some(m) = self.macros.get(name) {
+                avoid_expand_idents.insert(name.to_string());
+                match m {
+                    Macro_Content::Obj_Like(replacement_list) => {
+                        let mut expanded = self.expand_to_new_buffer(replacement_list, avoid_expand_idents);
+                        result.append(&mut expanded);
+                        context.eat_token();
+                    }
+                    Macro_Content::Func_Like(function_macro) => {
+                        if context.peek_token().kind != Punct("(") {
+                            result.push(context.cur_token().clone());
+                            context.eat_token();
+                            continue;
+                        }
+                        let arguments = self.eat_and_get_macro_invocation(&mut context);
+                        let mut expanded_arguments = Vec::new();
+                        for arg in arguments {
+                            let expanded_arg = self.expand_func_macro_invocation(arg, param_to_arg_map, avoid_expand_idents);
+                            expanded_arguments.push(expanded_arg);
+                        }
+                        let arguments = expanded_arguments;
+
+                        if function_macro.params.len() != arguments.len() {
+                            let error_description = format!("The function-like macro accepts {} argument(s), \
+                            but you provide {}.", function_macro.params.len(), arguments.len());
+                            report_preprocess_error(context.cur_token().span, &error_description);
+                            break;
+                        }
+                        let mut param_to_arg_map = HashMap::new();
+                        for i in (0..function_macro.params.len()) {
+                            param_to_arg_map.insert(function_macro.params[i].clone(), arguments[i].clone());
+                        }
+                        let mut expanded = self.expand_func_macro_invocation(&function_macro.body, &param_to_arg_map, avoid_expand_idents);
+                        result.append(&mut expanded);
+                    }
+                }
+                avoid_expand_idents.remove(name);
+                continue;
+            } else {
+                result.push(context.cur_token().clone());
+                context.eat_token();
+                continue;
+            }
+        }
+
+        return result;
+    }
+
+    pub fn expand_to_new_buffer(&self, original_tokens: &[Token], avoid_expand_idents: &mut HashSet<String>) -> Vec<Token> {
+        let mut result = Vec::new();
+        let mut context = PP_Context::new(original_tokens);
+
+        while context.cur_token().kind != Eof {
+            let name = &get_name(&context.cur_token().kind).to_string();
+            if name == "" || avoid_expand_idents.contains(name) {
+                result.push(context.cur_token().clone());
+                context.eat_token();
+                continue;
+            }
+            if let Some(m) = self.macros.get(name) {
+                avoid_expand_idents.insert(name.to_string());
+                match m {
+                    Macro_Content::Obj_Like(replacement_list) => {
+                        let mut expanded = self.expand_to_new_buffer(replacement_list, avoid_expand_idents);
+                        result.append(&mut expanded);
+                        context.eat_token();
+                    }
+                    Macro_Content::Func_Like(function_macro) => {
+                        if context.peek_token().kind != Punct("(") {
+                            result.push(context.cur_token().clone());
+                            context.eat_token();
+                            continue;
+                        }
+                        let arguments = self.eat_and_get_macro_invocation(&mut context);
+                        if function_macro.params.len() != arguments.len() {
+                            let error_description = format!("The function-like macro accepts {} argument(s), \
+                            but you provide {}.", function_macro.params.len(), arguments.len());
+                            report_preprocess_error(context.cur_token().span, &error_description);
+                            break;
+                        }
+                        let mut param_to_arg_map = HashMap::new();
+                        for i in (0..function_macro.params.len()) {
+                            param_to_arg_map.insert(function_macro.params[i].clone(), arguments[i].to_vec());
+                        }
+                        let mut expanded = self.expand_func_macro_invocation(&function_macro.body, &param_to_arg_map, avoid_expand_idents);
+                        result.append(&mut expanded);
+                    }
+                }
+                avoid_expand_idents.remove(name);
+                continue;
+            } else {
+                result.push(context.cur_token().clone());
+                context.eat_token();
+                continue;
+            }
+        }
+
+        return result;
+    }
 
     // @Smell: Maybe we can put avoid_expand_idents in Preprocessor struct, so that we
     // don't need pass this argument anymore.
