@@ -47,6 +47,7 @@ pub struct Token {
     pub kind: TokenKind,
     // bol: begining of line
     pub at_bol: bool,
+    pub preceded_by_space: bool,
     pub span: Span,
 }
 
@@ -90,6 +91,7 @@ pub struct Lexer<'a> {
     file_index: usize,
     index: usize, // @Rename: char_index
     at_bol: bool,
+    preceded_by_space: bool,
 }
 
 impl <'a>Lexer<'a> {
@@ -99,6 +101,7 @@ impl <'a>Lexer<'a> {
             file_index,
             index: 0,
             at_bol: true,
+            preceded_by_space: false,
         }
     }
 
@@ -154,8 +157,10 @@ impl <'a>Lexer<'a> {
             end_index: start_index + len - 1,
         };
         let at_bol = self.at_bol;
+        let preceded_by_space = self.preceded_by_space;
         self.at_bol = false;
-        return Token{kind, at_bol, span};
+        self.preceded_by_space = false;
+        return Token{kind, at_bol, preceded_by_space, span};
     }
 
     pub fn lex(&mut self) -> Vec<Token> {
@@ -170,7 +175,7 @@ impl <'a>Lexer<'a> {
             let start_index = self.index;
             match c {
                 '\n' => self.at_bol = true,
-                ' ' | '\t' | '\r' => (),
+                ' ' | '\t' | '\r' => self.preceded_by_space = true,
                 '.' if matches!(self.peek_char(), Some('0'..='9')) => {
                     let kind = self.read_num();
                     tokens.push(self.gen_token(
@@ -825,9 +830,9 @@ pub fn gen_dummy_token(kind: TokenKind) -> Token {
         start_index: 0,
         end_index: 0,
     };
-    return Token{kind, at_bol: false, span};
+    return Token{kind, at_bol: false, preceded_by_space: false, span};
 }
 
 pub fn gen_token(kind: TokenKind, span: Span) -> Token {
-    return Token{kind, at_bol: false, span};
+    return Token{kind, at_bol: false, preceded_by_space: false, span};
 }
