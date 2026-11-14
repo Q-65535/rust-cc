@@ -119,6 +119,46 @@ impl<'a> PP_Context<'a> {
         }
         return &self.tokens[start_index..self.cur_index];
     }
+
+    pub fn eat_and_get_macro_invocation(&mut self) -> Vec<&[Token]> {
+        let mut arguments = Vec::new();
+
+        let macro_name = get_name(&self.cur_token().kind).to_string();
+        debug_assert!(macro_name != "");
+        self.eat_token();
+        if self.cur_token().kind != Punct("(") {
+            report_out_of_expect_token_error("We are trying to parse function like macro \
+            invocation and we have seen a valid macro name; but after macro name, we expect to see '(', ", self.cur_token());
+        }
+        self.eat_token();
+        // Special case: 0 argument.
+        if self.cur_token().kind == Punct(")") {
+            self.eat_token();
+            return Vec::new();
+        }
+
+        loop {
+            if self.cur_token().kind == Eof {
+                let error_description = "Expect to see argument, but reached end of input.";
+                report_preprocess_error(self.cur_token().span, error_description);
+                break;
+            }
+            let arg = self.eat_and_get_one_arg();
+            arguments.push(arg);
+            if self.cur_token().kind == Punct(")") {
+                self.eat_token();
+                break;
+            } else if self.cur_token().kind == Punct(",") {
+                self.eat_token();
+                continue;
+            } else {
+                report_out_of_expect_token_error("Compiler bug: We shouldn't see \
+                anything other than ')' and ',' after parsing an argument.", self.cur_token());
+                break;
+            }
+        }
+        return arguments;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -388,7 +428,7 @@ impl Preprocessor {
                                     context.eat_token();
                                     continue;
                                 }
-                                let arguments = self.eat_and_get_macro_invocation(&mut context);
+                                let arguments = context.eat_and_get_macro_invocation();
                                 if function_macro.params.len() != arguments.len() {
                                     let error_description = format!("The function-like macro accepts {} argument(s), \
                                     but you provide {}.", function_macro.params.len(), arguments.len());
@@ -416,46 +456,6 @@ impl Preprocessor {
         return preprocessed_tokens;
     }
 
-    // @TODO: Move this to PP_Context.
-    pub fn eat_and_get_macro_invocation<'a>(&self, context: &'a mut PP_Context) -> Vec<&'a [Token]> {
-        let mut arguments = Vec::new();
-
-        let macro_name = get_name(&context.cur_token().kind).to_string();
-        debug_assert!(macro_name != "");
-        context.eat_token();
-        if context.cur_token().kind != Punct("(") {
-            report_out_of_expect_token_error("We are trying to parse function like macro \
-            invocation and we have seen a valid macro name; but after macro name, we expect to see '(', ", context.cur_token());
-        }
-        context.eat_token();
-        // Special case: 0 argument.
-        if context.cur_token().kind == Punct(")") {
-            context.eat_token();
-            return Vec::new();
-        }
-
-        loop {
-            if context.cur_token().kind == Eof {
-                let error_description = "Expect to see argument, but reached end of input.";
-                report_preprocess_error(context.cur_token().span, error_description);
-                break;
-            }
-            let arg = context.eat_and_get_one_arg();
-            arguments.push(arg);
-            if context.cur_token().kind == Punct(")") {
-                context.eat_token();
-                break;
-            } else if context.cur_token().kind == Punct(",") {
-                context.eat_token();
-                continue;
-            } else {
-                report_out_of_expect_token_error("Compiler bug: We shouldn't see \
-                anything other than ')' and ',' after parsing an argument.", context.cur_token());
-                break;
-            }
-        }
-        return arguments;
-    }
 
     pub fn expand_func_macro_invocation(&self, macro_body: &[Token], param_to_arg_map: &HashMap<String, Vec<Token>>, avoid_expand_idents: &mut HashSet<String>) -> Vec<Token> {
         let mut result = Vec::new();
@@ -469,7 +469,7 @@ impl Preprocessor {
                 continue;
             }
             if let Some(arg) = param_to_arg_map.get(name) {
-                let mut expanded = self.expand_to_new_buffer(&arg, avoid_expand_idents);
+                let mut expanded = self.expand_without_avoid_idents(&arg);
                 result.append(&mut expanded);
                 context.eat_token();
                 continue;
@@ -489,7 +489,7 @@ impl Preprocessor {
                             context.eat_token();
                             continue;
                         }
-                        let arguments = self.eat_and_get_macro_invocation(&mut context);
+                        let arguments = context.eat_and_get_macro_invocation();
                         let mut expanded_arguments = Vec::new();
                         for arg in arguments {
                             let expanded_arg = self.expand_func_macro_invocation(arg, param_to_arg_map, avoid_expand_idents);
@@ -548,7 +548,7 @@ impl Preprocessor {
                             context.eat_token();
                             continue;
                         }
-                        let arguments = self.eat_and_get_macro_invocation(&mut context);
+                        let arguments = context.eat_and_get_macro_invocation();
                         if function_macro.params.len() != arguments.len() {
                             let error_description = format!("The function-like macro accepts {} argument(s), \
                             but you provide {}.", function_macro.params.len(), arguments.len());
@@ -573,6 +573,10 @@ impl Preprocessor {
         }
 
         return result;
+    }
+
+    pub fn expand_without_avoid_idents(&self, original_tokens: &[Token]) -> Vec<Token> {
+        return self.expand_to_new_buffer(original_tokens, &mut HashSet::new());
     }
 
     // @Smell: Maybe we can put avoid_expand_idents in Preprocessor struct, so that we
