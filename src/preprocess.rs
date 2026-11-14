@@ -120,6 +120,17 @@ impl<'a> PP_Context<'a> {
         return &self.tokens[start_index..self.cur_index];
     }
 
+    pub fn eat_and_get_non_directive_chunk(&mut self) -> &'a [Token] {
+        let start_index = self.cur_index;
+        loop {
+            let cur_token = self.cur_token();
+            if cur_token.kind == Eof {break};
+            if cur_token.at_bol && cur_token.kind == Punct("#") {break};
+            self.eat_token();
+        }
+        return &self.tokens[start_index..self.cur_index];
+    }
+
     pub fn eat_and_get_macro_invocation(&mut self) -> Vec<&[Token]> {
         let mut arguments = Vec::new();
 
@@ -163,12 +174,20 @@ impl<'a> PP_Context<'a> {
 
 #[derive(Debug, Clone)]
 pub enum Macro_Content {
-    Obj_Like(Vec<Token>),
-    Func_Like(Box<Function_Macro>),
+    Obj_Like(Box<Obj_Like_Macro>),
+    Func_Like(Box<Func_Like_Macro>),
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Function_Macro {
+pub struct Obj_Like_Macro {
+    name: String,
+    body: Vec<Token>,
+}
+
+// @Rename: Func_Like_Macro
+#[derive(Debug, Clone, Default)]
+pub struct Func_Like_Macro {
+    name: String,
     params: Vec<String>,
     body: Vec<Token>,
 }
@@ -179,9 +198,10 @@ pub struct Invocation_Argument {
     expanded_arg: Vec<Token>,
 }
 
-impl Function_Macro {
+impl Func_Like_Macro {
     fn default() -> Self {
-        return Function_Macro {
+        return Func_Like_Macro {
+            name: ".bad_macro_name".to_string(),
             params: Vec::new(),
             body: Vec::new(),
         };
@@ -282,7 +302,7 @@ impl Preprocessor {
                         }
 
                         let raw_expr_tokens = context.eat_and_get_remainder_of_line();
-                        let mut expanded_expr_tokens = self.expand_to_new_buffer(raw_expr_tokens, &mut HashSet::new());
+                        let mut expanded_expr_tokens = self.expand(raw_expr_tokens, &mut HashSet::new());
 
                         let mut parser = Parser::new(expanded_expr_tokens);
                         let expr = match parser.parse_expr(Precedence::Lowest, Associativity::Left_To_Right) {
@@ -378,15 +398,19 @@ impl Preprocessor {
                         let mut remainder_of_line = context.eat_and_get_remainder_of_line();
                         let macro_content;
                         if remainder_of_line.len() > 0 && remainder_of_line[0].kind == Punct("(") && !remainder_of_line[0].preceded_by_space {
-                            let function_macro = parse_function_like_macro_definition(remainder_of_line);
-                            macro_content = Macro_Content::Func_Like(Box::new(function_macro));
+                            let name = name.clone();
+                            let (params, body) = parse_function_like_macro_definition(remainder_of_line);
+                            let func_like_macro = Func_Like_Macro{name, params, body};
+                            macro_content = Macro_Content::Func_Like(Box::new(func_like_macro));
                         } else {
-                            let replacement_list = remainder_of_line.to_vec();
-                            macro_content = Macro_Content::Obj_Like(replacement_list);
+                            let name = name.clone();
+                            let body = remainder_of_line.to_vec();
+                            let obj_like_macro = Obj_Like_Macro{name, body};
+                            macro_content = Macro_Content::Obj_Like(Box::new(obj_like_macro));
                         }
                         // @Compatibility: Currently we don't consider duplicate macro definition.
                         // New macro defines shadow old one if their name is the same.
-                        self.macros.insert(name.to_string(), macro_content);
+                        self.macros.insert(name, macro_content);
                     } else if directive == "undef" {
                         context.eat_token();
                         if context.cur_token().at_bol {
@@ -413,56 +437,10 @@ impl Preprocessor {
                     }
                 }
                 _ => {
-                    let name = &get_name(&context.cur_token().kind).to_string();
-                    if name == "" {
-                        preprocessed_tokens.push(context.cur_token().clone());
-                        context.eat_token();
-                        continue;
-                    }
-                    if let Some(m) = self.macros.get(name) {
-                        let mut avoid_expand_idents = HashSet::new();
-                        match m {
-                            Macro_Content::Obj_Like(replacement_list) => {
-                                // @Smell: We should deal with avoid_expand_idents inside expand_to_new_buffer().
-                                avoid_expand_idents.insert(name.to_string());
-                                let mut expanded = self.expand_to_new_buffer(replacement_list, &mut avoid_expand_idents);
-                                avoid_expand_idents.remove(name);
-                                preprocessed_tokens.append(&mut expanded);
-                                context.eat_token();
-                            }
-                            Macro_Content::Func_Like(function_macro) => {
-                                if context.peek_token().kind != Punct("(") {
-                                    preprocessed_tokens.push(context.cur_token().clone());
-                                    context.eat_token();
-                                    continue;
-                                }
-                                let arguments = context.eat_and_get_macro_invocation();
-                                if function_macro.params.len() != arguments.len() {
-                                    let error_description = format!("The function-like macro accepts {} argument(s), \
-                                    but you provide {}.", function_macro.params.len(), arguments.len());
-                                    report_preprocess_error(context.cur_token().span, &error_description);
-                                    break;
-                                }
-                                let mut param_to_arg_map = HashMap::new();
-                                for i in (0..function_macro.params.len()) {
-                                    let param_name = function_macro.params[i].clone();
-                                    let raw_arg = arguments[i].to_vec();
-                                    let expanded_arg = self.expand_to_new_buffer(&raw_arg, &mut avoid_expand_idents);
-                                    let invokation_arg = Invocation_Argument{raw_arg, expanded_arg};
-                                    param_to_arg_map.insert(param_name, invokation_arg);
-                                }
-                                avoid_expand_idents.insert(name.to_string());
-                                let mut expanded = self.expand_func_macro_invocation(&function_macro.body, &param_to_arg_map, &mut avoid_expand_idents);
-                                avoid_expand_idents.remove(name);
-                                preprocessed_tokens.append(&mut expanded);
-                            }
-                        }
-                        continue;
-                    } else {
-                        preprocessed_tokens.push(context.cur_token().clone());
-                        context.eat_token();
-                        continue;
-                    }
+                    let chunk = context.eat_and_get_non_directive_chunk();
+                    let mut expanded = self.expand(chunk, &mut HashSet::new());
+                    preprocessed_tokens.append(&mut expanded);
+                    continue;
                 }
             }
         }
@@ -482,10 +460,10 @@ impl Preprocessor {
                 substituted_body.append(&mut invok_arg.expanded_arg.clone());
             }
         }
-        return self.expand_to_new_buffer(&substituted_body, avoid_expand_idents);
+        return self.expand(&substituted_body, avoid_expand_idents);
     }
 
-    pub fn expand_to_new_buffer(&self, original_tokens: &[Token], avoid_expand_idents: &mut HashSet<String>) -> Vec<Token> {
+    pub fn expand(&self, original_tokens: &[Token], avoid_expand_idents: &mut HashSet<String>) -> Vec<Token> {
         let mut result = Vec::new();
         let mut context = PP_Context::new(original_tokens);
 
@@ -502,36 +480,36 @@ impl Preprocessor {
             }
             if let Some(m) = self.macros.get(name) {
                 match m {
-                    Macro_Content::Obj_Like(replacement_list) => {
+                    Macro_Content::Obj_Like(obj_like_macro) => {
                         avoid_expand_idents.insert(name.to_string());
-                        let mut expanded = self.expand_to_new_buffer(replacement_list, avoid_expand_idents);
+                        let mut expanded = self.expand(&obj_like_macro.body, avoid_expand_idents);
                         avoid_expand_idents.remove(name);
                         result.append(&mut expanded);
                         context.eat_token();
                     }
-                    Macro_Content::Func_Like(function_macro) => {
+                    Macro_Content::Func_Like(func_like_macro) => {
                         if context.peek_token().kind != Punct("(") {
                             result.push(context.cur_token().clone());
                             context.eat_token();
                             continue;
                         }
                         let raw_arguments = context.eat_and_get_macro_invocation();
-                        if function_macro.params.len() != raw_arguments.len() {
+                        if func_like_macro.params.len() != raw_arguments.len() {
                             let error_description = format!("The function-like macro accepts {} argument(s), \
-                            but you provide {}.", function_macro.params.len(), raw_arguments.len());
+                            but you provide {}.", func_like_macro.params.len(), raw_arguments.len());
                             report_preprocess_error(context.cur_token().span, &error_description);
                             break;
                         }
                         let mut param_to_arg_map = HashMap::new();
-                        for i in (0..function_macro.params.len()) {
-                            let param_name = function_macro.params[i].clone();
+                        for i in (0..func_like_macro.params.len()) {
+                            let param_name = func_like_macro.params[i].clone();
                             let raw_arg = raw_arguments[i].to_vec();
-                            let expanded_arg = self.expand_to_new_buffer(&raw_arg, avoid_expand_idents);
+                            let expanded_arg = self.expand(&raw_arg, avoid_expand_idents);
                             let invokation_arg = Invocation_Argument{raw_arg, expanded_arg};
                             param_to_arg_map.insert(param_name, invokation_arg);
                         }
                         avoid_expand_idents.insert(name.to_string());
-                        let mut expanded = self.expand_func_macro_invocation(&function_macro.body, &param_to_arg_map, avoid_expand_idents);
+                        let mut expanded = self.expand_func_macro_invocation(&func_like_macro.body, &param_to_arg_map, avoid_expand_idents);
                         avoid_expand_idents.remove(name);
                         result.append(&mut expanded);
                     }
@@ -546,10 +524,6 @@ impl Preprocessor {
         }
 
         return result;
-    }
-
-    pub fn expand_without_avoid_idents(&self, original_tokens: &[Token]) -> Vec<Token> {
-        return self.expand_to_new_buffer(original_tokens, &mut HashSet::new());
     }
 }
 
@@ -783,7 +757,7 @@ impl<'a> Helper_Parser<'a> {
     }
 }
 
-fn parse_function_like_macro_definition(tokens: &[Token]) -> Function_Macro {
+fn parse_function_like_macro_definition(tokens: &[Token]) -> (Vec<String>, Vec<Token>) {
     debug_assert!(tokens[0].kind == Punct("("));
     let mut parser = Helper_Parser::new(tokens);
     let mut params = Vec::new();
@@ -794,7 +768,7 @@ fn parse_function_like_macro_definition(tokens: &[Token]) -> Function_Macro {
     if parser.cur_token().kind == Punct(")") {
         parser.advance_token();
         let body = parser.tokens[parser.cur_index..].to_vec();
-        return Function_Macro{params, body};
+        return (params, body);
     }
 
     loop {
@@ -820,5 +794,5 @@ fn parse_function_like_macro_definition(tokens: &[Token]) -> Function_Macro {
         }
     }
     let body = parser.tokens[parser.cur_index..].to_vec();
-    return Function_Macro{params, body};
+    return (params, body);
 }
