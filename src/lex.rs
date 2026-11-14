@@ -48,6 +48,7 @@ pub struct Token {
     // bol: begining of line
     pub at_bol: bool,
     pub preceded_by_space: bool,
+    pub stop_expand: bool,
     pub span: Span,
 }
 
@@ -160,7 +161,7 @@ impl <'a>Lexer<'a> {
         let preceded_by_space = self.preceded_by_space;
         self.at_bol = false;
         self.preceded_by_space = false;
-        return Token{kind, at_bol, preceded_by_space, span};
+        return Token{kind, at_bol, preceded_by_space, stop_expand: false, span};
     }
 
     pub fn lex(&mut self) -> Vec<Token> {
@@ -830,9 +831,9 @@ pub fn gen_dummy_token(kind: TokenKind) -> Token {
         start_index: 0,
         end_index: 0,
     };
-    return Token{kind, at_bol: false, preceded_by_space: false, span};
+    return Token{kind, at_bol: false, preceded_by_space: false, stop_expand: false, span};
 }
 
 pub fn gen_token(kind: TokenKind, span: Span) -> Token {
-    return Token{kind, at_bol: false, preceded_by_space: false, span};
+    return Token{kind, at_bol: false, preceded_by_space: false, stop_expand: false, span};
 }
